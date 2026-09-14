@@ -1,3 +1,5 @@
+import { ExplorerModal } from './src/ui/Explorer';
+import type { ExplorerRoute } from './src/ui/explorerTypes';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -8,6 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -56,9 +59,25 @@ class Boundary extends React.Component<{ children: React.ReactNode }, { failed: 
   }
 }
 function Main() {
+  const narrow = useWindowDimensions().width < 360;
   const model = useApp(),
     [tab, setTab] = useState<ScreenName>('store'),
     [item, setItem] = useState<{ accountId: string; value: CatalogItem } | null>(null);
+  const [explorer, setExplorer] = useState<{ accountId: string; routes: ExplorerRoute[] } | null>(
+    null,
+  );
+  const onNavigate = (route: ExplorerRoute) => {
+    const id = model.active?.puuid;
+    if (id)
+      setExplorer((old) => ({
+        accountId: id,
+        routes: [...(old?.accountId === id ? old.routes : []).slice(-11), route],
+      }));
+  };
+  const onBack = () =>
+    setExplorer((old) =>
+      old && old.routes.length > 1 ? { ...old, routes: old.routes.slice(0, -1) } : null,
+    );
   const [login, setLogin] = useState<{ expectedId?: string } | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -67,6 +86,7 @@ function Main() {
   }, []);
   useEffect(() => {
     setItem(null);
+    setExplorer(null);
     setTab('store');
   }, [model.active?.puuid]);
   const onLink = (expectedId?: string) => setLogin({ expectedId });
@@ -78,11 +98,17 @@ function Main() {
     account: AccountScreen,
   };
   const Screen = screens[tab];
-  const expired = model.active && !model.active.demo && model.active.expiresAt <= now;
+  const expired =
+    model.active && !model.active.demo && model.active.expiresAt <= now && !model.active.canReauth;
   return (
     <SafeAreaView style={S.page} edges={['top', 'bottom']}>
       <StatusBar style="light" />
-      <View style={styles.shell}>
+      <View
+        style={styles.shell}
+        aria-hidden={!!explorer || !!item || !!login}
+        accessibilityElementsHidden={!!explorer || !!item || !!login}
+        importantForAccessibility={explorer || item || login ? 'no-hide-descendants' : 'auto'}
+      >
         {model.booting ? (
           <View style={styles.center}>
             <Image source={LOGO} style={styles.bootLogo} />
@@ -126,8 +152,13 @@ function Main() {
             <View style={styles.header}>
               <View style={[S.row, { gap: 10 }]}>
                 <Image source={LOGO} style={styles.headerLogo} />
-                <Text style={styles.wordmark}>OUTPOST</Text>
+                {!narrow && <Text style={styles.wordmark}>OUTPOST</Text>}
               </View>
+              <IconButton
+                icon="users"
+                label="Open friends and chat"
+                onPress={() => onNavigate({ type: 'friends' })}
+              />
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Open account settings"
@@ -141,7 +172,7 @@ function Main() {
                   ]}
                 />
                 <Text
-                  style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 140 }]}
+                  style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 92 }]}
                   numberOfLines={1}
                 >
                   {model.active.gameName}
@@ -168,6 +199,7 @@ function Main() {
                 model={model}
                 onItem={(value) => setItem({ accountId: model.active!.puuid, value })}
                 onLink={onLink}
+                onNavigate={onNavigate}
               />
             </View>
             <View style={styles.nav}>
@@ -220,6 +252,12 @@ function Main() {
           onClose={() => setItem(null)}
         />
       )}
+      <ExplorerModal
+        model={model}
+        routes={explorer?.accountId === model.active?.puuid ? (explorer?.routes ?? []) : []}
+        onNavigate={onNavigate}
+        onBack={onBack}
+      />
       <PrivacyGuard />
     </SafeAreaView>
   );
@@ -283,20 +321,24 @@ const styles = StyleSheet.create({
   nav: {
     flexDirection: 'row',
     backgroundColor: C.surface,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    paddingTop: 8,
-    paddingBottom: 6,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 28,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
   },
   navItem: { flex: 1, alignItems: 'center', gap: 4, minHeight: 48, justifyContent: 'center' },
   navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500' },
   navIndicator: {
     position: 'absolute',
-    top: -8,
-    width: 28,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: C.accent,
+    top: 0,
+    left: 2,
+    right: 2,
+    bottom: 0,
+    borderRadius: 20,
+    backgroundColor: `${C.accent}16`,
   },
   welcome: { flexGrow: 1, padding: 22, paddingBottom: 36, gap: 26 },
   welcomeArt: { height: 250, alignItems: 'center', justifyContent: 'center', borderRadius: 28 },

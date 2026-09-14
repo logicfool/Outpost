@@ -1,3 +1,6 @@
+import { useSocial } from './useSocial';
+import type { IdentityEdit, PlayerProfile, PlayerRef } from '../core/playerTypes';
+import type { LiveGame, Loadout, Section } from '../core/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import type {
@@ -22,6 +25,7 @@ import {
   updateStoreNotifications,
 } from '../platform/notifications';
 export function useApp() {
+  const [linkRevision, setLinkRevision] = useState(0);
   const [booting, setBooting] = useState(true),
     [accounts, setAccounts] = useState<Account[]>([]),
     [active, setActive] = useState<Account | null>(null);
@@ -35,7 +39,8 @@ export function useApp() {
   const activeRef = useRef(active),
     epoch = useRef(0),
     lastForegroundRefresh = useRef(0),
-    demoWishes = useRef<string[]>([]);
+    demoWishes = useRef<string[]>([]),
+    demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
   useEffect(() => {
     let mounted = true;
@@ -67,7 +72,10 @@ export function useApp() {
     setMessage(null);
     try {
       if (account.demo) {
-        setSnapshot(makeDemo().snapshot);
+        const d = makeDemo().snapshot;
+        if (demoLoadout.current)
+          d.loadout = { status: 'ready', data: demoLoadout.current, fetchedAt: Date.now() };
+        setSnapshot(d);
         return;
       }
       const runtime = await getRuntime(),
@@ -77,7 +85,20 @@ export function useApp() {
         runtime.repository.accounts(),
       ]);
       if (epoch.current === stamp && activeRef.current?.puuid === account.puuid) {
-        setSnapshot(next);
+        setSnapshot((previous) => {
+          if (!previous || previous.accountId !== next.accountId) return next;
+          const newer = <T>(oldValue: Section<T>, newValue: Section<T>) =>
+            oldValue.status === 'ready' &&
+            newValue.status === 'ready' &&
+            oldValue.fetchedAt > newValue.fetchedAt
+              ? oldValue
+              : newValue;
+          return {
+            ...next,
+            loadout: newer(previous.loadout, next.loadout),
+            liveGame: newer(previous.liveGame, next.liveGame),
+          };
+        });
         setHistory(entries);
         setCatalog(runtime.catalog);
         setAccounts(updatedAccounts);
@@ -104,6 +125,12 @@ export function useApp() {
     if (!active) return;
     if (active.demo) {
       const demo = makeDemo();
+      if (demoLoadout.current)
+        demo.snapshot.loadout = {
+          status: 'ready',
+          data: demoLoadout.current,
+          fetchedAt: Date.now(),
+        };
       setSnapshot(demo.snapshot);
       setCatalog(demo.catalog);
       setWishlist(demoWishes.current);
@@ -128,7 +155,7 @@ export function useApp() {
         if (epoch.current === stamp) setMessage(safeError(error).message);
       }
     })();
-  }, [active?.puuid, active?.expiresAt, refresh]);
+  }, [active?.puuid, linkRevision, refresh]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', (state) => {
       const account = activeRef.current;
@@ -136,7 +163,6 @@ export function useApp() {
         state === 'active' &&
         account &&
         !account.demo &&
-        account.expiresAt > Date.now() + 30000 &&
         Date.now() - lastForegroundRefresh.current > 5 * 60000
       ) {
         lastForegroundRefresh.current = Date.now();
@@ -158,6 +184,7 @@ export function useApp() {
         account = await runtime.link(tokens, region, expectedId);
       setAccounts(await runtime.repository.accounts());
       switchAccount(account);
+      setLinkRevision((v) => v + 1);
     },
     [switchAccount],
   );
@@ -239,12 +266,12 @@ export function useApp() {
       setMessage(safeError(error).message);
     }
   }, []);
-  const matchDetail = useCallback(async (id: string): Promise<MatchDetail> => {
+  const matchDetail = useCallback(async (id: string, subject?: string): Promise<MatchDetail> => {
     const account = activeRef.current;
     if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
-    if (account.demo) return demoMatch(id);
+    if (account.demo) return demoMatch(id, subject);
     const runtime = await getRuntime();
-    return (await runtime.client(account.puuid)).matchDetail(id);
+    return (await runtime.client(account.puuid)).matchDetail(id, subject);
   }, []);
   const moreMatches = useCallback(async (): Promise<void> => {
     const account = activeRef.current;
@@ -264,17 +291,136 @@ export function useApp() {
       const unique = new Map<string, MatchSummary>(
         [...snapshot.matches.data, ...next].map((m) => [m.id, m]),
       );
-      setSnapshot({
-        ...snapshot,
-        matches: { status: 'ready', fetchedAt: Date.now(), data: [...unique.values()] },
-      });
+      setSnapshot((previous) =>
+        previous?.accountId === account.puuid
+          ? {
+              ...previous,
+              matches: { status: 'ready', fetchedAt: Date.now(), data: [...unique.values()] },
+            }
+          : previous,
+      );
     } catch (error) {
       if (epoch.current === stamp) setMessage(safeError(error).message);
     } finally {
       if (epoch.current === stamp) setBusy(false);
     }
   }, [snapshot]);
+  const liveFlight = useRef<{ id: string; work: Promise<Section<LiveGame>> } | null>(null);
+  const refreshLive = useCallback(async (): Promise<Section<LiveGame>> => {
+    const account = activeRef.current;
+    if (!account) return { status: 'error', code: 'NO_ACCOUNT', message: 'Select an account.' };
+    if (liveFlight.current?.id === account.puuid) return liveFlight.current.work;
+    const stamp = epoch.current;
+    const run = async (): Promise<Section<LiveGame>> => {
+      let next: Section<LiveGame>;
+      try {
+        const game = account.demo
+          ? makeDemo().snapshot.liveGame
+          : {
+              status: 'ready' as const,
+              data: await (await (await getRuntime()).client(account.puuid)).liveGame(),
+              fetchedAt: Date.now(),
+            };
+        next = game;
+      } catch (reason) {
+        const e = safeError(reason);
+        next = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+      }
+      if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+        setSnapshot((previous) =>
+          previous?.accountId === account.puuid ? { ...previous, liveGame: next } : previous,
+        );
+      return next;
+    };
+    const work = run();
+    liveFlight.current = { id: account.puuid, work };
+    try {
+      return await work;
+    } finally {
+      if (liveFlight.current?.work === work) liveFlight.current = null;
+    }
+  }, []);
+  const playerProfile = useCallback(async (player: PlayerRef): Promise<PlayerProfile> => {
+    const account = activeRef.current;
+    if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+    if (player.hidden)
+      throw new AppError('PROFILE_PRIVATE', 'This player has hidden their identity.');
+    if (account.demo) {
+      const demo = makeDemo();
+      return {
+        player,
+        rank: demo.snapshot.rank,
+        matches: demo.snapshot.matches,
+        fetchedAt: Date.now(),
+        identitySource: 'match',
+      };
+    }
+    return (await (await getRuntime()).client(account.puuid)).playerProfile(player.subject);
+  }, []);
+  const playerMatches = useCallback(async (subject: string, start: number) => {
+    const account = activeRef.current;
+    if (!account || account.demo) return [];
+    return (await (await getRuntime()).client(account.puuid)).matchHistory(start, 20, subject);
+  }, []);
+  const freshLoadout = useCallback(async (): Promise<Loadout> => {
+    const account = activeRef.current;
+    if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+    if (account.demo) {
+      if (demoLoadout.current) return demoLoadout.current;
+      const state = makeDemo().snapshot.loadout;
+      if (state.status === 'ready') return state.data;
+    }
+    return (await (await getRuntime()).client(account.puuid)).loadout();
+  }, []);
+  const saveIdentity = useCallback(
+    async (edit: IdentityEdit): Promise<Loadout> => {
+      const account = activeRef.current;
+      if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+      const stamp = epoch.current;
+      let data: Loadout;
+      if (account.demo) {
+        const original = demoLoadout.current
+          ? { status: 'ready' as const, data: demoLoadout.current }
+          : makeDemo().snapshot.loadout;
+        data = {
+          ...(original.status === 'ready' ? original.data : { guns: [] }),
+          card: edit.cardId
+            ? catalog.items[edit.cardId]
+            : original.status === 'ready'
+              ? original.data.card
+              : undefined,
+          title: edit.titleId
+            ? catalog.items[edit.titleId]
+            : original.status === 'ready'
+              ? original.data.title
+              : undefined,
+        };
+        demoLoadout.current = data;
+      } else data = await (await (await getRuntime()).client(account.puuid)).saveIdentity(edit);
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+        throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+      setSnapshot((previous) =>
+        previous?.accountId === account.puuid
+          ? { ...previous, loadout: { status: 'ready', data, fetchedAt: Date.now() } }
+          : previous,
+      );
+      return data;
+    },
+    [catalog],
+  );
+  const playerRank = useCallback(async (player: PlayerRef) => {
+    const account = activeRef.current;
+    if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+    if (account.demo) {
+      const r = makeDemo().snapshot.rank;
+      if (r.status === 'ready') return r.data;
+      throw new AppError('DEMO', 'No demo rank.');
+    }
+    return (await (await getRuntime()).client(account.puuid)).rank(player.subject);
+  }, []);
+  const social = useSocial(active, catalog);
   return {
+    ...social,
     booting,
     accounts,
     active,
@@ -297,6 +443,12 @@ export function useApp() {
     clearCache,
     matchDetail,
     moreMatches,
+    refreshLive,
+    playerProfile,
+    playerMatches,
+    playerRank,
+    freshLoadout,
+    saveIdentity,
   };
 }
 export type AppModel = ReturnType<typeof useApp>;

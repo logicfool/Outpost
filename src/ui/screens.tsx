@@ -1,3 +1,5 @@
+import type { Navigate } from './explorerTypes';
+import { PlayerCover, LiveCard } from './profileViews';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -32,7 +34,7 @@ import type {
 import { MAX_ACCOUNTS, XP_PER_LEVEL } from '../core/types';
 import { safeError } from '../core/validation';
 import { catalogItem } from '../core/catalog';
-import { queueName } from '../core/normalize';
+import { queueName, walletOverview } from '../core/normalize';
 import {
   Badge,
   Button,
@@ -59,6 +61,7 @@ type Props = {
   model: AppModel;
   onItem(item: CatalogItem): void;
   onLink(expectedId?: string): void;
+  onNavigate: Navigate;
 };
 const date = (value?: number) =>
   value
@@ -155,10 +158,15 @@ function Wallet({ model }: { model: AppModel }) {
     <Resource section={model.snapshot?.wallet} title="Balances">
       {(balances) => (
         <View style={styles.wallet}>
-          {balances.map((m) => (
-            <View key={m.currencyId} style={styles.currency}>
-              <CurrencyIcon symbol={m.symbol} size={18} />
-              <Text style={styles.balance}>{m.amount.toLocaleString()}</Text>
+          {walletOverview(balances).map((m) => (
+            <View key={m.currencyId} style={[styles.currency, { flexDirection: 'column', gap: 4 }]}>
+              <View style={S.row}>
+                <CurrencyIcon symbol={m.symbol} size={16} />
+                <Text style={S.small}>{m.symbol}</Text>
+              </View>
+              <Text style={styles.balance}>
+                {m.amount === null ? '-' : m.amount.toLocaleString()}
+              </Text>
             </View>
           ))}
         </View>
@@ -417,7 +425,7 @@ function ItemTile({
     </Pressable>
   );
 }
-export function CollectionScreen({ model, onItem }: Props) {
+export function CollectionScreen({ model, onItem, onNavigate }: Props) {
   const [tab, setTab] = useState<'owned' | 'wishlist' | 'catalog' | 'equipped'>('owned'),
     [query, setQuery] = useState('');
   const [kind, setKind] = useState<
@@ -429,9 +437,10 @@ export function CollectionScreen({ model, onItem }: Props) {
     () =>
       Array.from(
         new Map(
-          Object.values(model.catalog.items)
-            .filter((item) => item.kind !== 'chroma')
-            .map((item) => [item.canonicalId, { ...item, id: item.canonicalId }]),
+          Object.values(model.catalog.items).map((item) => [
+            item.kind === 'chroma' ? item.id : item.canonicalId,
+            item.kind === 'chroma' ? item : { ...item, id: item.canonicalId },
+          ]),
         ).values(),
       ),
     [model.catalog],
@@ -460,6 +469,12 @@ export function CollectionScreen({ model, onItem }: Props) {
   const header = (
     <View style={{ gap: 14, paddingBottom: 16 }}>
       <Heading eyebrow="BUILT OVER TIME" title="Collection" />
+      <Button
+        title="Change player card & title"
+        secondary
+        icon="image"
+        onPress={() => onNavigate({ type: 'identity' })}
+      />
       <Tabs
         value={tab}
         onChange={setTab}
@@ -786,65 +801,24 @@ export function ProgressScreen({ model, onItem }: Props) {
     </Page>
   );
 }
-function ProfileBanner({ model }: { model: AppModel }) {
+function ProfileBanner({ model, onNavigate }: { model: AppModel; onNavigate: Navigate }) {
   const loadout =
     model.snapshot?.loadout.status === 'ready' ? model.snapshot.loadout.data : undefined;
   const xp = model.snapshot?.xp.status === 'ready' ? model.snapshot.xp.data : undefined;
-  const art = loadout?.card?.wideArt ?? loadout?.card?.wallpaper;
   return (
-    <View style={styles.banner}>
-      <View style={styles.bannerArt}>
-        {art ? (
-          <Image source={{ uri: art }} style={fill} resizeMode="cover" />
-        ) : (
-          <LinearGradient
-            colors={['#FF465540', '#7CC4FF26']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={fill}
-          />
-        )}
-        <LinearGradient colors={['#131A2500', '#131A25']} style={fill} />
-        {xp ? (
-          <View style={styles.levelPill}>
-            <Text style={styles.levelText}>Lvl {xp.level}</Text>
-          </View>
-        ) : null}
-      </View>
-      <View style={styles.bannerBody}>
-        <View style={[S.row, { gap: 12 }]}>
-          {loadout?.card?.image ? (
-            <Image source={{ uri: loadout.card.image }} style={styles.bannerAvatar} />
-          ) : (
-            <View style={[styles.bannerAvatar, { alignItems: 'center', justifyContent: 'center' }]}>
-              <Feather name="user" size={22} color={C.subtle} />
-            </View>
-          )}
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={S.h2} numberOfLines={1}>
-              {model.active?.gameName}
-              <Text style={{ color: C.subtle }}>#{model.active?.tagLine}</Text>
-            </Text>
-            {loadout?.title ? (
-              <Text style={[S.small, { color: C.gold }]} numberOfLines={1}>
-                {loadout.title.name}
-              </Text>
-            ) : null}
-          </View>
-        </View>
-        {xp ? (
-          <View style={{ gap: 6 }}>
-            <ProgressBar value={xp.xp} max={XP_PER_LEVEL} />
-            <View style={S.between}>
-              <Text style={S.small}>Level {xp.level}</Text>
-              <Text style={S.small}>
-                {xp.xp.toLocaleString()} / {XP_PER_LEVEL.toLocaleString()} XP
-              </Text>
-            </View>
-          </View>
-        ) : null}
-      </View>
-    </View>
+    <PlayerCover
+      player={{
+        subject: model.active!.puuid,
+        name: model.active!.gameName,
+        tag: model.active!.tagLine,
+        card: loadout?.card,
+        title: loadout?.title,
+        level: xp?.level,
+      }}
+      catalog={model.catalog}
+      xp={xp?.xp}
+      onEdit={() => onNavigate({ type: 'identity' })}
+    />
   );
 }
 function RankOverview({ model, onOpen }: { model: AppModel; onOpen(): void }) {
@@ -864,6 +838,7 @@ function RankOverview({ model, onOpen }: { model: AppModel; onOpen(): void }) {
               <Feather name="chevron-right" size={16} color={C.subtle} />
             </View>
           </View>
+          {rank.note && <Text style={S.small}>{rank.note}</Text>}
           <View style={styles.rankRow}>
             <View style={styles.rankCol}>
               <Text style={S.small} numberOfLines={1}>
@@ -911,14 +886,16 @@ function RankOverview({ model, onOpen }: { model: AppModel; onOpen(): void }) {
     </Resource>
   );
 }
-function CareerModal({
+export function CareerModal({
   rank,
   visible,
   onClose,
+  embedded = false,
 }: {
   rank?: Ranked;
   visible: boolean;
   onClose(): void;
+  embedded?: boolean;
 }) {
   const career = rank?.career ?? [];
   const [queue, setQueue] = useState('competitive'),
@@ -926,154 +903,156 @@ function CareerModal({
   const current = career.find((entry) => entry.queue === queue) ?? career[0];
   const ranked = current?.queue === 'competitive',
     [latest, ...previous] = current?.acts ?? [];
-  return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <ModalPage>
-        <ModalHeader title="Career summary" closeLabel="Close career summary" onClose={onClose} />
-        <ScrollView contentContainerStyle={S.content}>
-          {!current || !latest ? (
-            <Empty
-              title="No career stats yet"
-              detail="Play a few matches and refresh."
-              icon="bar-chart-2"
-            />
-          ) : (
-            <>
-              {career.length > 1 && (
-                <Tabs
-                  value={current.queue}
-                  onChange={setQueue}
-                  items={career.map((entry) => ({
-                    id: entry.queue,
-                    label: queueName(entry.queue),
-                  }))}
-                />
-              )}
-              <View style={S.card}>
-                <View style={S.between}>
-                  <Text style={S.h3}>{latest.name}</Text>
-                  {latest.current && <Badge text="CURRENT" color={C.violet} />}
-                </View>
-                <View style={S.divider} />
-                <View style={styles.rankRow}>
-                  {ranked && (
-                    <>
-                      <View style={styles.rankCol}>
-                        {latest.image ? (
-                          <Image
-                            source={{ uri: latest.image }}
-                            style={styles.rankIconLarge}
-                            resizeMode="contain"
-                          />
-                        ) : (
-                          <View style={styles.rankIconEmpty}>
-                            <Feather name="award" size={34} color={C.subtle} />
-                          </View>
-                        )}
-                        <Text style={S.h3}>{latest.tierName}</Text>
-                        {latest.rr !== null ? <Text style={S.small}>{latest.rr} RR</Text> : null}
-                      </View>
-                      <View style={styles.rankDivider} />
-                    </>
-                  )}
-                  <View style={[styles.rankCol, { gap: 12 }]}>
-                    <View style={{ alignItems: 'center' }}>
-                      <Text
-                        style={[
-                          styles.bigStat,
-                          { color: latest.wins * 2 >= latest.games ? C.mint : C.accent },
-                        ]}
-                      >
-                        {winRate(latest.wins, latest.games)}
-                      </Text>
-                      <Text style={S.small}>Win rate</Text>
+  const content = (
+    <ModalPage>
+      <ModalHeader title="Career summary" closeLabel="Close career summary" onClose={onClose} />
+      <ScrollView contentContainerStyle={S.content}>
+        {!current || !latest ? (
+          <Empty
+            title="No career stats yet"
+            detail="Play a few matches and refresh."
+            icon="bar-chart-2"
+          />
+        ) : (
+          <>
+            {career.length > 1 && (
+              <Tabs
+                value={current.queue}
+                onChange={setQueue}
+                items={career.map((entry) => ({ id: entry.queue, label: queueName(entry.queue) }))}
+              />
+            )}
+            <View style={S.card}>
+              <View style={S.between}>
+                <Text style={S.h3}>{latest.name}</Text>
+                {latest.current && <Badge text="CURRENT" color={C.violet} />}
+              </View>
+              <View style={S.divider} />
+              <View style={styles.rankRow}>
+                {ranked && (
+                  <>
+                    <View style={styles.rankCol}>
+                      {latest.image ? (
+                        <Image
+                          source={{ uri: latest.image }}
+                          style={styles.rankIconLarge}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={styles.rankIconEmpty}>
+                          <Feather name="award" size={34} color={C.subtle} />
+                        </View>
+                      )}
+                      <Text style={S.h3}>{latest.tierName}</Text>
+                      {latest.rr !== null ? <Text style={S.small}>{latest.rr} RR</Text> : null}
                     </View>
-                    <View style={{ alignItems: 'center' }}>
-                      <Text style={[styles.bigStat, { color: C.blue }]}>
-                        {latest.wins} / {latest.games}
-                      </Text>
-                      <Text style={S.small}>Wins / games</Text>
-                    </View>
+                    <View style={styles.rankDivider} />
+                  </>
+                )}
+                <View style={[styles.rankCol, { gap: 12 }]}>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text
+                      style={[
+                        styles.bigStat,
+                        { color: latest.wins * 2 >= latest.games ? C.mint : C.accent },
+                      ]}
+                    >
+                      {winRate(latest.wins, latest.games)}
+                    </Text>
+                    <Text style={S.small}>Win rate</Text>
+                  </View>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={[styles.bigStat, { color: C.blue }]}>
+                      {latest.wins} / {latest.games}
+                    </Text>
+                    <Text style={S.small}>Wins / games</Text>
                   </View>
                 </View>
               </View>
-              <View style={S.card}>
-                <View style={S.between}>
-                  <Text style={S.h3}>All-time</Text>
-                  <Text style={S.small}>
-                    {current.acts.length} {current.acts.length === 1 ? 'act' : 'acts'}
-                  </Text>
-                </View>
-                <View style={S.row}>
-                  <MiniStat
-                    label="Win rate"
-                    value={winRate(current.wins, current.games)}
-                    color={current.wins * 2 >= current.games ? C.mint : C.accent}
-                  />
-                  <MiniStat
-                    label="Wins / games"
-                    value={`${current.wins} / ${current.games}`}
-                    color={C.blue}
-                  />
-                </View>
+            </View>
+            <View style={S.card}>
+              <View style={S.between}>
+                <Text style={S.h3}>All-time</Text>
+                <Text style={S.small}>
+                  {current.acts.length} {current.acts.length === 1 ? 'act' : 'acts'}
+                </Text>
               </View>
-              {previous.length > 0 && (
-                <SectionHeader title="Previous acts" detail={`${previous.length}`} />
-              )}
-              {previous.map((act) => {
-                const expanded = open === act.seasonId;
-                return (
-                  <Pressable
-                    key={act.seasonId}
-                    onPress={() => setOpen(expanded ? null : act.seasonId)}
-                    style={S.card}
-                  >
-                    <View style={S.row}>
-                      {ranked ? (
-                        act.image ? (
-                          <Image
-                            source={{ uri: act.image }}
-                            style={{ width: 40, height: 40 }}
-                            resizeMode="contain"
-                          />
-                        ) : (
-                          <View style={[styles.rankIconEmpty, { width: 40, height: 40 }]}>
-                            <Feather name="help-circle" size={20} color={C.subtle} />
-                          </View>
-                        )
-                      ) : null}
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={S.h3}>{act.name}</Text>
-                        <Text style={S.small}>
-                          {ranked ? `${act.tierName} · ` : ''}
-                          {act.games} games
-                        </Text>
-                      </View>
-                      <Feather
-                        name={expanded ? 'chevron-up' : 'chevron-down'}
-                        size={18}
-                        color={C.subtle}
-                      />
+              <View style={S.row}>
+                <MiniStat
+                  label="Win rate"
+                  value={winRate(current.wins, current.games)}
+                  color={current.wins * 2 >= current.games ? C.mint : C.accent}
+                />
+                <MiniStat
+                  label="Wins / games"
+                  value={`${current.wins} / ${current.games}`}
+                  color={C.blue}
+                />
+              </View>
+            </View>
+            {previous.length > 0 && (
+              <SectionHeader title="Previous acts" detail={`${previous.length}`} />
+            )}
+            {previous.map((act) => {
+              const expanded = open === act.seasonId;
+              return (
+                <Pressable
+                  key={act.seasonId}
+                  onPress={() => setOpen(expanded ? null : act.seasonId)}
+                  style={S.card}
+                >
+                  <View style={S.row}>
+                    {ranked ? (
+                      act.image ? (
+                        <Image
+                          source={{ uri: act.image }}
+                          style={{ width: 40, height: 40 }}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={[styles.rankIconEmpty, { width: 40, height: 40 }]}>
+                          <Feather name="help-circle" size={20} color={C.subtle} />
+                        </View>
+                      )
+                    ) : null}
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={S.h3}>{act.name}</Text>
+                      <Text style={S.small}>
+                        {ranked ? `${act.tierName} · ` : ''}
+                        {act.games} games
+                      </Text>
                     </View>
-                    {expanded && (
-                      <View style={S.row}>
-                        <MiniStat label="Win rate" value={winRate(act.wins, act.games)} />
-                        <MiniStat label="Wins" value={act.wins} />
-                        <MiniStat label="Games" value={act.games} />
-                        {ranked && <MiniStat label="RR" value={act.rr} />}
-                      </View>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </>
-          )}
-        </ScrollView>
-      </ModalPage>
+                    <Feather
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={C.subtle}
+                    />
+                  </View>
+                  {expanded && (
+                    <View style={S.row}>
+                      <MiniStat label="Win rate" value={winRate(act.wins, act.games)} />
+                      <MiniStat label="Wins" value={act.wins} />
+                      <MiniStat label="Games" value={act.games} />
+                      {ranked && <MiniStat label="RR" value={act.rr} />}
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </>
+        )}
+      </ScrollView>
+    </ModalPage>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
-function MatchCard({
+export function MatchCard({
   match,
   detail,
   onPress,
@@ -1120,7 +1099,7 @@ function MatchCard({
               {resultLabel(detail.result).toUpperCase()}
             </Text>
           ) : (
-            <ActivityIndicator size="small" color={C.subtle} />
+            <Feather name="file-text" size={16} color={C.subtle} />
           )}
           {detail ? <Text style={styles.matchScore}>{detail.score}</Text> : null}
           <View style={[S.row, { gap: 4 }]}>
@@ -1155,11 +1134,25 @@ const ROUND_ICONS: Record<
   surrender: 'flag-outline',
   other: 'circle-small',
 };
-function PlayerRow({ player, ally }: { player: MatchPlayer; ally: boolean }) {
+function PlayerRow({
+  player,
+  ally,
+  onOpen,
+}: {
+  player: MatchPlayer;
+  ally: boolean;
+  onOpen(): void;
+}) {
   const kd = player.kills !== null && player.deaths ? player.kills / player.deaths : null,
     stripe = player.self ? C.gold : ally ? C.mint : C.accent;
   return (
-    <View style={[styles.playerCard, player.self && { borderColor: `${C.gold}59` }]}>
+    <Pressable
+      onPress={onOpen}
+      disabled={!!player.hidden}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${player.hidden ? 'hidden player' : player.name} profile`}
+      style={[styles.playerCard, player.self && { borderColor: `${C.gold}59` }]}
+    >
       <View style={[S.row, { gap: 12 }]}>
         <AgentFrame image={player.agentImage} size={44} />
         <View style={{ flex: 1, gap: 2 }}>
@@ -1199,17 +1192,23 @@ function PlayerRow({ player, ally }: { player: MatchPlayer; ally: boolean }) {
         <MiniStat label="ACS" value={player.acs} color={C.blue} />
       </View>
       <View style={[styles.playerStripe, { backgroundColor: stripe }]} />
-    </View>
+    </Pressable>
   );
 }
-function MatchReport({
+export function MatchReport({
   id,
   model,
   onClose,
+  onNavigate,
+  subject,
+  embedded = false,
 }: {
   id: string | null;
   model: AppModel;
   onClose(): void;
+  onNavigate: Navigate;
+  subject?: string;
+  embedded?: boolean;
 }) {
   const [detail, setDetail] = useState<MatchDetail | null>(null),
     [error, setError] = useState<string | null>(null),
@@ -1221,7 +1220,7 @@ function MatchReport({
     setTab('scoreboard');
     if (id)
       model
-        .matchDetail(id)
+        .matchDetail(id, subject)
         .then((data) => {
           if (alive) setDetail(data);
         })
@@ -1231,215 +1230,230 @@ function MatchReport({
     return () => {
       alive = false;
     };
-  }, [id, model.matchDetail]);
+  }, [id, subject, model.matchDetail]);
   const own = detail?.teams.find((t) => t.id === detail.teamId),
     other = detail?.teams.find((t) => t.id !== detail.teamId),
     teamGame = detail?.teams.length === 2;
   const tone = resultTone(detail?.result);
-  return (
-    <Modal visible={id !== null} animationType="slide" onRequestClose={onClose}>
-      <ModalPage>
-        <ModalHeader
-          eyebrow={detail ? queueName(detail.queue).toUpperCase() : undefined}
-          title={detail?.map ?? 'Match report'}
-          closeLabel="Close match report"
-          onClose={onClose}
-        />
-        <ScrollView contentContainerStyle={S.content}>
-          {error ? (
-            <Empty title="Report unavailable" detail={error} icon="alert-circle" />
-          ) : !detail ? (
-            <ActivityIndicator style={{ marginTop: 40 }} size="large" color={C.accent} />
-          ) : (
-            <>
-              <View style={styles.reportHero}>
-                {detail.mapImage ? (
-                  <Image source={{ uri: detail.mapImage }} style={fill} resizeMode="cover" />
-                ) : (
-                  <LinearGradient colors={[`${tone}40`, C.surface]} style={fill} />
-                )}
-                <LinearGradient colors={['#0B101840', '#0B1018E6']} style={fill} />
-                <Text style={[S.eyebrow, { color: tone }]}>
-                  {resultLabel(detail.result).toUpperCase()}
-                </Text>
-                {own && other && own.roundsWon !== null && other.roundsWon !== null ? (
-                  <Text style={styles.heroScore}>
-                    <Text style={{ color: C.mint }}>{own.roundsWon}</Text>
-                    <Text style={{ color: C.subtle }}> - </Text>
-                    <Text style={{ color: C.accent }}>{other.roundsWon}</Text>
-                  </Text>
-                ) : (
-                  <Text style={styles.heroScore}>{detail.score}</Text>
-                )}
-                <Text style={S.body}>
-                  {[detail.agent, duration(detail.durationMs), date(detail.startedAt)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </Text>
-              </View>
-              <View style={S.card}>
-                <View style={S.row}>
-                  <MiniStat
-                    label="K/D/A"
-                    value={`${detail.kills ?? '-'}/${detail.deaths ?? '-'}/${detail.assists ?? '-'}`}
-                  />
-                  <MiniStat label="ACS" value={detail.acs} color={C.blue} />
-                  <MiniStat
-                    label="HS%"
-                    value={detail.headshotPct === null ? null : `${detail.headshotPct}%`}
-                  />
-                  <MiniStat
-                    label="K/D"
-                    value={
-                      detail.kills !== null && detail.deaths
-                        ? (detail.kills / detail.deaths).toFixed(2)
-                        : null
-                    }
-                  />
-                </View>
-              </View>
-              <Tabs
-                value={tab}
-                onChange={setTab}
-                items={[
-                  { id: 'scoreboard', label: 'Scoreboard' },
-                  ...(teamGame && detail.rounds.length
-                    ? [{ id: 'rounds' as const, label: 'Rounds' }]
-                    : []),
-                  { id: 'duels', label: 'Duels' },
-                ]}
-              />
-              {tab === 'scoreboard' &&
-                (teamGame
-                  ? [own, other].map(
-                      (team) =>
-                        team && (
-                          <View key={team.id} style={{ gap: 10 }}>
-                            <SectionHeader
-                              title={team === own ? 'Your team' : 'Enemy team'}
-                              detail={
-                                team.roundsWon !== null ? `${team.roundsWon} rounds` : undefined
-                              }
-                            />
-                            {detail.players
-                              .filter((p) => p.teamId === team.id)
-                              .map((player) => (
-                                <PlayerRow
-                                  key={player.subject}
-                                  player={player}
-                                  ally={team === own}
-                                />
-                              ))}
-                          </View>
-                        ),
-                    )
-                  : detail.players.map((player) => (
-                      <PlayerRow key={player.subject} player={player} ally={player.self} />
-                    )))}
-              {tab === 'rounds' && own && other && (
-                <View style={[S.card, { gap: 14 }]}>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ gap: 6 }}>
-                      <View style={styles.roundLine}>
-                        <View style={styles.roundLabel} />
-                        {detail.rounds.map((round) => (
-                          <Text key={round.number} style={styles.roundNumber}>
-                            {round.number}
-                          </Text>
-                        ))}
-                      </View>
-                      {[own, other].map((team) => {
-                        const color = team === own ? C.mint : C.accent;
-                        return (
-                          <View key={team.id} style={styles.roundLine}>
-                            <Text style={[styles.roundLabel, { color }]}>
-                              {team === own ? 'YOU' : 'ENEMY'}
-                            </Text>
-                            {detail.rounds.map((round) => {
-                              const won = round.winningTeam === team.id;
-                              return (
-                                <View
-                                  key={round.number}
-                                  style={[
-                                    styles.roundCell,
-                                    won && {
-                                      backgroundColor: `${color}2E`,
-                                      borderColor: `${color}66`,
-                                    },
-                                  ]}
-                                >
-                                  {won ? (
-                                    <MaterialCommunityIcons
-                                      name={ROUND_ICONS[round.outcome]}
-                                      size={14}
-                                      color={color}
-                                    />
-                                  ) : null}
-                                </View>
-                              );
-                            })}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </ScrollView>
-                  <View style={styles.legend}>
-                    {(['elimination', 'detonate', 'defuse', 'time'] as const).map((outcome) => (
-                      <View key={outcome} style={[S.row, { gap: 4 }]}>
-                        <MaterialCommunityIcons
-                          name={ROUND_ICONS[outcome]}
-                          size={13}
-                          color={C.muted}
-                        />
-                        <Text style={S.small}>
-                          {outcome === 'elimination'
-                            ? 'Elimination'
-                            : outcome === 'detonate'
-                              ? 'Spike detonated'
-                              : outcome === 'defuse'
-                                ? 'Spike defused'
-                                : 'Time expired'}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
+  const content = (
+    <ModalPage>
+      <ModalHeader
+        eyebrow={detail ? queueName(detail.queue).toUpperCase() : undefined}
+        title={detail?.map ?? 'Match report'}
+        closeLabel="Close match report"
+        onClose={onClose}
+      />
+      <ScrollView contentContainerStyle={S.content}>
+        {error ? (
+          <Empty title="Report unavailable" detail={error} icon="alert-circle" />
+        ) : !detail ? (
+          <ActivityIndicator style={{ marginTop: 40 }} size="large" color={C.accent} />
+        ) : (
+          <>
+            <View style={styles.reportHero}>
+              {detail.mapImage ? (
+                <Image source={{ uri: detail.mapImage }} style={fill} resizeMode="cover" />
+              ) : (
+                <LinearGradient colors={[`${tone}40`, C.surface]} style={fill} />
               )}
-              {tab === 'duels' &&
-                (detail.duels.length ? (
-                  detail.duels.map((duel) => (
-                    <View key={duel.subject} style={[S.card, { gap: 10 }]}>
-                      <View style={[S.row, { gap: 12 }]}>
-                        <AgentFrame image={duel.agentImage} size={40} />
-                        <Text style={[S.h3, { flex: 1 }]} numberOfLines={1}>
-                          {duel.name}
+              <LinearGradient colors={['#0B101840', '#0B1018E6']} style={fill} />
+              <Text style={[S.eyebrow, { color: tone }]}>
+                {resultLabel(detail.result).toUpperCase()}
+              </Text>
+              {own && other && own.roundsWon !== null && other.roundsWon !== null ? (
+                <Text style={styles.heroScore}>
+                  <Text style={{ color: C.mint }}>{own.roundsWon}</Text>
+                  <Text style={{ color: C.subtle }}> - </Text>
+                  <Text style={{ color: C.accent }}>{other.roundsWon}</Text>
+                </Text>
+              ) : (
+                <Text style={styles.heroScore}>{detail.score}</Text>
+              )}
+              <Text style={S.body}>
+                {[detail.agent, duration(detail.durationMs), date(detail.startedAt)]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            </View>
+            <View style={S.card}>
+              <View style={S.row}>
+                <MiniStat
+                  label="K/D/A"
+                  value={`${detail.kills ?? '-'}/${detail.deaths ?? '-'}/${detail.assists ?? '-'}`}
+                />
+                <MiniStat label="ACS" value={detail.acs} color={C.blue} />
+                <MiniStat
+                  label="HS%"
+                  value={detail.headshotPct === null ? null : `${detail.headshotPct}%`}
+                />
+                <MiniStat
+                  label="K/D"
+                  value={
+                    detail.kills !== null && detail.deaths
+                      ? (detail.kills / detail.deaths).toFixed(2)
+                      : null
+                  }
+                />
+              </View>
+            </View>
+            <Tabs
+              value={tab}
+              onChange={setTab}
+              items={[
+                { id: 'scoreboard', label: 'Scoreboard' },
+                ...(teamGame && detail.rounds.length
+                  ? [{ id: 'rounds' as const, label: 'Rounds' }]
+                  : []),
+                { id: 'duels', label: 'Duels' },
+              ]}
+            />
+            {tab === 'scoreboard' &&
+              (teamGame
+                ? [own, other].map(
+                    (team) =>
+                      team && (
+                        <View key={team.id} style={{ gap: 10 }}>
+                          <SectionHeader
+                            title={
+                              team === own
+                                ? subject && subject !== model.active?.puuid
+                                  ? 'Player’s team'
+                                  : 'Your team'
+                                : 'Opposing team'
+                            }
+                            detail={
+                              team.roundsWon !== null ? `${team.roundsWon} rounds` : undefined
+                            }
+                          />
+                          {detail.players
+                            .filter((p) => p.teamId === team.id)
+                            .map((player) => (
+                              <PlayerRow
+                                key={player.subject}
+                                player={player}
+                                ally={team === own}
+                                onOpen={() => onNavigate({ type: 'player', player })}
+                              />
+                            ))}
+                        </View>
+                      ),
+                  )
+                : detail.players.map((player) => (
+                    <PlayerRow
+                      key={player.subject}
+                      player={player}
+                      ally={player.self}
+                      onOpen={() => onNavigate({ type: 'player', player })}
+                    />
+                  )))}
+            {tab === 'rounds' && own && other && (
+              <View style={[S.card, { gap: 14 }]}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ gap: 6 }}>
+                    <View style={styles.roundLine}>
+                      <View style={styles.roundLabel} />
+                      {detail.rounds.map((round) => (
+                        <Text key={round.number} style={styles.roundNumber}>
+                          {round.number}
                         </Text>
-                        <Text style={styles.duelScore}>
-                          <Text style={{ color: C.mint }}>{duel.kills}</Text>
-                          <Text style={{ color: C.subtle }}> - </Text>
-                          <Text style={{ color: C.accent }}>{duel.deaths}</Text>
-                        </Text>
-                      </View>
-                      <View style={styles.duelBar}>
-                        <View style={{ flex: duel.kills || 0.0001, backgroundColor: C.mint }} />
-                        <View style={{ flex: duel.deaths || 0.0001, backgroundColor: C.accent }} />
-                      </View>
+                      ))}
                     </View>
-                  ))
-                ) : (
-                  <Empty title="No duels recorded" icon="crosshair" />
-                ))}
-            </>
-          )}
-        </ScrollView>
-      </ModalPage>
+                    {[own, other].map((team) => {
+                      const color = team === own ? C.mint : C.accent;
+                      return (
+                        <View key={team.id} style={styles.roundLine}>
+                          <Text style={[styles.roundLabel, { color }]}>
+                            {team === own ? 'YOU' : 'ENEMY'}
+                          </Text>
+                          {detail.rounds.map((round) => {
+                            const won = round.winningTeam === team.id;
+                            return (
+                              <View
+                                key={round.number}
+                                style={[
+                                  styles.roundCell,
+                                  won && {
+                                    backgroundColor: `${color}2E`,
+                                    borderColor: `${color}66`,
+                                  },
+                                ]}
+                              >
+                                {won ? (
+                                  <MaterialCommunityIcons
+                                    name={ROUND_ICONS[round.outcome]}
+                                    size={14}
+                                    color={color}
+                                  />
+                                ) : null}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+                <View style={styles.legend}>
+                  {(['elimination', 'detonate', 'defuse', 'time'] as const).map((outcome) => (
+                    <View key={outcome} style={[S.row, { gap: 4 }]}>
+                      <MaterialCommunityIcons
+                        name={ROUND_ICONS[outcome]}
+                        size={13}
+                        color={C.muted}
+                      />
+                      <Text style={S.small}>
+                        {outcome === 'elimination'
+                          ? 'Elimination'
+                          : outcome === 'detonate'
+                            ? 'Spike detonated'
+                            : outcome === 'defuse'
+                              ? 'Spike defused'
+                              : 'Time expired'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+            {tab === 'duels' &&
+              (detail.duels.length ? (
+                detail.duels.map((duel) => (
+                  <View key={duel.subject} style={[S.card, { gap: 10 }]}>
+                    <View style={[S.row, { gap: 12 }]}>
+                      <AgentFrame image={duel.agentImage} size={40} />
+                      <Text style={[S.h3, { flex: 1 }]} numberOfLines={1}>
+                        {duel.name}
+                      </Text>
+                      <Text style={styles.duelScore}>
+                        <Text style={{ color: C.mint }}>{duel.kills}</Text>
+                        <Text style={{ color: C.subtle }}> - </Text>
+                        <Text style={{ color: C.accent }}>{duel.deaths}</Text>
+                      </Text>
+                    </View>
+                    <View style={styles.duelBar}>
+                      <View style={{ flex: duel.kills || 0.0001, backgroundColor: C.mint }} />
+                      <View style={{ flex: duel.deaths || 0.0001, backgroundColor: C.accent }} />
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Empty title="No duels recorded" icon="crosshair" />
+              ))}
+          </>
+        )}
+      </ScrollView>
+    </ModalPage>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <Modal visible={id !== null} animationType="slide" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }
-export function MatchesScreen({ model }: Props) {
-  const [selected, setSelected] = useState<string | null>(null),
-    [career, setCareer] = useState(false),
-    [filter, setFilter] = useState('all');
+export function MatchesScreen({ model, onNavigate }: Props) {
+  const [filter, setFilter] = useState('all');
   const [details, setDetails] = useState<Record<string, MatchDetail>>({}),
     requested = useRef(new Set<string>());
   const matches =
@@ -1474,44 +1488,15 @@ export function MatchesScreen({ model }: Props) {
     <>
       <Page model={model}>
         <Heading eyebrow="YOUR CAREER" title="Profile" />
-        <ProfileBanner model={model} />
-        <RankOverview model={model} onOpen={() => setCareer(true)} />
-        <SectionHeader title="Live game" />
-        <Resource title="Live game" section={model.snapshot?.liveGame}>
-          {(game) => (
-            <View style={styles.liveCard}>
-              {game.mapImage ? (
-                <Image source={{ uri: game.mapImage }} style={fill} resizeMode="cover" />
-              ) : null}
-              <View style={[fill, { backgroundColor: '#131A25C7' }]} />
-              <View
-                style={[
-                  styles.liveIcon,
-                  { backgroundColor: game.state === 'offline' ? C.raised : `${C.mint}26` },
-                ]}
-              >
-                <Feather
-                  name={game.state === 'offline' ? 'moon' : 'radio'}
-                  color={game.state === 'offline' ? C.subtle : C.mint}
-                  size={20}
-                />
-              </View>
-              <View style={{ gap: 2, flex: 1 }}>
-                <Text style={S.h3}>
-                  {game.state === 'in_game'
-                    ? 'In game'
-                    : game.state === 'agent_select'
-                      ? 'Agent select'
-                      : 'Not in a game'}
-                </Text>
-                <Text style={S.small}>
-                  {game.map ??
-                    (game.state === 'offline' ? 'Start a match to see it here.' : 'Loading map…')}
-                </Text>
-              </View>
-            </View>
-          )}
-        </Resource>
+        <ProfileBanner model={model} onNavigate={onNavigate} />
+        <RankOverview model={model} onOpen={() => rank && onNavigate({ type: 'career', rank })} />
+        <Button
+          title="Friends & chat"
+          secondary
+          icon="users"
+          onPress={() => onNavigate({ type: 'friends' })}
+        />
+        <LiveCard model={model} onOpen={() => onNavigate({ type: 'live' })} />
         <SectionHeader title="Match history" />
         <Resource title="Match history" section={model.snapshot?.matches}>
           {(list) => {
@@ -1533,7 +1518,7 @@ export function MatchesScreen({ model }: Props) {
                     key={match.id}
                     match={match}
                     detail={details[match.id]}
-                    onPress={() => setSelected(match.id)}
+                    onPress={() => onNavigate({ type: 'match', id: match.id })}
                   />
                 ))}
                 {!shown.length && <Empty title="No matches yet" icon="crosshair" />}
@@ -1550,8 +1535,6 @@ export function MatchesScreen({ model }: Props) {
           }}
         </Resource>
       </Page>
-      <MatchReport id={selected} model={model} onClose={() => setSelected(null)} />
-      <CareerModal rank={rank} visible={career} onClose={() => setCareer(false)} />
     </>
   );
 }
@@ -1570,7 +1553,8 @@ export function AccountScreen({ model, onLink }: Props) {
       setConfirm(null);
     }
   };
-  const live = active.expiresAt > Date.now();
+  const live = active.expiresAt > Date.now(),
+    renewable = active.canReauth;
   return (
     <>
       <Page model={model}>
@@ -1587,7 +1571,15 @@ export function AccountScreen({ model, onLink }: Props) {
               </Text>
             </View>
             <Badge
-              text={active.demo ? 'DEMO' : live ? 'CONNECTED' : 'SIGN IN AGAIN'}
+              text={
+                active.demo
+                  ? 'DEMO'
+                  : live
+                    ? 'CONNECTED'
+                    : renewable
+                      ? 'AUTO RENEW'
+                      : 'SIGN IN AGAIN'
+              }
               color={active.demo ? C.gold : live ? C.mint : C.accent}
             />
           </View>
@@ -1629,7 +1621,11 @@ export function AccountScreen({ model, onLink }: Props) {
                 </Text>
                 <Text style={S.small}>
                   {account.region.toUpperCase()} ·{' '}
-                  {account.expiresAt > Date.now() ? 'Connected' : 'Sign in again'}
+                  {account.expiresAt > Date.now()
+                    ? 'Connected'
+                    : account.canReauth
+                      ? 'Auto-renew available'
+                      : 'Sign in again'}
                 </Text>
               </View>
               <Feather
@@ -1697,7 +1693,7 @@ export function AccountScreen({ model, onLink }: Props) {
             deletes its local data but does not sign it out on Riot's side. Demo mode uses made-up
             data.
           </Text>
-          <Text style={S.small}>Outpost 0.2.0</Text>
+          <Text style={S.small}>Outpost 0.3.0</Text>
         </View>
       </Page>
       <Modal
@@ -1782,7 +1778,7 @@ export function ItemModal({
   const [preview, setPreview] = useState<CatalogMedia | null>(null);
   useEffect(() => setPreview(null), [item?.id]);
   const shown = preview ?? item,
-    video = shown?.video ?? item?.video,
+    video = preview ? preview.video : item?.video,
     tint = rarityColor(item?.rarity);
   const wished = item ? model.wishlist.includes(item.canonicalId) : false,
     weaponItem = item?.kind === 'skin' || item?.kind === 'chroma';
@@ -1835,7 +1831,7 @@ export function ItemModal({
             {video ? (
               <SkinVideo key={video} uri={video} />
             ) : weaponItem ? (
-              <Text style={S.small}>No video preview for this skin.</Text>
+              <Text style={S.small}>No video preview is available for this selection.</Text>
             ) : null}
             {item.levels && item.levels.length > 1 ? (
               <>

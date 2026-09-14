@@ -13,7 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { CatalogItem, Money, Section as DataSection, StoreOffer } from '../core/types';
-import { countdown } from '../core/normalize';
+import { countdown, currencySymbol } from '../core/normalize';
 import { C, CURRENCY_ICONS, S, rarityColor, rarityIcon } from './theme';
 type IconName = React.ComponentProps<typeof Feather>['name'];
 export function Button({
@@ -33,6 +33,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={title}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -159,7 +160,7 @@ export function MoneyText({
     <View style={[S.row, { gap: 10, flexWrap: 'wrap' }]}>
       {prices.map((p) => (
         <View key={p.currencyId} style={[S.row, { gap: 5 }]}>
-          <CurrencyIcon symbol={p.symbol} size={size} />
+          <CurrencyIcon symbol={currencySymbol(p.currencyId)} size={size} />
           <Text
             style={{
               color: strike ? C.subtle : C.ink,

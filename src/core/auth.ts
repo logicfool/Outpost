@@ -163,42 +163,85 @@ export function sessionActive(session: Session, now = Date.now()): boolean {
   return session.account.expiresAt > now + 30000;
 }
 
-const REAUTH_URL =
-  'https://auth.riotgames.com/authorize?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&client_id=play-valorant-web-prod&response_type=token%20id_token&nonce=1&scope=account%20openid';
+const COOKIE_NAMES = new Set(['ssid', 'tdid', 'sub', 'csid', 'clid', 'did', 'asid']);
+export function rotatedCookies(
+  previous: Record<string, string>,
+  headers: Headers,
+): Record<string, string> {
+  const result = { ...previous };
+  const native = headers as Headers & { getSetCookie?: () => string[] };
+  const rawValues = native.getSetCookie?.() ?? [headers.get('set-cookie') ?? ''];
+  const values = rawValues.flatMap((value) => value.split(/,(?=\s*[a-z0-9_-]+=)/i));
+  for (const line of values) {
+    const pieces = line.split(';'),
+      pair = pieces.shift()?.trim() ?? '',
+      separator = pair.indexOf('=');
+    if (separator < 1) continue;
+    const name = pair.slice(0, separator),
+      value = pair.slice(separator + 1);
+    if (!COOKIE_NAMES.has(name)) continue;
+    const expired = pieces.some(
+      (part) => /^\s*max-age=0\s*$/i.test(part) || /^\s*max-age=-/i.test(part),
+    );
+    if (!value || expired) delete result[name];
+    else if (value.length <= 8192 && !/[\r\n;]/.test(value)) result[name] = value;
+  }
+  return result;
+}
+
 export async function reauthenticateWithCookies(
   cookies: Record<string, string>,
+  attempt: LoginAttempt,
+  fetcher: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<LoginTokens> {
-  if (!cookies.ssid)
+  if (!cookies.ssid || cookies.ssid.length > 8192 || /[\r\n;]/.test(cookies.ssid))
     throw new AppError('REAUTH_UNAVAILABLE', 'This account has no reusable Riot session cookie.');
   const cookie = Object.entries(cookies)
-    .filter(([k, v]) => /^[a-z0-9_-]{1,32}$/i.test(k) && v && !/[\r\n;]/.test(v))
+    .filter(([k, v]) => COOKIE_NAMES.has(k) && v && v.length <= 8192 && !/[\r\n;]/.test(v))
     .map(([k, v]) => `${k}=${v}`)
     .join('; ');
-  let response: Response;
+  const controller = new AbortController(),
+    timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    response = await fetch(REAUTH_URL, {
-      method: 'GET',
-      headers: { Accept: 'text/html,*/*', Cookie: cookie },
-      redirect: 'manual',
-    });
-  } catch {
-    throw new AppError('NETWORK', 'Riot silent reauthentication could not be reached.');
+    let response: Response;
+    try {
+      response = await fetcher(authorizationUrl(attempt), {
+        method: 'GET',
+        headers: { Accept: 'text/html,*/*', Cookie: cookie },
+        credentials: 'omit',
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+    } catch {
+      throw new AppError(
+        controller.signal.aborted ? 'TIMEOUT' : 'NETWORK',
+        'Riot silent reauthentication could not be reached.',
+      );
+    }
+    if (response.redirected || (response.url && new URL(response.url).origin !== AUTH_ORIGIN))
+      throw new AppError('AUTH_REDIRECT', 'An unexpected authentication redirect was blocked.');
+    if (response.status === 429) {
+      const delay = Number(response.headers.get('retry-after'));
+      throw new AppError(
+        'RATE_LIMIT',
+        'Riot asked this app to wait before renewing the session.',
+        Date.now() + (Number.isFinite(delay) && delay > 0 ? delay : 60) * 1000,
+        429,
+      );
+    }
+    if (response.status >= 500)
+      throw new AppError(
+        'SERVICE_UNAVAILABLE',
+        'Riot sign-in is temporarily unavailable.',
+        undefined,
+        response.status,
+      );
+    const location = response.headers.get('location');
+    if (![301, 302, 303, 307, 308].includes(response.status) || !location || !isCallback(location))
+      throw new AppError('REAUTH_REQUIRED', 'Riot requires interactive sign-in again.');
+    const tokens = parseCallback(location, attempt);
+    return { ...tokens, reauthCookies: rotatedCookies(cookies, response.headers) };
+  } finally {
+    clearTimeout(timeout);
   }
-  const location = response.headers.get('location') ?? response.url;
-  if (!location || location.includes('authenticate.riotgames.com/login'))
-    throw new AppError('REAUTH_REQUIRED', 'Riot requires an interactive sign-in again.');
-  let parsed: URL;
-  try {
-    parsed = new URL(location);
-  } catch {
-    throw new AppError('REAUTH_REQUIRED', 'Riot did not return a reusable session.');
-  }
-  const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ''));
-  const accessToken = fragment.get('access_token') ?? '';
-  const idToken = fragment.get('id_token') ?? undefined;
-  const expiresIn = Number(fragment.get('expires_in') ?? '3600');
-  token(accessToken);
-  if (!Number.isFinite(expiresIn) || expiresIn < 30 || expiresIn > 86400)
-    throw new AppError('SESSION_INVALID', 'Riot returned an invalid session lifetime.');
-  return { accessToken, idToken, expiresAt: Date.now() + expiresIn * 1000, reauthCookies: cookies };
 }

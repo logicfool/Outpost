@@ -22,7 +22,7 @@ const files = [
   path.join(root, 'App.tsx'),
   path.join(root, 'app.config.ts'),
   ...walk(path.join(root, 'src')),
-].filter((file) => /\.tsx?$/.test(file));
+].filter((file) => /\.tsx?$/.test(file) && !file.endsWith('.d.ts'));
 let failed = false;
 for (const file of files) {
   const result = ts.transpileModule(fs.readFileSync(file, 'utf8'), {

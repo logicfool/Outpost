@@ -1,3 +1,4 @@
+import { DEMO_ART } from './demoAssets';
 import type {
   Account,
   Catalog,
@@ -53,13 +54,26 @@ export function demoCatalog(): Catalog {
       kind: 'skin',
       rarity: RARITIES[index],
       weapon: name.split(' ').at(-1),
+      ...DEMO_ART.skins[name],
     };
   });
   for (const [index, name] of ['Pocket Sage', 'Good Luck'].entries()) {
     const id = `00000000-0000-4000-8002-${String(index + 1).padStart(12, '0')}`;
     items[id] = { id, canonicalId: id, name, kind: 'buddy' };
   }
-  return { items, bundles: {}, maps: {}, tiers: {}, contracts: {}, seasons: {}, fetchedAt: 0 };
+  for (const item of [...DEMO_ART.cards, ...DEMO_ART.titles]) items[item.id] = item;
+  for (const skin of Object.values(items).filter((i) => i.kind === 'skin'))
+    for (const chroma of skin.chromas ?? [])
+      items[chroma.id] = { ...skin, ...chroma, canonicalId: skin.id, kind: 'chroma' };
+  return {
+    items,
+    bundles: DEMO_ART.bundles,
+    maps: DEMO_ART.maps,
+    tiers: DEMO_ART.tiers,
+    contracts: {},
+    seasons: {},
+    fetchedAt: 0,
+  };
 }
 const QUEUES = ['competitive', 'competitive', 'unrated', 'swiftplay', 'competitive'];
 export function makeDemo(now = Date.now()): {
@@ -81,6 +95,7 @@ export function makeDemo(now = Date.now()): {
     startedAt: now - (index + 1) * 3600000,
     queue: QUEUES[index]!,
     map,
+    mapImage: DEMO_ART.maps[map]?.image,
     rrChange: QUEUES[index] === 'competitive' ? [22, -16, 18, 25, -13][index] : undefined,
   }));
   const act = (
@@ -92,11 +107,21 @@ export function makeDemo(now = Date.now()): {
     wins: number,
     games: number,
     current = false,
-  ) => ({ seasonId, name, tier, tierName, rr, wins, games, current });
+  ) => ({
+    seasonId,
+    name,
+    tier,
+    tierName,
+    image: DEMO_ART.tiers[String(tier)]?.image,
+    rr,
+    wins,
+    games,
+    current,
+  });
   const competitive = [
-    act('demo-v26-a5', 'V26 // ACT V', 22, 'DIAMOND 2', 67, 28, 46, true),
-    act('demo-v26-a4', 'V26 // ACT IV', 23, 'DIAMOND 3', 12, 31, 58),
-    act('demo-v25-a3', 'V25 // ACT III', 19, 'PLATINUM 2', 40, 22, 40),
+    act('demo-v26-a5', 'V26 // ACT V', 19, 'DIAMOND 2', 67, 28, 46, true),
+    act('demo-v26-a4', 'V26 // ACT IV', 20, 'DIAMOND 3', 12, 31, 58),
+    act('demo-v25-a3', 'V25 // ACT III', 16, 'PLATINUM 2', 40, 22, 40),
   ];
   const unrated = [
     act('demo-v26-a5', 'V26 // ACT V', 0, 'Unrated', 0, 14, 25, true),
@@ -152,14 +177,20 @@ export function makeDemo(now = Date.now()): {
     ]),
     rank: ready({
       name: 'DIAMOND 2',
-      tier: 22,
+      tier: 19,
+      image: DEMO_ART.tiers['19']?.image,
       rr: 67,
       wins: 28,
       games: 46,
       currentSeason: true,
       seasonId: 'demo-v26-a5',
       seasonName: 'V26 // ACT V',
-      peak: { tier: 23, name: 'DIAMOND 3', seasonName: 'V26 // ACT IV' },
+      peak: {
+        tier: 20,
+        image: DEMO_ART.tiers['20']?.image,
+        name: 'DIAMOND 3',
+        seasonName: 'V26 // ACT IV',
+      },
       career: [
         {
           queue: 'competitive',
@@ -196,16 +227,38 @@ export function makeDemo(now = Date.now()): {
     }),
     collection: ready([
       ...skins.slice(4),
-      ...Object.values(catalog.items).filter((i) => i.kind === 'buddy'),
+      ...Object.values(catalog.items).filter((i) => ['buddy', 'card', 'title'].includes(i.kind)),
     ]),
     loadout: ready({
+      version: 1,
+      card: DEMO_ART.cards[0],
+      title: DEMO_ART.titles[0],
       guns: [
         { weapon: 'Phantom', skin: skins[7]! },
         { weapon: 'Ghost', skin: skins[5]! },
         { weapon: 'Melee', skin: skins[4]! },
       ],
     }),
-    liveGame: ready({ state: 'in_game', matchId: 'demo-live', map: 'Abyss' }),
+    liveGame: ready({
+      state: 'in_game',
+      matchId: '00000000-0000-4000-8005-000000000001',
+      map: 'Abyss',
+      mapImage: DEMO_ART.maps.Abyss?.image,
+      observedAt: now,
+      queue: 'competitive',
+      players: AGENTS.map((agent, i) => ({
+        subject: i === 0 ? DEMO_ID : `00000000-0000-4000-8004-${String(i).padStart(12, '0')}`,
+        self: i === 0,
+        name: PLAYERS[i]!,
+        tag: 'DEMO',
+        teamId: i % 2 ? 'Red' : 'Blue',
+        agent,
+        agentImage: DEMO_ART.agents[agent],
+        level: 50 + i * 3,
+        card: DEMO_ART.cards[0],
+        title: DEMO_ART.titles[0],
+      })),
+    }),
     matches: ready(matches),
   };
   return { account: DEMO_ACCOUNT, snapshot, catalog };
@@ -235,7 +288,7 @@ const PLAYERS = [
   'Ferro',
 ];
 const OUTCOMES: RoundOutcome[] = ['elimination', 'detonate', 'elimination', 'defuse', 'time'];
-export function demoMatch(id: string): MatchDetail {
+export function demoMatch(id: string, subject = DEMO_ID): MatchDetail {
   const match = makeDemo().snapshot.matches;
   const entry = match.status === 'ready' ? match.data.find((m) => m.id === id) : undefined;
   const index =
@@ -256,8 +309,14 @@ export function demoMatch(id: string): MatchDetail {
       name: PLAYERS[i]!,
       tag: i === 0 ? 'DEMO' : String(1000 + i * 137),
       teamId: i % 2 === 0 ? 'Blue' : 'Red',
-      self: i === 0,
+      self:
+        subject === (i === 0 ? DEMO_ID : `00000000-0000-4000-8004-${String(i).padStart(12, '0')}`),
       agent,
+      agentImage: DEMO_ART.agents[agent],
+      card: DEMO_ART.cards[0],
+      title: DEMO_ART.titles[0],
+      tierName: DEMO_ART.tiers[String(18 + (i % 6))]?.name,
+      tierImage: DEMO_ART.tiers[String(18 + (i % 6))]?.image,
       level: 40 + i * 23,
       tier: 18 + (i % 6),
       kills,
@@ -284,22 +343,25 @@ export function demoMatch(id: string): MatchDetail {
       outcome: OUTCOMES[(i + index) % OUTCOMES.length]!,
     };
   });
-  const self = players[0]!;
+  const self = players.find((p) => p.self) ?? players[0]!;
+  const ownBlue = self.teamId === 'Blue';
   return {
     id,
     map: entry?.map ?? 'Ascent',
+    mapImage: DEMO_ART.maps[entry?.map ?? 'Ascent']?.image,
     queue: entry?.queue ?? 'competitive',
     startedAt: entry?.startedAt ?? Date.now() - 3600000,
     durationMs: (38 + index * 3) * 60000 + 42000,
     agent: self.agent,
+    agentImage: self.agentImage,
     kills: self.kills,
     deaths: self.deaths,
     assists: self.assists,
     acs: self.acs,
     headshotPct: self.headshotPct,
-    result: win ? 'WIN' : 'LOSS',
-    score: `${blue} - ${red}`,
-    teamId: 'Blue',
+    result: win === ownBlue ? 'WIN' : 'LOSS',
+    score: ownBlue ? `${blue} - ${red}` : `${red} - ${blue}`,
+    teamId: self.teamId,
     teams: [
       { id: 'Blue', roundsWon: blue, won: win },
       { id: 'Red', roundsWon: red, won: !win },
@@ -307,7 +369,7 @@ export function demoMatch(id: string): MatchDetail {
     players: players.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
     rounds,
     duels: players
-      .filter((p) => p.teamId === 'Red')
+      .filter((p) => p.teamId !== self.teamId)
       .map((p, i) => ({
         subject: p.subject,
         name: p.name,

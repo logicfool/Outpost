@@ -1,3 +1,9 @@
+import { parseChatBootstrap } from './chatBootstrap';
+import { prepareIdentityEdit, verifyIdentity } from './identity';
+import { PlayerScope } from './playerScope';
+import { glzOrigin, normalizeLive } from './live';
+import { catalogWithContent } from './rank';
+import type { PlayerRef, PlayerProfile, IdentityEdit } from './playerTypes';
 import type {
   Catalog,
   LiveGame,
@@ -9,6 +15,7 @@ import type {
   Session,
   Snapshot,
   Store,
+  Loadout,
 } from './types';
 import {
   accountFromUserInfo,
@@ -104,6 +111,7 @@ export async function connectAccount(
       : undefined,
   };
 
+  session.account.canReauth = Boolean(session.reauth?.cookies.ssid);
   return validateSession(session);
 }
 async function section<T>(loader: () => Promise<T>): Promise<Section<T>> {
@@ -116,47 +124,52 @@ async function section<T>(loader: () => Promise<T>): Promise<Section<T>> {
 }
 export class RiotClient {
   private cache = new SingleFlightCache();
-  private allowedMatches = new Set<string>();
+  private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
   constructor(
     private session: Session,
     private http: HttpClient,
     private publicClient: CatalogClient,
     private catalog: Catalog,
+    readonly scope = new PlayerScope(
+      session.account.puuid,
+      session.account.gameName,
+      session.account.tagLine,
+    ),
   ) {
     validateSession(session);
+  }
+  isActive() {
+    return !this.disposed && sessionActive(this.session);
   }
   dispose() {
     this.disposed = true;
     this.cache.clear();
-    this.allowedMatches.clear();
   }
-  private async read(path: string, ttlMs = 60000, method: 'GET' | 'POST' = 'GET') {
+  private async read(
+    path: string,
+    ttlMs = 60000,
+    method: 'GET' | 'POST' | 'PUT' = 'GET',
+    body?: unknown,
+    expectedSubject = this.session.account.puuid,
+    host: 'pd' | 'shared' | 'glz' = 'pd',
+  ) {
     if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
     if (!sessionActive(this.session))
-      throw new AppError(
-        'SESSION_EXPIRED',
-        'Your Riot session expired. Reconnect to refresh account data.',
-      );
+      throw new AppError('SESSION_EXPIRED', 'Your Riot session expired. Reconnect to refresh.');
     if (!path.startsWith('/') || path.includes('..') || path.includes('://') || path.includes('\\'))
       throw new AppError('NETWORK_POLICY', 'The request path is not allowed.');
-    const { puuid, shard } = this.session.account;
-    uuid(puuid);
-    return this.cache.get(`${method}:${path}`, ttlMs, async () => {
-      let clientVersion: string;
-      try {
-        clientVersion = await this.publicClient.version();
-      } catch {
-        throw new AppError(
-          'CLIENT_VERSION',
-          'The current VALORANT client version could not be resolved. Retry when the public catalog is available.',
-        );
-      }
-      if (this.disposed || !sessionActive(this.session))
-        throw new AppError('SESSION_EXPIRED', 'Reconnect your Riot account before refreshing.');
-      const result = await this.http.json(`https://pd.${shard}.a.pvp.net${path}`, {
+    const { shard, region } = this.session.account;
+    uuid(expectedSubject);
+    const origin = host === 'glz' ? glzOrigin(region, shard) : `https://${host}.${shard}.a.pvp.net`;
+    const encoded = method === 'GET' ? undefined : JSON.stringify(body ?? {});
+    return this.cache.get(`${host}:${method}:${path}:${encoded ?? ''}`, ttlMs, async () => {
+      const clientVersion = await this.publicClient.version();
+      if (!this.isActive())
+        throw new AppError('SESSION_EXPIRED', 'The account session changed. Refresh to retry.');
+      const result = await this.http.json(`${origin}${path}`, {
         method,
-        ...(method === 'POST' ? { body: '{}' } : {}),
+        ...(encoded !== undefined ? { body: encoded } : {}),
         headers: {
           Authorization: `Bearer ${this.session.accessToken}`,
           'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
@@ -167,65 +180,99 @@ export class RiotClient {
         },
       });
       if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
-      sameSubject(object(result.data), puuid);
+      sameSubject(object(result.data), expectedSubject);
       return result;
     });
   }
-
-  private async glzRead(path: string, ttlMs = 30000) {
-    if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
-    if (!sessionActive(this.session))
-      throw new AppError(
-        'SESSION_EXPIRED',
-        'Your Riot session expired. Reconnect to refresh account data.',
+  private async rankCatalog(): Promise<Catalog> {
+    try {
+      const result = await this.read(
+        '/content-service/v3/content',
+        10 * 60000,
+        'GET',
+        undefined,
+        this.session.account.puuid,
+        'shared',
       );
-    if (!path.startsWith('/') || path.includes('..') || path.includes('://') || path.includes('\\'))
-      throw new AppError('NETWORK_POLICY', 'The request path is not allowed.');
-    const { region, shard } = this.session.account;
-    return this.cache.get(`glz:${path}`, ttlMs, async () => {
-      const clientVersion = await this.publicClient.version();
-      return this.http.json(`https://glz-${region}-1.${shard}.a.pvp.net${path}`, {
-        headers: {
-          Authorization: `Bearer ${this.session.accessToken}`,
-          'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
-          'X-Riot-ClientVersion': clientVersion,
-          'X-Riot-ClientPlatform': PLATFORM,
-          Accept: 'application/json',
-        },
+      return catalogWithContent(this.catalog, result.data);
+    } catch (error) {
+      const e = safeError(error);
+      if (e.status === 401 || e.status === 403 || e.code === 'SESSION_REMOVED') throw e;
+      return this.catalog;
+    }
+  }
+  async rank(subject = this.session.account.puuid) {
+    this.scope.player(subject);
+    const [result, catalog] = await Promise.all([
+      this.read(`/mmr/v1/players/${uuid(subject)}`, 60000, 'GET', undefined, subject),
+      this.rankCatalog(),
+    ]);
+    return normalizeRank(result.data, catalog);
+  }
+  private async resolveNames<T extends PlayerRef>(players: T[]): Promise<T[]> {
+    const ids = [...new Set(players.filter((p) => !p.hidden).map((p) => uuid(p.subject)))].slice(
+      0,
+      20,
+    );
+    if (!ids.length) return players;
+    try {
+      const response = await this.read('/name-service/v2/players', 5 * 60000, 'PUT', ids);
+      const aliases = new Map(
+        array(response.data)
+          .map(object)
+          .filter((p) => ids.includes(text(p.Subject).toLowerCase()))
+          .map((p) => [text(p.Subject).toLowerCase(), p]),
+      );
+      return players.map((p) => {
+        const alias = p.hidden ? undefined : aliases.get(p.subject);
+        return alias
+          ? { ...p, name: text(alias.GameName, p.name), tag: text(alias.TagLine, p.tag) }
+          : p;
       });
-    });
+    } catch {
+      return players;
+    }
   }
   async liveGame(): Promise<LiveGame> {
     const id = this.session.account.puuid;
-    const resolveMap = async (mode: 'core-game' | 'pregame', matchId: string) => {
+    for (const mode of ['core-game', 'pregame'] as const) {
+      let matchId: string;
       try {
-        const detail = object((await this.glzRead(`/${mode}/v1/matches/${matchId}`)).data);
-        const mapId = text(detail.MapID) || text(detail.MapId);
-        const meta = this.catalog.maps[mapId];
-        return { map: meta?.name || mapId.split('/').pop() || undefined, mapImage: meta?.image };
-      } catch {
-        return {};
+        const current = object(
+          (await this.read(`/${mode}/v1/players/${id}`, 10000, 'GET', undefined, id, 'glz')).data,
+        );
+        matchId = uuid(current.MatchID);
+      } catch (error) {
+        const e = safeError(error);
+        if (e.status === 404 || e.code === 'PLAYER_ABSENT') continue;
+        throw e;
       }
-    };
-    try {
-      const current = object((await this.glzRead(`/core-game/v1/players/${id}`)).data);
-      const matchId = text(current.MatchID);
-      if (matchId)
-        return { state: 'in_game', matchId, ...(await resolveMap('core-game', matchId)) };
-    } catch (error) {
-      const e = safeError(error);
-      if (e.status && ![404, 400].includes(e.status)) throw e;
+      const state = mode === 'core-game' ? 'in_game' : 'agent_select';
+      try {
+        const detail = await this.read(
+          `/${mode}/v1/matches/${matchId}`,
+          10000,
+          'GET',
+          undefined,
+          id,
+          'glz',
+        );
+        const game = normalizeLive(detail.data, state, matchId, id, this.catalog);
+        game.players = await this.resolveNames(game.players ?? []);
+        for (const player of game.players) this.scope.remember(player);
+        return game;
+      } catch (error) {
+        const e = safeError(error);
+        if (e.code === 'SESSION_REMOVED' || e.code === 'ACCOUNT_MISMATCH') throw e;
+        return {
+          state,
+          matchId,
+          observedAt: Date.now(),
+          detailError: { code: e.code, message: e.message, retryAt: e.retryAt },
+        };
+      }
     }
-    try {
-      const pre = object((await this.glzRead(`/pregame/v1/players/${id}`)).data);
-      const matchId = text(pre.MatchID);
-      if (matchId)
-        return { state: 'agent_select', matchId, ...(await resolveMap('pregame', matchId)) };
-    } catch (error) {
-      const e = safeError(error);
-      if (e.status && ![404, 400].includes(e.status)) throw e;
-    }
-    return { state: 'offline' };
+    return { state: 'idle', observedAt: Date.now() };
   }
   async store(): Promise<Store> {
     const id = this.session.account.puuid;
@@ -256,7 +303,11 @@ export class RiotClient {
       fallbackPrices,
     );
   }
-  async matchHistory(start = 0, count = 20): Promise<MatchSummary[]> {
+  async matchHistory(
+    start = 0,
+    count = 20,
+    subject = this.session.account.puuid,
+  ): Promise<MatchSummary[]> {
     if (
       !Number.isInteger(start) ||
       start < 0 ||
@@ -266,31 +317,118 @@ export class RiotClient {
       count > 50
     )
       throw new AppError('PAGINATION', 'The requested match range is invalid.');
-    const id = this.session.account.puuid,
+    this.scope.player(subject);
+    const id = uuid(subject),
       query = `startIndex=${start}&endIndex=${start + count}`;
     const [history, updates] = await Promise.all([
-      this.read(`/match-history/v1/history/${id}?${query}`),
-      this.read(`/mmr/v1/players/${id}/competitiveupdates?${query}&queue=competitive`).catch(
-        () => undefined,
-      ),
+      this.read(`/match-history/v1/history/${id}?${query}`, 60000, 'GET', undefined, id),
+      this.read(
+        `/mmr/v1/players/${id}/competitiveupdates?${query}&queue=competitive`,
+        60000,
+        'GET',
+        undefined,
+        id,
+      ).catch(() => undefined),
     ]);
     const matches = normalizeMatches(history.data, updates?.data, this.catalog);
-    for (const match of matches) this.allowedMatches.add(uuid(match.id));
+    for (const match of matches) this.scope.allowMatch(id, uuid(match.id));
     return matches;
   }
-  async matchDetail(id: string): Promise<MatchDetail> {
-    uuid(id);
-    if (!this.allowedMatches.has(id)) await this.matchHistory();
-    if (!this.allowedMatches.has(id))
-      throw new AppError(
-        'MATCH_SCOPE',
-        'Only matches in this account’s loaded history may be opened.',
-      );
-    return normalizeMatchDetail(
-      (await this.read(`/match-details/v1/matches/${id}`, 24 * 60 * 60000)).data,
-      this.session.account.puuid,
+  async matchDetail(id: string, subject = this.session.account.puuid): Promise<MatchDetail> {
+    id = uuid(id);
+    subject = uuid(subject);
+    this.scope.player(subject);
+    if (!this.scope.allowsMatch(subject, id)) await this.matchHistory(0, 20, subject);
+    if (!this.scope.allowsMatch(subject, id))
+      throw new AppError('MATCH_SCOPE', 'Open a match from this player’s loaded history.');
+    const raw = await this.read(`/match-details/v1/matches/${id}`, 24 * 60 * 60000);
+    const detail = normalizeMatchDetail(raw.data, subject, this.catalog);
+    detail.players = await this.resolveNames(detail.players);
+    for (const player of detail.players) this.scope.remember(player);
+    detail.duels = detail.duels.map((duel) => ({
+      ...duel,
+      name: detail.players.find((p) => p.subject === duel.subject)?.name ?? duel.name,
+    }));
+    return detail;
+  }
+  async chatBootstrap() {
+    if (!this.isActive())
+      throw new AppError('SESSION_EXPIRED', 'Reconnect your account before opening chat.');
+    const headers = {
+      Authorization: `Bearer ${this.session.accessToken}`,
+      'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+    };
+    const [pas, config] = await Promise.all([
+      this.http.text('https://riot-geo.pas.si.riotgames.com/pas/v1/service/chat', { headers }),
+      this.http.json(
+        'https://clientconfig.rpg.riotgames.com/api/v1/config/player?app=Riot%20Client',
+        { headers },
+      ),
+    ]);
+    if (!this.isActive())
+      throw new AppError('SESSION_REMOVED', 'The account changed while opening chat.');
+    return parseChatBootstrap(this.session, pas.data, config.data);
+  }
+  async playerProfile(subject: string): Promise<PlayerProfile> {
+    subject = uuid(subject);
+    const entry = this.scope.player(subject);
+    const [rank, matches] = await Promise.all([
+      section(() => this.rank(subject)),
+      section(() => this.matchHistory(0, 20, subject)),
+    ]);
+    if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
+    return {
+      player: entry.player,
+      rank,
+      matches,
+      fetchedAt: Date.now(),
+      identitySource: entry.source,
+    };
+  }
+  async loadout(): Promise<Loadout> {
+    return normalizeLoadout(
+      (
+        await this.read(
+          `/personalization/v2/players/${this.session.account.puuid}/playerloadout`,
+          0,
+        )
+      ).data,
       this.catalog,
     );
+  }
+  async saveIdentity(edit: IdentityEdit): Promise<Loadout> {
+    if (this.identityWrite)
+      throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current identity change to finish.');
+    const run = async () => {
+      const id = this.session.account.puuid,
+        path = `/personalization/v2/players/${id}/playerloadout`;
+      const current = (await this.read(path, 0)).data;
+      const owned = async (type: string) => {
+        const response = object((await this.read(`/store/v1/entitlements/${id}/${type}`, 0)).data);
+        const entries = Array.isArray(response.Entitlements)
+          ? response.Entitlements
+          : array(response.EntitlementsByTypes).flatMap((g) => array(object(g).Entitlements));
+        return new Set(entries.map((e) => text(object(e).ItemID).toLowerCase()));
+      };
+      const [cards, titles] = await Promise.all([
+        edit.cardId ? owned(ITEM_TYPES.card) : new Set<string>(),
+        edit.titleId ? owned(ITEM_TYPES.title) : new Set<string>(),
+      ]);
+      const body = prepareIdentityEdit(current, edit, cards, titles);
+
+      await this.read(path, 0, 'PUT', body);
+      const verified = (await this.read(path, 0)).data;
+      verifyIdentity(verified, body);
+      this.cache.clear();
+      return normalizeLoadout(verified, this.catalog);
+    };
+    const work = run();
+    this.identityWrite = work;
+    try {
+      return await work;
+    } finally {
+      if (this.identityWrite === work) this.identityWrite = undefined;
+    }
   }
   async snapshot(): Promise<Snapshot> {
     const id = this.session.account.puuid;
@@ -298,9 +436,7 @@ export class RiotClient {
       await Promise.all([
         section(() => this.store()),
         section(async () => normalizeWallet((await this.read(`/store/v1/wallet/${id}`)).data)),
-        section(async () =>
-          normalizeRank((await this.read(`/mmr/v1/players/${id}`, 2 * 60000)).data, this.catalog),
-        ),
+        section(() => this.rank()),
         section(async () => {
           const progress = object(
             object((await this.read(`/account-xp/v1/players/${id}`, 2 * 60000)).data).Progress,
@@ -333,12 +469,7 @@ export class RiotClient {
           );
           return normalizeCollection({ EntitlementsByTypes: groups.flat() }, this.catalog);
         }),
-        section(async () =>
-          normalizeLoadout(
-            (await this.read(`/personalization/v2/players/${id}/playerloadout`, 2 * 60000)).data,
-            this.catalog,
-          ),
-        ),
+        section(() => this.loadout()),
         section(() => this.liveGame()),
         section(() => this.matchHistory()),
       ]);

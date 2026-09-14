@@ -1,3 +1,5 @@
+import { nativeFetcher } from './network';
+import { PlayerScope } from '../core/playerScope';
 import { Platform } from 'react-native';
 import { CatalogClient } from '../core/catalog';
 import { HttpClient } from '../core/http';
@@ -8,13 +10,14 @@ import { AppError } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
 import { openRepository } from './storage';
 import type { Repository } from './storage.types';
-import { vault } from './secure';
+import { vault, randomHex } from './secure';
 import { cancelAccountNotifications, updateStoreNotifications } from './notifications';
 export class Runtime {
-  readonly http = new HttpClient();
+  readonly http = new HttpClient(nativeFetcher);
   readonly publicClient = new CatalogClient(this.http);
   catalog: Catalog = { ...EMPTY_CATALOG };
   private clients = new Map<string, RiotClient>();
+  private scopes = new Map<string, PlayerScope>();
   private flights = new Map<string, Promise<Snapshot>>();
   private clientFlights = new Map<string, Promise<RiotClient>>();
   private generations = new Map<string, number>();
@@ -24,7 +27,7 @@ export class Runtime {
     if (!force && this.catalog.fetchedAt > Date.now() - 86400000) return this.catalog;
     const cached = await this.repository.catalog();
 
-    if (!force && cached?.seasons && cached.fetchedAt > Date.now() - 86400000)
+    if (!force && cached?.schemaVersion === 3 && cached.fetchedAt > Date.now() - 86400000)
       return (this.catalog = cached);
     const fresh = await this.publicClient.load();
     if (!Object.keys(fresh.items).length) return (this.catalog = cached ?? { ...EMPTY_CATALOG });
@@ -64,12 +67,17 @@ export class Runtime {
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
     this.clients.get(id)?.dispose();
     this.clients.delete(id);
+    this.scopes.delete(id);
     this.clientFlights.delete(id);
     this.lastSync.delete(id);
   }
   async client(id: string): Promise<RiotClient> {
     const existing = this.clients.get(id);
-    if (existing) return existing;
+    if (existing?.isActive()) return existing;
+    if (existing) {
+      existing.dispose();
+      this.clients.delete(id);
+    }
     const pending = this.clientFlights.get(id);
     if (pending) return pending;
     const generation = this.generations.get(id) ?? 0;
@@ -86,7 +94,11 @@ export class Runtime {
             'SESSION_EXPIRED',
             'Reconnect your Riot account to fetch fresh data. Cached data remains available.',
           );
-        const freshTokens = await reauthenticateWithCookies(session.reauth.cookies);
+        const freshTokens = await reauthenticateWithCookies(
+          session.reauth.cookies,
+          { state: randomHex(), nonce: randomHex(), createdAt: Date.now() },
+          nativeFetcher,
+        );
         const refreshed = await connectAccount(this.http, freshTokens, session.account.region);
         if (refreshed.account.puuid !== id)
           throw new AppError(
@@ -94,7 +106,12 @@ export class Runtime {
             'Silent reauthentication returned a different Riot account. Interactive sign-in is required.',
           );
         refreshed.account.addedAt = session.account.addedAt;
-        refreshed.reauth = session.reauth;
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError(
+            'SESSION_REMOVED',
+            'Session renewal was discarded after account removal.',
+          );
+        refreshed.account.canReauth = Boolean(refreshed.reauth?.cookies.ssid);
         await vault.write(refreshed);
         await this.repository.saveAccount(refreshed.account);
         session = refreshed;
@@ -105,7 +122,11 @@ export class Runtime {
           'SESSION_REMOVED',
           'Account initialization was discarded after a session change.',
         );
-      const client = new RiotClient(session, this.http, this.publicClient, this.catalog);
+      const scope =
+        this.scopes.get(id) ??
+        new PlayerScope(id, session.account.gameName, session.account.tagLine);
+      this.scopes.set(id, scope);
+      const client = new RiotClient(session, this.http, this.publicClient, this.catalog, scope);
       this.clients.set(id, client);
       return client;
     })();

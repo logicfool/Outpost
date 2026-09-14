@@ -10,3 +10,9 @@ ios/
 *.keystore
 *.p12
 *.mobileprovision
+
+# Local/cloud build outputs and validation caches
+builds/
+dist-*/
+playwright-report/
+test-results/

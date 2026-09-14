@@ -1,3 +1,4 @@
+import { mergeSnapshot } from '../core/snapshot';
 import * as SQLite from 'expo-sqlite';
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
 import { DEFAULT_SETTINGS, MAX_ACCOUNTS } from '../core/types';
@@ -89,6 +90,13 @@ async function create(): Promise<Repository> {
         throw new AppError('DEMO_ISOLATION', 'Demo snapshots cannot overwrite real account data.');
       await write(async () => {
         await db.withTransactionAsync(async () => {
+          snapshot = mergeSnapshot(
+            await readJson<Snapshot>(
+              'SELECT data FROM snapshots WHERE account_id = ?',
+              snapshot.accountId,
+            ),
+            snapshot,
+          );
           await db.runAsync(
             'INSERT INTO snapshots(account_id,data) VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET data=excluded.data',
             uuid(snapshot.accountId),

@@ -13,6 +13,7 @@ export interface Account {
   expiresAt: number;
   country?: string;
   createdAt?: number;
+  canReauth?: boolean;
   emailVerified?: boolean;
   phoneVerified?: boolean;
   demo?: boolean;
@@ -68,12 +69,13 @@ export interface ContractDefinition {
   levels: { xp: number; rewardId?: string }[];
 }
 export interface Catalog {
+  schemaVersion?: number;
   items: Record<string, CatalogItem>;
   bundles: Record<string, { name: string; image?: string }>;
   maps: Record<string, { name: string; image?: string; listImage?: string }>;
   tiers: Record<string, { name: string; image?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
-  seasons?: Record<string, { name: string; startsAt?: number }>;
+  seasons?: Record<string, { name: string; startsAt?: number; endsAt?: number }>;
   currentSeasonId?: string;
   fetchedAt: number;
 }
@@ -136,7 +138,7 @@ export interface Ranked {
   career?: QueueCareer[];
 }
 export interface LiveGame {
-  state: 'offline' | 'agent_select' | 'in_game';
+  state: 'offline' | 'idle' | 'agent_select' | 'in_game';
   matchId?: string;
   map?: string;
   mapImage?: string;
@@ -207,6 +209,7 @@ export interface Progression {
   weeklyRefillAt?: number;
 }
 export interface Loadout {
+  version?: number;
   guns: { weapon: string; skin: CatalogItem; buddy?: CatalogItem }[];
   card?: CatalogItem;
   title?: CatalogItem;
@@ -251,3 +254,22 @@ export const EMPTY_CATALOG: Catalog = {
   seasons: {},
   fetchedAt: 0,
 };
+
+export interface Ranked {
+  source?: 'active-season' | 'latest-update' | 'latest-played' | 'unrated';
+  note?: string;
+  placementsRemaining?: number;
+}
+export interface LiveGame {
+  players?: import('./playerTypes').LivePlayer[];
+  queue?: string;
+  gamePod?: string;
+  observedAt?: number;
+  detailError?: { code: string; message: string; retryAt?: number };
+}
+export interface MatchPlayer {
+  hidden?: boolean;
+  hideLevel?: boolean;
+  card?: CatalogItem;
+  title?: CatalogItem;
+}

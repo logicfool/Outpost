@@ -14,7 +14,7 @@ build:
         name: Build unsigned iPhone app
         working_directory: ./ios
         command: |
-          set -o pipefail
+          set -euo pipefail
           xcodebuild -workspace Outpost.xcworkspace -scheme Outpost -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -200
@@ -22,16 +22,16 @@ build:
         name: Package IPA
         working_directory: ./ios
         command: |
+          set -euo pipefail
+          test -d build/Build/Products/Release-iphoneos/Outpost.app
           rm -rf Payload Outpost-unsigned.ipa
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/Outpost.app Payload/
           zip -qry Outpost-unsigned.ipa Payload
+          unzip -tq Outpost-unsigned.ipa
           ls -lh Outpost-unsigned.ipa
     - eas/upload_artifact:
         name: Upload IPA
         inputs:
           type: application-archive
-          path: |
-            /Users/expo/workingdir/build/valorantTracker/ios/Outpost-unsigned.ipa
-            valorantTracker/ios/Outpost-unsigned.ipa
-            ios/Outpost-unsigned.ipa
+          path: ios/Outpost-unsigned.ipa

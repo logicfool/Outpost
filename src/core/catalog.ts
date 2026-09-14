@@ -43,6 +43,7 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
+    schemaVersion: 3,
     fetchedAt: now,
   };
   const add = (id: string, item: CatalogItem) => {
@@ -116,7 +117,10 @@ export function buildCatalog(
       const item: CatalogItem = {
         id: text(entry.uuid),
         canonicalId: text(entry.uuid),
-        name: text(entry.displayName),
+        name:
+          kind === 'title'
+            ? text(entry.titleText, text(entry.displayName))
+            : text(entry.displayName),
         kind,
         image: safeImage(entry.displayIcon) ?? safeImage(entry.smallArt),
         wallpaper: safeImage(entry.largeArt) ?? safeImage(entry.fullPortrait),
@@ -160,6 +164,7 @@ export function buildCatalog(
         [text(parent?.displayName), text(season.displayName)].filter(Boolean).join(' // ') ||
         'Act',
       startsAt: timestamp(season.startTime),
+      endsAt: timestamp(season.endTime),
     };
   }
   for (const raw of dataList(responses.contracts)) {

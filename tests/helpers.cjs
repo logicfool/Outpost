@@ -49,7 +49,7 @@ const storefront = () => ({
       {
         OfferID: LEVEL,
         Rewards: [{ ItemID: LEVEL }],
-        Cost: { '85ad13f7-3d1b-5128-9eb2-7cd8a8e4d0b0': 1775 },
+        Cost: { '85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741': 1775 },
       },
     ],
   },

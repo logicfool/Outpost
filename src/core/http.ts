@@ -27,6 +27,16 @@ export class HttpClient {
     else this.active--;
   }
   async json(url: string, init: RequestInit = {}): Promise<JsonResponse> {
+    return this.request(url, init, 'json');
+  }
+  async text(url: string, init: RequestInit = {}): Promise<JsonResponse> {
+    return this.request(url, init, 'text');
+  }
+  private async request(
+    url: string,
+    init: RequestInit,
+    format: 'json' | 'text',
+  ): Promise<JsonResponse> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port)
       throw new AppError('NETWORK_POLICY', 'Only trusted HTTPS endpoints are allowed.');
@@ -98,6 +108,15 @@ export class HttpClient {
             429,
           );
         }
+        if (response.status === 400) {
+          let semanticCode = '';
+          try {
+            const body = await response.json();
+            semanticCode = String(body?.errorCode ?? '');
+          } catch {}
+          if (semanticCode === 'PLAYER_DOES_NOT_EXIST' || semanticCode === 'RESOURCE_NOT_FOUND')
+            throw new AppError('PLAYER_ABSENT', 'No live session was returned.', undefined, 400);
+        }
         throw new AppError(
           response.status >= 500 ? 'SERVICE_UNAVAILABLE' : 'ENDPOINT_UNAVAILABLE',
           'This Riot feature is temporarily unavailable or its endpoint has changed.',
@@ -109,11 +128,13 @@ export class HttpClient {
       if (length > 32 * 1024 * 1024)
         throw new AppError('RESPONSE_SIZE', 'The response was unexpectedly large.');
       const contentType = response.headers.get('content-type') ?? '';
-      if (!contentType.toLowerCase().includes('json'))
+      if (format === 'json' && !contentType.toLowerCase().includes('json'))
         throw new AppError('SCHEMA', 'The service returned an unexpected response format.');
       let data: unknown;
       try {
-        data = await response.json();
+        data = format === 'json' ? await response.json() : await response.text();
+        if (typeof data === 'string' && data.length > 32000)
+          throw new Error('Oversized text response');
       } catch {
         throw new AppError('SCHEMA', 'The service returned unreadable data.');
       }

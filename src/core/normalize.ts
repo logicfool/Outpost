@@ -62,15 +62,31 @@ export function queueName(id: string): string {
 }
 const resolved = (item: CatalogItem, fallback: string) =>
   item.name.startsWith('Unresolved') ? fallback : item.name;
+export const AGENT_TOKEN_ID = 'f08d4ae3-939c-4576-ab26-09ce1f23bb37';
+export function currencySymbol(id: string): string {
+  const key = id.toLowerCase();
+  return (
+    Object.entries(CURRENCIES).find(([, value]) => value === key)?.[0] ??
+    (key === AGENT_TOKEN_ID ? 'Agent token' : 'Unknown')
+  );
+}
 export function money(raw: unknown): Money[] {
   return Object.entries(object(raw))
     .filter(([, amount]) => typeof amount === 'number' && Number.isFinite(amount) && amount >= 0)
-    .map(([currencyId, amount]) => ({
-      currencyId,
-      symbol: Object.entries(CURRENCIES).find(([, id]) => id === currencyId)?.[0] ?? 'Currency',
+    .map(([id, amount]) => ({
+      currencyId: id.toLowerCase(),
+      symbol: currencySymbol(id),
       amount: amount as number,
     }));
 }
+export function walletOverview(balances: Money[]) {
+  return (['VP', 'RP', 'KC'] as const).map((symbol) => ({
+    symbol,
+    currencyId: CURRENCIES[symbol],
+    amount: balances.find((b) => b.currencyId.toLowerCase() === CURRENCIES[symbol])?.amount ?? null,
+  }));
+}
+
 function offer(raw: unknown, catalog: Catalog, overridePrices?: unknown, id?: string): StoreOffer {
   const o = object(raw),
     rewards = array(o.Rewards).map(object);
@@ -177,100 +193,7 @@ export function normalizeWallet(raw: unknown): Money[] {
     throw new AppError('SCHEMA', 'Wallet balances are unavailable.');
   return money(r.Balances);
 }
-function tierMeta(catalog: Catalog, tier: number | null) {
-  const meta = tier ? catalog.tiers[String(tier)] : undefined;
-  return {
-    name: meta?.name ?? (tier === null || tier === 0 ? 'Unrated' : `Tier ${tier}`),
-    image: meta?.image,
-  };
-}
-export function normalizeRank(raw: unknown, catalog: Catalog, activeSeasonId?: string): Ranked {
-  const r = object(raw),
-    queues = object(r.QueueSkills);
-  if (!r.QueueSkills) throw new AppError('SCHEMA', 'Rank information is unavailable.');
-  const seasons = object(object(queues.competitive).SeasonalInfoBySeasonID),
-    latest = object(r.LatestCompetitiveUpdate);
-  const currentId = activeSeasonId ?? catalog.currentSeasonId;
-  const seasonId = currentId ?? (text(latest.SeasonID) || undefined);
-  const currentSeason = Boolean(currentId && seasonId === currentId);
-  const season = object(seasons[seasonId ?? '']);
-  const tier = nullableNumber(season.CompetitiveTier),
-    meta = tierMeta(catalog, tier);
-  const seasonMeta = catalog.seasons ?? {};
-  const career: QueueCareer[] = Object.entries(queues)
-    .map(([queue, value]) => {
-      const acts: ActStat[] = Object.entries(object(object(value).SeasonalInfoBySeasonID))
-        .map(([id, info]) => {
-          const s = object(info),
-            actTier = nullableNumber(s.CompetitiveTier),
-            actMeta = tierMeta(catalog, actTier);
-          return {
-            seasonId: id,
-            name: seasonMeta[id]?.name ?? 'Earlier act',
-            startsAt: seasonMeta[id]?.startsAt,
-            current: id === currentId,
-            tier: actTier,
-            tierName: actMeta.name,
-            image: actMeta.image,
-            rr: nullableNumber(s.RankedRating),
-            wins: number(s.NumberOfWinsWithPlacements, number(s.NumberOfWins)),
-            games: number(s.NumberOfGames),
-          };
-        })
-        .filter((act) => act.games > 0)
-        .sort(
-          (a, b) => Number(b.current) - Number(a.current) || (b.startsAt ?? 0) - (a.startsAt ?? 0),
-        );
-      return {
-        queue,
-        acts,
-        wins: acts.reduce((sum, act) => sum + act.wins, 0),
-        games: acts.reduce((sum, act) => sum + act.games, 0),
-      };
-    })
-    .filter((entry) => entry.acts.length)
-    .sort((a, b) =>
-      a.queue === 'competitive' ? -1 : b.queue === 'competitive' ? 1 : b.games - a.games,
-    );
-
-  let peak: { tier: number; seasonId: string } | undefined;
-  for (const [id, info] of Object.entries(seasons)) {
-    const s = object(info),
-      candidates = [
-        nullableNumber(s.CompetitiveTier),
-        ...Object.entries(object(s.WinsByTier))
-          .filter(([, count]) => typeof count === 'number' && count > 0)
-          .map(([key]) => Number(key)),
-      ];
-    for (const candidate of candidates)
-      if (
-        candidate !== null &&
-        Number.isInteger(candidate) &&
-        candidate > 2 &&
-        (!peak || candidate > peak.tier)
-      )
-        peak = { tier: candidate, seasonId: id };
-  }
-  return {
-    name: meta.name,
-    image: meta.image,
-    tier,
-    rr: nullableNumber(season.RankedRating),
-    wins: nullableNumber(season.NumberOfWins),
-    games: nullableNumber(season.NumberOfGames),
-    seasonId,
-    currentSeason,
-    seasonName: seasonId ? seasonMeta[seasonId]?.name : undefined,
-    peak: peak
-      ? {
-          tier: peak.tier,
-          ...tierMeta(catalog, peak.tier),
-          seasonName: seasonMeta[peak.seasonId]?.name,
-        }
-      : undefined,
-    career,
-  };
-}
+export { resolveRank as normalizeRank } from './rank';
 export function normalizeCollection(raw: unknown, catalog: Catalog): CatalogItem[] {
   const root = object(raw);
   const groups = requiredArray(root.EntitlementsByTypes, 'collection');
@@ -301,6 +224,7 @@ export function normalizeLoadout(raw: unknown, catalog: Catalog): Loadout {
     };
   });
   return {
+    version: nullableNumber(r.Version) ?? undefined,
     guns,
     card: identity.PlayerCardID
       ? catalogItem(catalog, text(identity.PlayerCardID), 'card')
@@ -437,6 +361,10 @@ export function normalizeMatchDetail(
     .map((p) => {
       const subject = text(p.subject).toLowerCase(),
         stats = object(p.stats),
+        identity = object(p.playerIdentity),
+        hidden = (p.incognito === true || identity.Incognito === true) && subject !== me,
+        hideLevel =
+          (p.hideAccountLevel === true || identity.HideAccountLevel === true) && subject !== me,
         agent = catalogItem(catalog, text(p.characterId), 'agent');
       const score = nullableNumber(stats.score),
         rounds = nullableNumber(stats.roundsPlayed),
@@ -444,13 +372,17 @@ export function normalizeMatchDetail(
         tierInfo = tier ? catalog.tiers[String(tier)] : undefined;
       return {
         subject,
-        name: text(p.gameName) || 'Player',
-        tag: text(p.tagLine),
+        name: hidden ? 'Hidden player' : text(p.gameName) || 'Player',
+        tag: hidden ? '' : text(p.tagLine),
         teamId: text(p.teamId),
         self: subject === me,
+        hidden,
+        hideLevel,
+        card: text(p.playerCard) ? catalogItem(catalog, text(p.playerCard), 'card') : undefined,
+        title: text(p.playerTitle) ? catalogItem(catalog, text(p.playerTitle), 'title') : undefined,
         agent: resolved(agent, 'Unknown agent'),
         agentImage: agent.image,
-        level: nullableNumber(p.accountLevel),
+        level: hideLevel ? null : nullableNumber(p.accountLevel),
         tier,
         tierName: tierInfo?.name,
         tierImage: tierInfo?.image,
