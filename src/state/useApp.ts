@@ -42,6 +42,7 @@ export function useApp() {
     demoWishes = useRef<string[]>([]),
     demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
+  const social = useSocial(active, catalog);
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -171,26 +172,31 @@ export function useApp() {
     });
     return () => listener.remove();
   }, [refresh]);
-  const switchAccount = useCallback((account: Account | null) => {
-    epoch.current++;
-    activeRef.current = account;
-    setActive(account);
-    setSnapshot(null);
-    setMessage(null);
-  }, []);
+  const switchAccount = useCallback(
+    (account: Account | null) => {
+      social.disconnectChat();
+      epoch.current++;
+      activeRef.current = account;
+      setActive(account);
+      setLinkRevision((v) => v + 1);
+      setSnapshot(null);
+      setMessage(null);
+    },
+    [social.disconnectChat],
+  );
   const link = useCallback(
     async (tokens: LoginTokens, region?: Region, expectedId?: string) => {
       const runtime = await getRuntime(),
         account = await runtime.link(tokens, region, expectedId);
       setAccounts(await runtime.repository.accounts());
       switchAccount(account);
-      setLinkRevision((v) => v + 1);
     },
     [switchAccount],
   );
   const remove = useCallback(
     async (id: string) => {
       try {
+        if (activeRef.current?.puuid === id) social.disconnectChat();
         const runtime = await getRuntime();
         await runtime.remove(id);
         const list = await runtime.repository.accounts();
@@ -254,6 +260,7 @@ export function useApp() {
   );
   const clearCache = useCallback(async () => {
     try {
+      social.disconnectChat();
       const runtime = await getRuntime();
       await runtime.clearCache();
       setSnapshot(null);
@@ -396,7 +403,7 @@ export function useApp() {
               : undefined,
         };
         demoLoadout.current = data;
-      } else data = await (await (await getRuntime()).client(account.puuid)).saveIdentity(edit);
+      } else data = await (await getRuntime()).saveIdentity(account.puuid, edit);
       if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
         throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
       setSnapshot((previous) =>
@@ -418,7 +425,6 @@ export function useApp() {
     }
     return (await (await getRuntime()).client(account.puuid)).rank(player.subject);
   }, []);
-  const social = useSocial(active, catalog);
   return {
     ...social,
     booting,

@@ -410,3 +410,16 @@ test('new errors are not concealed behind old successful cached data', () => {
     };
   assert.equal(mergeSnapshot(previous, next).liveGame.status, 'error');
 });
+test('an early server 401 invalidates the cached client before local expiry', async () => {
+  const c = client(async () => response({}, 401));
+  assert.equal(c.isActive(), true);
+  await assert.rejects(c.store(), code('SESSION_EXPIRED'));
+  assert.equal(c.needsReauth(), true);
+  assert.equal(c.isActive(), false);
+});
+test('403 denial does not pretend the token expired or change authentication scope', async () => {
+  const c = client(async () => response({}, 403));
+  await assert.rejects(c.store(), code('ACCESS_DENIED'));
+  assert.equal(c.needsReauth(), false);
+  assert.equal(c.isActive(), true);
+});

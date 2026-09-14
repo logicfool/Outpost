@@ -143,7 +143,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   }, [stop]);
   const disconnectChat = useCallback(() => {
     wanted.current = false;
-    stop();
+    stop(true);
   }, [stop]);
   const sendChat = useCallback(async (subject: string, body: string) => {
     body = messageText(body);

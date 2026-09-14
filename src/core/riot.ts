@@ -126,6 +126,10 @@ export class RiotClient {
   private cache = new SingleFlightCache();
   private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
+  private sessionRejected = false;
+  needsReauth() {
+    return this.sessionRejected;
+  }
   constructor(
     private session: Session,
     private http: HttpClient,
@@ -140,7 +144,7 @@ export class RiotClient {
     validateSession(session);
   }
   isActive() {
-    return !this.disposed && sessionActive(this.session);
+    return !this.disposed && !this.sessionRejected && sessionActive(this.session);
   }
   dispose() {
     this.disposed = true;
@@ -167,18 +171,26 @@ export class RiotClient {
       const clientVersion = await this.publicClient.version();
       if (!this.isActive())
         throw new AppError('SESSION_EXPIRED', 'The account session changed. Refresh to retry.');
-      const result = await this.http.json(`${origin}${path}`, {
-        method,
-        ...(encoded !== undefined ? { body: encoded } : {}),
-        headers: {
-          Authorization: `Bearer ${this.session.accessToken}`,
-          'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
-          'X-Riot-ClientVersion': clientVersion,
-          'X-Riot-ClientPlatform': PLATFORM,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-      });
+      const result = await this.http
+        .json(`${origin}${path}`, {
+          method,
+          ...(encoded !== undefined ? { body: encoded } : {}),
+          headers: {
+            Authorization: `Bearer ${this.session.accessToken}`,
+            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+            'X-Riot-ClientVersion': clientVersion,
+            'X-Riot-ClientPlatform': PLATFORM,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+        })
+        .catch((error) => {
+          if (safeError(error).status === 401) {
+            this.sessionRejected = true;
+            this.cache.clear();
+          }
+          throw error;
+        });
       if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
       sameSubject(object(result.data), expectedSubject);
       return result;
@@ -364,7 +376,13 @@ export class RiotClient {
         'https://clientconfig.rpg.riotgames.com/api/v1/config/player?app=Riot%20Client',
         { headers },
       ),
-    ]);
+    ]).catch((error) => {
+      if (safeError(error).status === 401) {
+        this.sessionRejected = true;
+        this.cache.clear();
+      }
+      throw error;
+    });
     if (!this.isActive())
       throw new AppError('SESSION_REMOVED', 'The account changed while opening chat.');
     return parseChatBootstrap(this.session, pas.data, config.data);

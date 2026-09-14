@@ -1,5 +1,7 @@
 import { nativeFetcher } from './network';
 import { PlayerScope } from '../core/playerScope';
+import type { IdentityEdit } from '../core/playerTypes';
+import type { Loadout } from '../core/types';
 import { Platform } from 'react-native';
 import { CatalogClient } from '../core/catalog';
 import { HttpClient } from '../core/http';
@@ -18,7 +20,9 @@ export class Runtime {
   catalog: Catalog = { ...EMPTY_CATALOG };
   private clients = new Map<string, RiotClient>();
   private scopes = new Map<string, PlayerScope>();
+  private rejectedSessions = new Set<string>();
   private flights = new Map<string, Promise<Snapshot>>();
+  private identityFlights = new Map<string, Promise<Loadout>>();
   private clientFlights = new Map<string, Promise<RiotClient>>();
   private generations = new Map<string, number>();
   private lastSync = new Map<string, number>();
@@ -68,12 +72,15 @@ export class Runtime {
     this.clients.get(id)?.dispose();
     this.clients.delete(id);
     this.scopes.delete(id);
+    this.rejectedSessions.delete(id);
     this.clientFlights.delete(id);
     this.lastSync.delete(id);
   }
   async client(id: string): Promise<RiotClient> {
     const existing = this.clients.get(id);
     if (existing?.isActive()) return existing;
+    const rejected = this.rejectedSessions.has(id) || existing?.needsReauth() === true;
+    if (rejected) this.rejectedSessions.add(id);
     if (existing) {
       existing.dispose();
       this.clients.delete(id);
@@ -88,7 +95,7 @@ export class Runtime {
           'SESSION_EXPIRED',
           'Reconnect your Riot account to fetch fresh data. Cached data remains available.',
         );
-      if (!sessionActive(session)) {
+      if (rejected || !sessionActive(session)) {
         if (!session.reauth?.cookies?.ssid)
           throw new AppError(
             'SESSION_EXPIRED',
@@ -114,6 +121,7 @@ export class Runtime {
         refreshed.account.canReauth = Boolean(refreshed.reauth?.cookies.ssid);
         await vault.write(refreshed);
         await this.repository.saveAccount(refreshed.account);
+        this.rejectedSessions.delete(id);
         session = refreshed;
       }
       await this.loadCatalog();
@@ -178,22 +186,52 @@ export class Runtime {
       if (this.flights.get(id) === work) this.flights.delete(id);
     }
   }
+  async saveIdentity(id: string, edit: IdentityEdit): Promise<Loadout> {
+    if (this.identityFlights.has(id))
+      throw new AppError('LOADOUT_BUSY', 'An identity update is already running.');
+    const generation = this.generations.get(id) ?? 0;
+    const run = async () => {
+      const data = await (await this.client(id)).saveIdentity(edit);
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed while saving.');
+      const saved = await this.repository.snapshot(id);
+      if (saved)
+        await this.repository.saveSnapshot({
+          ...saved,
+          loadout: { status: 'ready', data, fetchedAt: Date.now() },
+        });
+      return data;
+    };
+    const work = run();
+    this.identityFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
+    }
+  }
   async remove(id: string): Promise<void> {
     const initializing = this.clientFlights.get(id);
     this.invalidate(id);
     await initializing?.catch(() => {});
 
     await this.flights.get(id)?.catch(() => {});
+    await this.identityFlights.get(id)?.catch(() => {});
     await cancelAccountNotifications(id);
     await vault.remove(id);
     await this.repository.removeAccount(id);
   }
   async clearCache(): Promise<void> {
-    const pending = [...this.flights.values(), ...this.clientFlights.values()];
+    const pending = [
+      ...this.flights.values(),
+      ...this.clientFlights.values(),
+      ...this.identityFlights.values(),
+    ];
     for (const id of new Set([
       ...this.clients.keys(),
       ...this.clientFlights.keys(),
       ...this.flights.keys(),
+      ...this.identityFlights.keys(),
     ]))
       this.invalidate(id);
     await Promise.allSettled(pending);
