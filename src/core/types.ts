@@ -53,6 +53,7 @@ export interface CatalogItem {
   kind: ItemKind;
   image?: string;
   wallpaper?: string;
+  wideArt?: string;
   rarity?: string;
   weapon?: string;
   video?: string;
@@ -69,9 +70,10 @@ export interface ContractDefinition {
 export interface Catalog {
   items: Record<string, CatalogItem>;
   bundles: Record<string, { name: string; image?: string }>;
-  maps: Record<string, { name: string; image?: string }>;
-  tiers: Record<string, { name: string; image?: string }>;
+  maps: Record<string, { name: string; image?: string; listImage?: string }>;
+  tiers: Record<string, { name: string; image?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
+  seasons?: Record<string, { name: string; startsAt?: number }>;
   currentSeasonId?: string;
   fetchedAt: number;
 }
@@ -102,6 +104,24 @@ export interface Store {
   clockOffsetMs: number;
   endpoint: 'v2' | 'v3' | 'demo';
 }
+export interface ActStat {
+  seasonId: string;
+  name: string;
+  startsAt?: number;
+  current: boolean;
+  tier: number | null;
+  tierName: string;
+  image?: string;
+  rr: number | null;
+  wins: number;
+  games: number;
+}
+export interface QueueCareer {
+  queue: string;
+  acts: ActStat[];
+  wins: number;
+  games: number;
+}
 export interface Ranked {
   name: string;
   tier: number | null;
@@ -110,7 +130,10 @@ export interface Ranked {
   wins: number | null;
   games: number | null;
   seasonId?: string;
+  seasonName?: string;
   currentSeason: boolean;
+  peak?: { tier: number; name: string; image?: string; seasonName?: string };
+  career?: QueueCareer[];
 }
 export interface LiveGame {
   state: 'offline' | 'agent_select' | 'in_game';
@@ -125,12 +148,36 @@ export interface MatchSummary {
   map: string;
   mapImage?: string;
   rrChange?: number;
+  tierAfter?: number;
+  tierImage?: string;
+}
+export type RoundOutcome = 'elimination' | 'detonate' | 'defuse' | 'time' | 'surrender' | 'other';
+export interface MatchPlayer {
+  subject: string;
+  name: string;
+  tag: string;
+  teamId: string;
+  self: boolean;
+  agent: string;
+  agentImage?: string;
+  level: number | null;
+  tier: number | null;
+  tierName?: string;
+  tierImage?: string;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  score: number | null;
+  acs: number | null;
+  headshotPct: number | null;
 }
 export interface MatchDetail {
   id: string;
   map: string;
+  mapImage?: string;
   queue: string;
   startedAt: number;
+  durationMs?: number;
   agent: string;
   agentImage?: string;
   kills: number | null;
@@ -140,6 +187,11 @@ export interface MatchDetail {
   headshotPct: number | null;
   result: 'WIN' | 'LOSS' | 'DRAW' | 'UNKNOWN';
   score: string;
+  teamId?: string;
+  teams: { id: string; roundsWon: number | null; won: boolean }[];
+  players: MatchPlayer[];
+  rounds: { number: number; winningTeam: string; outcome: RoundOutcome }[];
+  duels: { subject: string; name: string; agentImage?: string; kills: number; deaths: number }[];
 }
 export interface Progression {
   contracts: {
@@ -187,6 +239,8 @@ export interface Settings {
   reminders: boolean;
   backgroundSync: boolean;
 }
+export const MAX_ACCOUNTS = 10;
+export const XP_PER_LEVEL = 5000;
 export const DEFAULT_SETTINGS: Settings = { reminders: false, backgroundSync: false };
 export const EMPTY_CATALOG: Catalog = {
   items: {},
@@ -194,5 +248,6 @@ export const EMPTY_CATALOG: Catalog = {
   maps: {},
   tiers: {},
   contracts: {},
+  seasons: {},
   fetchedAt: 0,
 };

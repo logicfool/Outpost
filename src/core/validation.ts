@@ -74,6 +74,22 @@ export function safeImage(value: unknown): string | undefined {
     return undefined;
   }
 }
+
+const MEDIA_HOSTS = new Set(['media.valorant-api.com', 'valorant.dyn.riotcdn.net']);
+export function safeMedia(value: unknown): string | undefined {
+  try {
+    const url = new URL(text(value));
+    return url.protocol === 'https:' &&
+      MEDIA_HOSTS.has(url.hostname) &&
+      !url.username &&
+      !url.password &&
+      !url.port
+      ? url.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 export function timestamp(value: unknown): number | undefined {
   const result = typeof value === 'string' ? Date.parse(value) : value;
   return typeof result === 'number' && Number.isFinite(result) && result > 0 ? result : undefined;

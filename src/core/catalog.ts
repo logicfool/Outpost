@@ -1,6 +1,6 @@
 import type { Catalog, CatalogItem, ItemKind, JsonObject } from './types';
 import { EMPTY_CATALOG } from './types';
-import { array, number, object, safeImage, text, timestamp } from './validation';
+import { array, number, object, safeImage, safeMedia, text, timestamp } from './validation';
 import { HttpClient, SingleFlightCache } from './http';
 export const PUBLIC_ORIGIN = 'https://valorant-api.com';
 export const CATALOG_PATHS = [
@@ -27,7 +27,7 @@ function rarity(id: string) {
       'e046854e-406c-37f4-6607-19a9ba8426fc': 'Exclusive',
       '60bca009-4182-7998-dee7-b8a2558dc369': 'Premium',
       '12683d76-48d7-84a3-4e09-6985794f0445': 'Select',
-      '411d4e44-4a0d-39f6-9ca7-97a78e6fc3d5': 'Ultra',
+      '411e4a55-4e59-7757-41f0-86a53f101bb5': 'Ultra',
     } as Record<string, string>
   )[id];
 }
@@ -42,6 +42,7 @@ export function buildCatalog(
     maps: Object.create(null),
     tiers: Object.create(null),
     contracts: Object.create(null),
+    seasons: Object.create(null),
     fetchedAt: now,
   };
   const add = (id: string, item: CatalogItem) => {
@@ -58,14 +59,16 @@ export function buildCatalog(
         id: text(level.uuid),
         name: text(level.displayName, `Level ${index + 1}`),
         image: safeImage(level.displayIcon),
-        video: safeImage(level.streamedVideo),
+        video: safeMedia(level.streamedVideo),
       }));
       const chromaMedia = chromas.map((chroma, index) => ({
         id: text(chroma.uuid),
         name: text(chroma.displayName, `Variant ${index + 1}`),
         image: safeImage(chroma.fullRender) ?? safeImage(chroma.displayIcon),
-        video: safeImage(chroma.streamedVideo),
+        video: safeMedia(chroma.streamedVideo),
       }));
+      const video =
+        levelMedia.find((v) => v.video)?.video ?? chromaMedia.find((v) => v.video)?.video;
       const item: CatalogItem = {
         id: text(skin.uuid),
         canonicalId: text(skin.uuid),
@@ -78,7 +81,7 @@ export function buildCatalog(
           safeImage(chromas[0]?.fullRender),
         wallpaper: safeImage(skin.wallpaper),
         rarity: rarity(text(skin.contentTierUuid)),
-        video: levelMedia.find((v) => v.video)?.video,
+        video,
         levels: levelMedia,
         chromas: chromaMedia,
       };
@@ -87,7 +90,7 @@ export function buildCatalog(
         add(text(level.uuid), {
           ...item,
           image: safeImage(level.displayIcon) ?? item.image,
-          video: safeImage(level.streamedVideo) ?? item.video,
+          video: safeMedia(level.streamedVideo) ?? item.video,
         });
       for (const chroma of chromas)
         add(text(chroma.uuid), {
@@ -95,7 +98,7 @@ export function buildCatalog(
           kind: 'chroma',
           name: text(chroma.displayName, item.name),
           image: safeImage(chroma.fullRender) ?? safeImage(chroma.displayIcon) ?? item.image,
-          video: safeImage(chroma.streamedVideo) ?? item.video,
+          video: safeMedia(chroma.streamedVideo) ?? item.video,
         });
     }
   }
@@ -117,6 +120,7 @@ export function buildCatalog(
         kind,
         image: safeImage(entry.displayIcon) ?? safeImage(entry.smallArt),
         wallpaper: safeImage(entry.largeArt) ?? safeImage(entry.fullPortrait),
+        wideArt: safeImage(entry.wideArt),
       };
       add(item.id, item);
       for (const level of array(entry.levels).map(object))
@@ -128,16 +132,34 @@ export function buildCatalog(
   }
   for (const raw of dataList(responses.maps)) {
     const e = object(raw),
-      item = { name: text(e.displayName), image: safeImage(e.splash) };
+      item = {
+        name: text(e.displayName),
+        image: safeImage(e.splash),
+        listImage: safeImage(e.listViewIcon),
+      };
     catalog.maps[text(e.mapUrl)] = item;
     catalog.maps[text(e.uuid)] = item;
   }
   const tierSets = dataList(responses.competitivetiers);
   for (const raw of array(object(tierSets[tierSets.length - 1]).tiers)) {
-    const e = object(raw);
+    const e = object(raw),
+      color = text(e.color);
     catalog.tiers[String(number(e.tier))] = {
       name: text(e.tierName),
       image: safeImage(e.largeIcon) ?? safeImage(e.smallIcon),
+      color: /^[0-9a-f]{6}/i.test(color) ? `#${color.slice(0, 6)}` : undefined,
+    };
+  }
+  const seasonList = dataList(responses.seasons).map(object);
+  for (const season of seasonList) {
+    if (!season.parentUuid) continue;
+    const parent = seasonList.find((s) => s.uuid === season.parentUuid);
+    catalog.seasons![text(season.uuid)] = {
+      name:
+        text(season.title) ||
+        [text(parent?.displayName), text(season.displayName)].filter(Boolean).join(' // ') ||
+        'Act',
+      startsAt: timestamp(season.startTime),
     };
   }
   for (const raw of dataList(responses.contracts)) {

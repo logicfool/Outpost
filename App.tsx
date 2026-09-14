@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -25,8 +26,9 @@ import {
   StoreScreen,
   type ScreenName,
 } from './src/ui/screens';
-import { Badge, Button, IconButton } from './src/ui/components';
+import { Button, IconButton } from './src/ui/components';
 import { C, S } from './src/ui/theme';
+const LOGO = require('./assets/logo.png');
 const NAV: { id: ScreenName; label: string; icon: React.ComponentProps<typeof Feather>['name'] }[] =
   [
     { id: 'store', label: 'Store', icon: 'shopping-bag' },
@@ -43,12 +45,10 @@ class Boundary extends React.Component<{ children: React.ReactNode }, { failed: 
   render() {
     return this.state.failed ? (
       <View
-        style={[S.page, { alignItems: 'center', justifyContent: 'center', padding: 30, gap: 16 }]}
+        style={[S.page, { alignItems: 'center', justifyContent: 'center', padding: 30, gap: 12 }]}
       >
-        <Text style={S.h2}>Something interrupted Outpost.</Text>
-        <Text style={S.body}>
-          Close and reopen the app. Your token is never printed in this error screen.
-        </Text>
+        <Text style={S.h2}>Something went wrong.</Text>
+        <Text style={S.body}>Close and reopen Outpost.</Text>
       </View>
     ) : (
       this.props.children
@@ -85,63 +85,47 @@ function Main() {
       <View style={styles.shell}>
         {model.booting ? (
           <View style={styles.center}>
-            <ActivityIndicator color={C.mint} size="large" />
-            <Text style={S.small}>Opening your local workspace…</Text>
+            <Image source={LOGO} style={styles.bootLogo} />
+            <ActivityIndicator color={C.accent} />
           </View>
         ) : !model.active ? (
           <ScrollView contentContainerStyle={styles.welcome}>
-            <View style={S.row}>
-              <View style={styles.logo}>
-                <Feather name="layers" color={C.ink} size={25} />
-              </View>
+            <View style={[S.row, { gap: 12 }]}>
+              <Image source={LOGO} style={styles.logo} />
               <Text style={styles.wordmark}>OUTPOST</Text>
             </View>
-            <LinearGradient colors={['#2B344A', '#172A30', C.background]} style={styles.welcomeArt}>
-              <View style={styles.orbit}>
-                <Feather name="crosshair" size={84} color={C.mint} />
-              </View>
-              <View style={[styles.floating, { left: 2, top: 38 }]}>
-                <Feather name="shopping-bag" size={21} color={C.accent} />
-                <Text style={S.h3}>Daily drops</Text>
-              </View>
-              <View style={[styles.floating, { right: 0, bottom: 42 }]}>
-                <Feather name="award" size={21} color={C.violet} />
-                <Text style={S.h3}>Your climb</Text>
-              </View>
+            <LinearGradient
+              colors={['#FF465529', '#7CC4FF14', C.background]}
+              style={styles.welcomeArt}
+            >
+              <Image source={LOGO} style={styles.welcomeLogo} />
             </LinearGradient>
-            <View style={{ gap: 14 }}>
-              <Text style={S.eyebrow}>YOUR VALORANT COMPANION</Text>
-              <Text style={[S.title, { fontSize: 43, lineHeight: 48 }]}>
-                {'Your game.\nCloser at hand.'}
+            <View style={{ gap: 10 }}>
+              <Text style={S.eyebrow}>VALORANT COMPANION</Text>
+              <Text style={[S.title, { fontSize: 36, lineHeight: 42 }]}>
+                {'Your store, collection\nand matches.'}
               </Text>
               <Text style={S.body}>
-                The store you check. The collection you build. The progress you earn. One private,
-                on-device home.
+                Check daily offers, track your wishlist and review your games in one place.
               </Text>
             </View>
             <View style={{ gap: 12 }}>
-              <Button title="Explore the demo" onPress={model.enterDemo} icon="arrow-right" />
               <Button
                 title={
-                  Platform.OS === 'web'
-                    ? 'Real sign-in requires a native build'
-                    : 'Connect Riot account · experimental'
+                  Platform.OS === 'web' ? 'Sign-in needs the mobile app' : 'Connect Riot account'
                 }
                 disabled={Platform.OS === 'web'}
-                secondary
                 onPress={() => onLink()}
-                icon="shield"
+                icon="log-in"
               />
+              <Button title="Try the demo" secondary onPress={model.enterDemo} icon="play" />
             </View>
-            <Text style={S.small}>
-              Independent, read-only, and not endorsed by Riot Games. Live store access uses
-              unofficial services. No claim of continuous tracking or account-safety guarantees.
-            </Text>
           </ScrollView>
         ) : (
           <>
             <View style={styles.header}>
-              <View style={S.row}>
+              <View style={[S.row, { gap: 10 }]}>
+                <Image source={LOGO} style={styles.headerLogo} />
                 <Text style={styles.wordmark}>OUTPOST</Text>
               </View>
               <Pressable
@@ -156,30 +140,26 @@ function Main() {
                     { backgroundColor: model.active.demo ? C.gold : expired ? C.accent : C.mint },
                   ]}
                 />
-                <Text style={[S.small, { color: C.ink, maxWidth: 145 }]} numberOfLines={1}>
+                <Text
+                  style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 140 }]}
+                  numberOfLines={1}
+                >
                   {model.active.gameName}
                 </Text>
-                <Feather name="chevron-down" size={14} color={C.subtle} />
+                {model.active.demo && <Text style={styles.demo}>DEMO</Text>}
               </Pressable>
             </View>
-            {model.active.demo && (
-              <View style={styles.notice}>
-                <Feather name="eye" color={C.gold} size={14} />
-                <Text style={[S.small, { color: C.gold, flex: 1 }]}>
-                  DEMO · Illustrative account, items, prices, and results
-                </Text>
-              </View>
-            )}
             {expired && (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => onLink(model.active!.puuid)}
                 style={styles.notice}
               >
-                <Feather name="lock" color={C.accent} size={15} />
-                <Text style={[S.small, { color: C.accent, flex: 1 }]}>
-                  Session expired. Cached data may be stale. Tap to reconnect.
+                <Feather name="lock" color={C.accent} size={14} />
+                <Text style={[S.small, { color: C.ink, flex: 1 }]}>
+                  Session expired. Tap to sign in again.
                 </Text>
+                <Feather name="chevron-right" color={C.subtle} size={16} />
               </Pressable>
             )}
             <View style={S.flex}>
@@ -191,42 +171,34 @@ function Main() {
               />
             </View>
             <View style={styles.nav}>
-              {NAV.map((nav) => (
-                <Pressable
-                  key={nav.id}
-                  accessibilityRole="tab"
-                  accessibilityLabel={nav.label}
-                  accessibilityState={{ selected: tab === nav.id }}
-                  style={styles.navItem}
-                  onPress={() => setTab(nav.id)}
-                >
-                  <View
-                    style={[styles.navIcon, tab === nav.id && { backgroundColor: '#FF536419' }]}
+              {NAV.map((nav) => {
+                const selected = tab === nav.id;
+                return (
+                  <Pressable
+                    key={nav.id}
+                    accessibilityRole="tab"
+                    accessibilityLabel={nav.label}
+                    accessibilityState={{ selected }}
+                    style={styles.navItem}
+                    onPress={() => setTab(nav.id)}
                   >
-                    <Feather
-                      name={nav.icon}
-                      size={21}
-                      color={tab === nav.id ? C.accent : C.subtle}
-                    />
-                  </View>
-                  <Text
-                    style={{
-                      color: tab === nav.id ? C.ink : C.subtle,
-                      fontSize: 10,
-                      fontWeight: tab === nav.id ? '700' : '500',
-                    }}
-                  >
-                    {nav.label}
-                  </Text>
-                </Pressable>
-              ))}
+                    {selected && <View style={styles.navIndicator} />}
+                    <Feather name={nav.icon} size={20} color={selected ? C.accent : C.subtle} />
+                    <Text
+                      style={[styles.navLabel, selected && { color: C.ink, fontWeight: '700' }]}
+                    >
+                      {nav.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </>
         )}
         {model.message && (
           <View style={styles.message}>
             <Feather name="info" size={18} color={C.gold} />
-            <Text style={[S.body, { flex: 1, fontSize: 12 }]}>{model.message}</Text>
+            <Text style={[S.body, { flex: 1, fontSize: 13 }]}>{model.message}</Text>
             <IconButton icon="x" label="Dismiss message" onPress={model.dismissMessage} />
           </View>
         )}
@@ -269,96 +241,69 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     backgroundColor: C.background,
   },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 20 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 24 },
+  bootLogo: { width: 96, height: 96, borderRadius: 24 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 22,
-    paddingTop: 10,
-    paddingBottom: 8,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 10,
   },
-  wordmark: { color: C.ink, fontSize: 13, letterSpacing: 3.5, fontWeight: '900' },
-  miniLogo: {
-    width: 31,
-    height: 31,
-    borderRadius: 10,
-    backgroundColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logo: {
-    width: 43,
-    height: 43,
-    borderRadius: 14,
-    backgroundColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  wordmark: { color: C.ink, fontSize: 14, letterSpacing: 3, fontWeight: '800' },
+  logo: { width: 40, height: 40, borderRadius: 11 },
+  headerLogo: { width: 30, height: 30, borderRadius: 8 },
   profile: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
+    backgroundColor: C.surface,
     borderWidth: 1,
     borderColor: C.border,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
   },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  demo: { color: C.gold, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   notice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 9,
-    backgroundColor: C.surface,
+    marginHorizontal: 18,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#FF46551F',
+    borderWidth: 1,
+    borderColor: '#FF465540',
   },
   nav: {
     flexDirection: 'row',
-    backgroundColor: '#1B1B1BF2',
-    borderWidth: 1,
-    borderColor: '#333',
-    marginHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 30,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  navItem: { flex: 1, alignItems: 'center', gap: 3, minHeight: 52, justifyContent: 'center' },
-  navIcon: {
-    width: 48,
-    height: 31,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  welcome: { flexGrow: 1, padding: 25, paddingBottom: 38, gap: 28 },
-  welcomeArt: { height: 245, alignItems: 'center', justifyContent: 'center', borderRadius: 30 },
-  orbit: {
-    borderWidth: 1,
-    borderColor: '#6DE7C435',
-    borderRadius: 90,
-    width: 170,
-    height: 170,
-    alignItems: 'center',
-    justifyContent: 'center',
-    transform: [{ rotate: '-15deg' }],
-  },
-  floating: {
-    position: 'absolute',
     backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 17,
-    padding: 15,
-    gap: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    paddingTop: 8,
+    paddingBottom: 6,
   },
+  navItem: { flex: 1, alignItems: 'center', gap: 4, minHeight: 48, justifyContent: 'center' },
+  navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500' },
+  navIndicator: {
+    position: 'absolute',
+    top: -8,
+    width: 28,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: C.accent,
+  },
+  welcome: { flexGrow: 1, padding: 22, paddingBottom: 36, gap: 26 },
+  welcomeArt: { height: 250, alignItems: 'center', justifyContent: 'center', borderRadius: 28 },
+  welcomeLogo: { width: 160, height: 160, borderRadius: 40 },
   message: {
     position: 'absolute',
-    bottom: 81,
+    bottom: 76,
     left: 14,
     right: 14,
     backgroundColor: C.raised,

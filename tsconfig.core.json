@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2022", "module": "CommonJS", "moduleResolution": "Node",
     "lib": ["ES2022", "DOM"], "strict": true, "noUncheckedIndexedAccess": true,
-    "skipLibCheck": true, "outDir": ".test-build", "rootDir": "src/core", "types": []
+    "skipLibCheck": true, "ignoreDeprecations": "6.0", "outDir": ".test-build", "rootDir": "src/core", "types": []
   },
   "include": ["src/core/**/*.ts"]
 }

@@ -7,16 +7,24 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   userInterfaceStyle: 'dark',
   scheme: 'outpost',
+
+  icon: './assets/icon.png',
   ios: {
     bundleIdentifier: 'app.outpost.valorant',
     supportsTablet: true,
+    icon: './assets/icon.png',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       UIBackgroundModes: ['processing'],
       BGTaskSchedulerPermittedIdentifiers: ['com.expo.modules.backgroundtask.processing'],
     },
   },
-  android: { package: 'app.outpost.valorant', allowBackup: false },
+  android: {
+    package: 'app.outpost.valorant',
+    allowBackup: false,
+    icon: './assets/icon.png',
+    adaptiveIcon: { foregroundImage: './assets/adaptive-icon.png', backgroundColor: '#1B212E' },
+  },
   plugins: [
     ['expo-secure-store', { configureAndroidBackup: true }],
     'expo-sqlite',

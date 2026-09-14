@@ -1,14 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
+import { AppState, Image, Platform, StyleSheet, View } from 'react-native';
 import {
-  usePreventScreenCapture,
   enableAppSwitcherProtectionAsync,
   disableAppSwitcherProtectionAsync,
 } from 'expo-screen-capture';
-import { Feather } from '@expo/vector-icons';
-import { C, S } from './theme';
+import { C } from './theme';
+
 export function PrivacyGuard() {
-  usePreventScreenCapture('outpost-account');
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     void enableAppSwitcherProtectionAsync(1).catch(() => {});
@@ -16,16 +14,16 @@ export function PrivacyGuard() {
       void disableAppSwitcherProtectionAsync().catch(() => {});
     };
   }, []);
-  const [covered, setCovered] = useState(AppState.currentState !== 'active');
+  const [covered, setCovered] = useState(AppState.currentState === 'background');
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) =>
-      setCovered(state !== 'active'),
+      setCovered(state === 'background'),
     );
     return () => subscription.remove();
   }, []);
   return covered ? (
     <View
-      accessibilityLabel="Account privacy cover"
+      accessibilityLabel="Privacy cover"
       style={[
         StyleSheet.absoluteFill,
         {
@@ -34,12 +32,13 @@ export function PrivacyGuard() {
           elevation: 10000,
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 20,
         },
       ]}
     >
-      <Feather name="shield" size={42} color={C.mint} />
-      <Text style={S.h2}>Your account stays yours.</Text>
+      <Image
+        source={require('../../assets/logo.png')}
+        style={{ width: 88, height: 88, borderRadius: 22 }}
+      />
     </View>
   ) : null;
 }

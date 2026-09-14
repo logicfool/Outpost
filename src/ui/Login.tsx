@@ -4,12 +4,10 @@ import {
   Modal,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import {
   authorizationUrl,
@@ -23,12 +21,11 @@ import { AppError, number, safeError, token } from '../core/validation';
 import type { LoginAttempt, LoginTokens, Region } from '../core/types';
 import { randomHex } from '../platform/secure';
 import { captureRiotReauthCookies } from '../platform/cookies';
-import { Badge, Button, IconButton, Tabs } from './components';
+import { Button, ModalHeader, ModalPage, Tabs } from './components';
 import { C, S } from './theme';
 import type { LoginProps } from './Login.types';
 export default function Login({ onClose, onLink, expectedId }: LoginProps) {
-  const [phase, setPhase] = useState<'consent' | 'browser' | 'exchange'>('consent'),
-    [consent, setConsent] = useState(false),
+  const [phase, setPhase] = useState<'start' | 'browser' | 'exchange'>('start'),
     [advanced, setAdvanced] = useState(false);
   const [region, setRegion] = useState<'auto' | Region>('auto'),
     [error, setError] = useState<string | null>(null),
@@ -47,6 +44,9 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
   );
   const accessRef = useRef('');
   accessRef.current = access;
+  const close = () => {
+    if (phase !== 'exchange') onClose();
+  };
   const finish = async (tokens: LoginTokens) => {
     setPhase('exchange');
     setError(null);
@@ -58,7 +58,7 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
     } catch (e) {
       if (alive.current) {
         setError(safeError(e).message);
-        setPhase('consent');
+        setPhase('start');
       }
     }
   };
@@ -79,7 +79,7 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             .catch(() => finish(tokens));
         } catch (e) {
           setError(safeError(e).message);
-          setPhase('consent');
+          setPhase('start');
         }
       }
       return false;
@@ -87,94 +87,48 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
     return isLoginNavigationAllowed(url);
   };
   return (
-    <Modal
-      animationType="slide"
-      onRequestClose={() => {
-        if (phase !== 'exchange') onClose();
-      }}
-    >
-      <SafeAreaView style={S.page}>
-        <View style={styles.header}>
-          <View style={{ gap: 3 }}>
-            <Text style={S.h3}>
-              {expectedId ? 'Reconnect your account' : 'Connect a Riot account'}
-            </Text>
-            <Text numberOfLines={1} style={[S.small, { maxWidth: 285 }]}>
-              {phase === 'browser' ? origin : 'Personal account access · experimental'}
-            </Text>
-          </View>
-          <IconButton
-            icon="x"
-            label={phase === 'exchange' ? 'Verification in progress' : 'Close sign-in'}
-            onPress={() => {
-              if (phase !== 'exchange') onClose();
-            }}
-          />
-        </View>
-        {phase === 'consent' && (
+    <Modal animationType="slide" onRequestClose={close}>
+      <ModalPage>
+        <ModalHeader
+          title={expectedId ? 'Reconnect account' : 'Connect Riot account'}
+          detail={phase === 'browser' ? origin : undefined}
+          closeLabel={phase === 'exchange' ? 'Verification in progress' : 'Close sign-in'}
+          onClose={close}
+        />
+        {phase === 'start' && (
           <ScrollView contentContainerStyle={S.content} keyboardShouldPersistTaps="handled">
-            <Badge text="UNOFFICIAL CLIENT INTEGRATION" color={C.gold} />
-            <Text style={S.title}>{'Your account.\nOn your device.'}</Text>
-            <Text style={S.body}>
-              This flow opens Riot’s real sign-in page. Enter your password and complete MFA only
-              there. Outpost does not read the page’s form fields or save your password.
-            </Text>
-            <View style={S.card}>
-              <Text style={S.h3}>Important before connecting</Text>
+            <View style={{ gap: 8 }}>
+              <Text style={S.title}>Sign in with Riot</Text>
               <Text style={S.body}>
-                Personal store endpoints are not part of Riot’s approved public API. Riot can
-                restrict or change access. This is an experimental companion, not an approved RSO
-                integration or a guarantee of account safety.
-              </Text>
-              <Text style={S.body}>
-                Session tokens are powerful account secrets, even though this app only reads game
-                data. Tokens and the reusable Riot web-session cookies needed for silent renewal
-                stay in native secure storage. Your Riot password is never stored. Riot can still
-                revoke the session or require MFA again.
+                You will sign in on Riot's own page. Outpost never sees your password.
               </Text>
             </View>
             {error && (
-              <Text accessibilityRole="alert" style={{ color: C.accent, lineHeight: 22 }}>
+              <Text accessibilityRole="alert" style={{ color: C.accent, lineHeight: 21 }}>
                 {error}
               </Text>
             )}
-            <Text style={S.h3}>Account region</Text>
-            <Tabs
-              value={region}
-              onChange={setRegion}
-              items={[
-                { id: 'auto', label: 'Auto' },
-                ...REGIONS.map((id) => ({ id, label: id.toUpperCase() })),
-              ]}
-            />
-            <Pressable
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: consent }}
-              onPress={() => setConsent(!consent)}
-              style={S.row}
-            >
-              <View style={[styles.checkbox, consent && { backgroundColor: C.accent }]} />
-              <Text style={[S.body, { flex: 1 }]}>
-                I own this account and understand the unsupported-access and token-security risks.
-              </Text>
-            </Pressable>
-            <Button
-              title="Continue to Riot sign-in"
-              icon="arrow-up-right"
-              disabled={!consent}
-              onPress={begin}
-            />
+            <View style={{ gap: 10 }}>
+              <Text style={S.h3}>Region</Text>
+              <Tabs
+                value={region}
+                onChange={setRegion}
+                items={[
+                  { id: 'auto', label: 'Auto' },
+                  ...REGIONS.map((id) => ({ id, label: id.toUpperCase() })),
+                ]}
+              />
+            </View>
+            <Button title="Continue to Riot sign-in" icon="arrow-up-right" onPress={begin} />
             <Pressable onPress={() => setAdvanced(!advanced)}>
               <Text style={[S.small, { textAlign: 'center', padding: 10 }]}>
-                Advanced: use a session I already own {advanced ? '−' : '+'}
+                Use an access token instead {advanced ? '−' : '+'}
               </Text>
             </Pressable>
             {advanced && (
               <View style={S.card}>
                 <Text style={S.body}>
-                  Paste only your own access token here, never into chat or a third-party website.
-                  Select a region when no ID token is supplied. Tokens are validated with Riot
-                  before saving.
+                  Paste your own access token. Pick a region if you don't add an ID token.
                 </Text>
                 <TextInput
                   style={S.input}
@@ -202,8 +156,8 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
                 />
                 <Button
                   secondary
-                  disabled={!consent || !access}
-                  title="Validate and connect"
+                  disabled={!access}
+                  title="Connect"
                   onPress={() => {
                     try {
                       token(access);
@@ -211,7 +165,7 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
                       if (!expires || expires <= Date.now() + 30000)
                         throw new AppError(
                           'SESSION_EXPIRED',
-                          'This token has no usable expiry or has already expired. Use Riot sign-in.',
+                          'This token has expired. Use Riot sign-in instead.',
                         );
                       void finish({
                         accessToken: access,
@@ -225,10 +179,6 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
                 />
               </View>
             )}
-            <Text style={S.small}>
-              No Google account, developer API key, or Outpost server is required for this
-              experimental client mode. Web demo mode never accepts tokens.
-            </Text>
           </ScrollView>
         )}
         {phase === 'browser' && attempt.current && (
@@ -282,36 +232,29 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             }}
             onOpenWindow={() => {
               setError(
-                'This sign-in method opens an external window. Use Riot’s account sign-in in this flow.',
+                'This sign-in option opens an external window. Use your Riot account sign-in instead.',
               );
-              setPhase('consent');
+              setPhase('start');
             }}
             onError={() => {
-              setError(
-                'Riot sign-in could not be loaded. Retry without bypassing any challenge or security check.',
-              );
-              setPhase('consent');
+              setError('Riot sign-in could not be loaded. Try again.');
+              setPhase('start');
             }}
             onHttpError={(event) => {
               if (event.nativeEvent.statusCode >= 400) {
-                setError('Riot rejected or could not serve this sign-in page. Try again later.');
-                setPhase('consent');
+                setError('Riot sign-in is unavailable right now. Try again later.');
+                setPhase('start');
               }
             }}
           />
         )}
         {phase === 'exchange' && (
-          <View style={[S.flex, { alignItems: 'center', justifyContent: 'center', gap: 20 }]}>
+          <View style={[S.flex, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
             <ActivityIndicator size="large" color={C.accent} />
-            <Text style={S.h3}>Verifying your session with Riot</Text>
-            <Text style={S.body}>Resolving identity, entitlements, and region.</Text>
+            <Text style={S.h3}>Connecting your account…</Text>
           </View>
         )}
-      </SafeAreaView>
+      </ModalPage>
     </Modal>
   );
 }
-const styles = StyleSheet.create({
-  header: { ...S.between, padding: 18, borderBottomWidth: 1, borderBottomColor: C.border },
-  checkbox: { height: 23, width: 23, borderRadius: 6, borderWidth: 1, borderColor: C.subtle },
-});

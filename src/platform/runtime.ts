@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import { CatalogClient } from '../core/catalog';
 import { HttpClient } from '../core/http';
 import { RiotClient, connectAccount } from '../core/riot';
-import { EMPTY_CATALOG } from '../core/types';
+import { EMPTY_CATALOG, MAX_ACCOUNTS } from '../core/types';
 import type { Account, Catalog, LoginTokens, Region, Snapshot } from '../core/types';
 import { AppError } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
@@ -23,7 +23,8 @@ export class Runtime {
   async loadCatalog(force = false): Promise<Catalog> {
     if (!force && this.catalog.fetchedAt > Date.now() - 86400000) return this.catalog;
     const cached = await this.repository.catalog();
-    if (!force && cached && cached.fetchedAt > Date.now() - 86400000)
+
+    if (!force && cached?.seasons && cached.fetchedAt > Date.now() - 86400000)
       return (this.catalog = cached);
     const fresh = await this.publicClient.load();
     if (!Object.keys(fresh.items).length) return (this.catalog = cached ?? { ...EMPTY_CATALOG });
@@ -41,10 +42,10 @@ export class Runtime {
         'Sign in to the account you selected for reconnection.',
       );
     const existing = await this.repository.accounts();
-    if (!existing.some((a) => a.puuid === session.account.puuid) && existing.length >= 5)
+    if (!existing.some((a) => a.puuid === session.account.puuid) && existing.length >= MAX_ACCOUNTS)
       throw new AppError(
         'ACCOUNT_LIMIT',
-        'Remove one of the five linked accounts before adding another.',
+        `Remove one of the ${MAX_ACCOUNTS} linked accounts before adding another.`,
       );
     const old = existing.find((a) => a.puuid === session.account.puuid);
     if (old) session.account.addedAt = old.addedAt;

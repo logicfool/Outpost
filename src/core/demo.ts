@@ -3,6 +3,8 @@ import type {
   Catalog,
   CatalogItem,
   MatchDetail,
+  MatchPlayer,
+  RoundOutcome,
   Section,
   Snapshot,
   StoreOffer,
@@ -30,6 +32,16 @@ const NAMES = [
   'Reaver Operator',
   'Spectrum Phantom',
 ];
+const RARITIES = [
+  'Premium',
+  'Deluxe',
+  'Premium',
+  'Select',
+  'Exclusive',
+  'Ultra',
+  'Premium',
+  'Exclusive',
+];
 export function demoCatalog(): Catalog {
   const items: Record<string, CatalogItem> = {};
   NAMES.forEach((name, index) => {
@@ -39,7 +51,7 @@ export function demoCatalog(): Catalog {
       canonicalId: id,
       name,
       kind: 'skin',
-      rarity: index === 4 ? 'Exclusive' : 'Premium',
+      rarity: RARITIES[index],
       weapon: name.split(' ').at(-1),
     };
   });
@@ -47,8 +59,9 @@ export function demoCatalog(): Catalog {
     const id = `00000000-0000-4000-8002-${String(index + 1).padStart(12, '0')}`;
     items[id] = { id, canonicalId: id, name, kind: 'buddy' };
   }
-  return { items, bundles: {}, maps: {}, tiers: {}, contracts: {}, fetchedAt: 0 };
+  return { items, bundles: {}, maps: {}, tiers: {}, contracts: {}, seasons: {}, fetchedAt: 0 };
 }
+const QUEUES = ['competitive', 'competitive', 'unrated', 'swiftplay', 'competitive'];
 export function makeDemo(now = Date.now()): {
   account: Account;
   snapshot: Snapshot;
@@ -57,7 +70,7 @@ export function makeDemo(now = Date.now()): {
   const catalog = demoCatalog(),
     skins = Object.values(catalog.items).filter((i) => i.kind === 'skin');
   const ready = <T>(data: T): Section<T> => ({ status: 'ready', data, fetchedAt: now });
-  const prices = [1775, 1775, 1775, 1775, 4350, 1775, 1775, 2675];
+  const prices = [1775, 1275, 1775, 875, 4350, 2475, 1775, 2675];
   const offers: StoreOffer[] = skins.map((item, index) => ({
     id: item.id,
     item,
@@ -66,10 +79,31 @@ export function makeDemo(now = Date.now()): {
   const matches = ['Ascent', 'Lotus', 'Haven', 'Bind', 'Split'].map((map, index) => ({
     id: `00000000-0000-4000-8003-${String(index + 1).padStart(12, '0')}`,
     startedAt: now - (index + 1) * 3600000,
-    queue: 'competitive',
+    queue: QUEUES[index]!,
     map,
-    rrChange: [22, -16, 18, 25, -13][index],
+    rrChange: QUEUES[index] === 'competitive' ? [22, -16, 18, 25, -13][index] : undefined,
   }));
+  const act = (
+    seasonId: string,
+    name: string,
+    tier: number,
+    tierName: string,
+    rr: number,
+    wins: number,
+    games: number,
+    current = false,
+  ) => ({ seasonId, name, tier, tierName, rr, wins, games, current });
+  const competitive = [
+    act('demo-v26-a5', 'V26 // ACT V', 22, 'DIAMOND 2', 67, 28, 46, true),
+    act('demo-v26-a4', 'V26 // ACT IV', 23, 'DIAMOND 3', 12, 31, 58),
+    act('demo-v25-a3', 'V25 // ACT III', 19, 'PLATINUM 2', 40, 22, 40),
+  ];
+  const unrated = [
+    act('demo-v26-a5', 'V26 // ACT V', 0, 'Unrated', 0, 14, 25, true),
+    act('demo-v26-a4', 'V26 // ACT IV', 0, 'Unrated', 0, 9, 19),
+  ];
+  const sum = (acts: typeof competitive, key: 'wins' | 'games') =>
+    acts.reduce((total, a) => total + a[key], 0);
   const snapshot: Snapshot = {
     accountId: DEMO_ID,
     demo: true,
@@ -116,7 +150,31 @@ export function makeDemo(now = Date.now()): {
       { currencyId: CURRENCIES.RP, symbol: 'RP', amount: 85 },
       { currencyId: CURRENCIES.KC, symbol: 'KC', amount: 6800 },
     ]),
-    rank: ready({ name: 'DIAMOND 2', tier: 22, rr: 67, wins: 28, games: 46, currentSeason: true }),
+    rank: ready({
+      name: 'DIAMOND 2',
+      tier: 22,
+      rr: 67,
+      wins: 28,
+      games: 46,
+      currentSeason: true,
+      seasonId: 'demo-v26-a5',
+      seasonName: 'V26 // ACT V',
+      peak: { tier: 23, name: 'DIAMOND 3', seasonName: 'V26 // ACT IV' },
+      career: [
+        {
+          queue: 'competitive',
+          acts: competitive,
+          wins: sum(competitive, 'wins'),
+          games: sum(competitive, 'games'),
+        },
+        {
+          queue: 'unrated',
+          acts: unrated,
+          wins: sum(unrated, 'wins'),
+          games: sum(unrated, 'games'),
+        },
+      ],
+    }),
     xp: ready({ level: 143, xp: 3250 }),
     progression: ready({
       contracts: [
@@ -152,21 +210,109 @@ export function makeDemo(now = Date.now()): {
   };
   return { account: DEMO_ACCOUNT, snapshot, catalog };
 }
+const AGENTS = [
+  'Jett',
+  'Omen',
+  'Sova',
+  'Killjoy',
+  'Breach',
+  'Reyna',
+  'Viper',
+  'Cypher',
+  'Skye',
+  'Raze',
+];
+const PLAYERS = [
+  'Nightshift',
+  'Lumen',
+  'Kestrel',
+  'Brix',
+  'Solace',
+  'Vanta',
+  'Orbit',
+  'Mako',
+  'Quill',
+  'Ferro',
+];
+const OUTCOMES: RoundOutcome[] = ['elimination', 'detonate', 'elimination', 'defuse', 'time'];
 export function demoMatch(id: string): MatchDetail {
   const match = makeDemo().snapshot.matches;
   const entry = match.status === 'ready' ? match.data.find((m) => m.id === id) : undefined;
+  const index =
+      match.status === 'ready'
+        ? Math.max(
+            0,
+            match.data.findIndex((m) => m.id === id),
+          )
+        : 0,
+    win = entry?.rrChange !== undefined ? entry.rrChange >= 0 : index % 2 === 0;
+  const players: MatchPlayer[] = AGENTS.map((agent, i) => {
+    const kills = 26 - i * 2 + ((i + index) % 3),
+      deaths = 11 + ((i + index) % 4) * 3,
+      assists = 3 + ((i + index) % 5),
+      acs = 300 - i * 16;
+    return {
+      subject: i === 0 ? DEMO_ID : `00000000-0000-4000-8004-${String(i).padStart(12, '0')}`,
+      name: PLAYERS[i]!,
+      tag: i === 0 ? 'DEMO' : String(1000 + i * 137),
+      teamId: i % 2 === 0 ? 'Blue' : 'Red',
+      self: i === 0,
+      agent,
+      level: 40 + i * 23,
+      tier: 18 + (i % 6),
+      kills,
+      deaths,
+      assists,
+      score: acs * 21,
+      acs,
+      headshotPct: 16 + ((i * 7) % 15),
+    };
+  });
+  const [blue, red] = win ? [13, 8] : [9, 13];
+  let blueLeft = blue,
+    redLeft = red;
+  const rounds = Array.from({ length: blue + red }, (_, i) => {
+    const last = i === blue + red - 1,
+      blueWins = last
+        ? win
+        : blueLeft > (win ? 1 : 0) && (redLeft === (win ? 0 : 1) || (i * 7 + index) % 3 !== 0);
+    if (blueWins) blueLeft--;
+    else redLeft--;
+    return {
+      number: i + 1,
+      winningTeam: blueWins ? 'Blue' : 'Red',
+      outcome: OUTCOMES[(i + index) % OUTCOMES.length]!,
+    };
+  });
+  const self = players[0]!;
   return {
     id,
     map: entry?.map ?? 'Ascent',
-    queue: 'competitive',
+    queue: entry?.queue ?? 'competitive',
     startedAt: entry?.startedAt ?? Date.now() - 3600000,
-    agent: 'Jett',
-    kills: 24,
-    deaths: 15,
-    assists: 6,
-    acs: 278,
-    headshotPct: 29.4,
-    result: (entry?.rrChange ?? 1) >= 0 ? 'WIN' : 'LOSS',
-    score: (entry?.rrChange ?? 1) >= 0 ? '13 - 8' : '9 - 13',
+    durationMs: (38 + index * 3) * 60000 + 42000,
+    agent: self.agent,
+    kills: self.kills,
+    deaths: self.deaths,
+    assists: self.assists,
+    acs: self.acs,
+    headshotPct: self.headshotPct,
+    result: win ? 'WIN' : 'LOSS',
+    score: `${blue} - ${red}`,
+    teamId: 'Blue',
+    teams: [
+      { id: 'Blue', roundsWon: blue, won: win },
+      { id: 'Red', roundsWon: red, won: !win },
+    ],
+    players: players.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+    rounds,
+    duels: players
+      .filter((p) => p.teamId === 'Red')
+      .map((p, i) => ({
+        subject: p.subject,
+        name: p.name,
+        kills: 5 - i + (index % 2),
+        deaths: 2 + (i % 3),
+      })),
   };
 }

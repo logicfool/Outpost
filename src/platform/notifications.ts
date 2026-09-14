@@ -31,11 +31,11 @@ export async function cancelAccountNotifications(
   dismissDelivered = true,
 ): Promise<void> {
   for (const n of await Notifications.getAllScheduledNotificationsAsync())
-    if (n.content.data.accountId === id)
+    if (n.content.data?.accountId === id)
       await Notifications.cancelScheduledNotificationAsync(n.identifier);
   if (dismissDelivered)
     for (const n of await Notifications.getPresentedNotificationsAsync())
-      if (n.request.content.data.accountId === id)
+      if (n.request.content.data?.accountId === id)
         await Notifications.dismissNotificationAsync(n.request.identifier);
 }
 export async function cancelAllNotifications(): Promise<void> {

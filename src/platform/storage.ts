@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
-import { DEFAULT_SETTINGS } from '../core/types';
+import { DEFAULT_SETTINGS, MAX_ACCOUNTS } from '../core/types';
 import { AppError, uuid } from '../core/validation';
 import { historyEntry } from '../core/normalize';
 import type { Repository } from './storage.types';
@@ -63,10 +63,10 @@ async function create(): Promise<Repository> {
         const count = await db.getFirstAsync<{ count: number }>(
           'SELECT COUNT(*) AS count FROM accounts',
         );
-        if (!existing && (count?.count ?? 0) >= 5)
+        if (!existing && (count?.count ?? 0) >= MAX_ACCOUNTS)
           throw new AppError(
             'ACCOUNT_LIMIT',
-            'Five accounts are already linked. Remove an account before adding another.',
+            `${MAX_ACCOUNTS} accounts are already linked. Remove an account before adding another.`,
           );
         await db.runAsync(
           'INSERT INTO accounts(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data',

@@ -9,11 +9,13 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { CatalogItem, Money, Section as DataSection, StoreOffer } from '../core/types';
 import { countdown } from '../core/normalize';
-import { C, S, rarityColor } from './theme';
+import { C, CURRENCY_ICONS, S, rarityColor, rarityIcon } from './theme';
+type IconName = React.ComponentProps<typeof Feather>['name'];
 export function Button({
   title,
   onPress,
@@ -25,8 +27,9 @@ export function Button({
   onPress(): void;
   secondary?: boolean;
   disabled?: boolean;
-  icon?: React.ComponentProps<typeof Feather>['name'];
+  icon?: IconName;
 }) {
+  const color = secondary ? C.ink : '#FFFFFF';
   return (
     <Pressable
       accessibilityRole="button"
@@ -35,14 +38,12 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        {
-          backgroundColor: secondary ? C.raised : C.accent,
-          opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
-        },
+        secondary ? styles.buttonSecondary : { backgroundColor: C.accent },
+        { opacity: disabled ? 0.4 : pressed ? 0.8 : 1 },
       ]}
     >
-      {icon && <Feather name={icon} size={17} color={C.ink} />}
-      <Text style={styles.buttonText}>{title}</Text>
+      {icon && <Feather name={icon} size={16} color={color} />}
+      <Text style={[styles.buttonText, { color }]}>{title}</Text>
     </Pressable>
   );
 }
@@ -50,9 +51,9 @@ export function IconButton({
   icon,
   label,
   onPress,
-  color = C.muted,
+  color = C.ink,
 }: {
-  icon: React.ComponentProps<typeof Feather>['name'];
+  icon: IconName;
   label: string;
   onPress(): void;
   color?: string;
@@ -61,16 +62,17 @@ export function IconButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      hitSlop={10}
       onPress={onPress}
-      style={styles.iconButton}
+      style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
     >
-      <Feather name={icon} size={21} color={color} />
+      <Feather name={icon} size={20} color={color} />
     </Pressable>
   );
 }
 export function Badge({ text, color = C.mint }: { text: string; color?: string }) {
   return (
-    <View style={[styles.badge, { backgroundColor: `${color}15` }]}>
+    <View style={[styles.badge, { backgroundColor: `${color}1F` }]}>
       <View style={[styles.dot, { backgroundColor: color }]} />
       <Text style={[styles.badgeText, { color }]}>{text}</Text>
     </View>
@@ -81,9 +83,9 @@ export function Tabs<T extends string>({
   value,
   onChange,
 }: {
-  items: { id: T; label: string }[];
+  items: readonly { id: NoInfer<T>; label: string }[];
   value: T;
-  onChange(id: T): void;
+  onChange(id: NoInfer<T>): void;
 }) {
   return (
     <ScrollView
@@ -91,27 +93,87 @@ export function Tabs<T extends string>({
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.tabs}
     >
-      {items.map((item) => (
-        <Pressable
-          key={item.id}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: value === item.id }}
-          onPress={() => onChange(item.id)}
-          style={[styles.tab, value === item.id && styles.tabSelected]}
-        >
-          <Text style={[styles.tabText, value === item.id && { color: C.ink }]}>{item.label}</Text>
-        </Pressable>
-      ))}
+      {items.map((item) => {
+        const selected = value === item.id;
+        return (
+          <Pressable
+            key={item.id}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onChange(item.id)}
+            style={[styles.tab, selected && styles.tabSelected]}
+          >
+            <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{item.label}</Text>
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
-export function MoneyText({ prices, large = false }: { prices: Money[]; large?: boolean }) {
+export function SectionHeader({ title, detail }: { title: string; detail?: string }) {
   return (
-    <Text style={{ color: C.ink, fontSize: large ? 23 : 15, fontWeight: '800' }}>
-      {prices.length
-        ? prices.map((p) => `${p.amount.toLocaleString()} ${p.symbol}`).join(' + ')
-        : 'Price unavailable'}
-    </Text>
+    <View style={S.between}>
+      <Text style={S.h2}>{title}</Text>
+      {detail ? <Text style={S.small}>{detail}</Text> : null}
+    </View>
+  );
+}
+export function CurrencyIcon({ symbol, size = 16 }: { symbol: string; size?: number }) {
+  const uri = CURRENCY_ICONS[symbol];
+  return uri ? (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size }}
+      resizeMode="contain"
+      accessibilityLabel={symbol}
+    />
+  ) : (
+    <Text style={[S.small, { fontWeight: '700' }]}>{symbol}</Text>
+  );
+}
+export function RarityIcon({ rarity, size = 18 }: { rarity?: string; size?: number }) {
+  const uri = rarityIcon(rarity);
+  return uri ? (
+    <Image
+      source={{ uri }}
+      style={{ width: size, height: size }}
+      resizeMode="contain"
+      accessibilityLabel={rarity}
+    />
+  ) : (
+    <View style={{ width: size, height: size }} />
+  );
+}
+export function MoneyText({
+  prices,
+  large = false,
+  strike = false,
+}: {
+  prices: Money[];
+  large?: boolean;
+  strike?: boolean;
+}) {
+  if (!prices.length) return <Text style={S.small}>Price unavailable</Text>;
+  const size = strike ? 12 : large ? 20 : 15;
+  return (
+    <View style={[S.row, { gap: 10, flexWrap: 'wrap' }]}>
+      {prices.map((p) => (
+        <View key={p.currencyId} style={[S.row, { gap: 5 }]}>
+          <CurrencyIcon symbol={p.symbol} size={size} />
+          <Text
+            style={{
+              color: strike ? C.subtle : C.ink,
+              fontSize: size,
+              fontWeight: strike ? '500' : '700',
+              textDecorationLine: strike ? 'line-through' : 'none',
+              fontVariant: ['tabular-nums'],
+            }}
+          >
+            {p.amount.toLocaleString()}
+          </Text>
+        </View>
+      ))}
+    </View>
   );
 }
 export function ItemArt({
@@ -131,23 +193,44 @@ export function ItemArt({
         <Image
           source={{ uri: item.image }}
           resizeMode="contain"
-          style={{ width: '95%', height: '95%' }}
+          style={{ width: '92%', height: '92%' }}
           accessibilityLabel={item.name}
           onError={() => setFailed(true)}
         />
       ) : (
-        <View style={{ alignItems: 'center', gap: 7 }}>
-          <Feather
-            name={item.kind === 'skin' || item.kind === 'chroma' ? 'crosshair' : 'hexagon'}
-            size={Math.min(36, size / 2)}
-            color={rarityColor(item.rarity)}
-          />
-          <Text style={[S.small, { fontSize: 9, letterSpacing: 2 }]}>
-            {item.weapon?.toUpperCase() ?? item.kind.toUpperCase()}
-          </Text>
-        </View>
+        <Feather
+          name={item.kind === 'skin' || item.kind === 'chroma' ? 'crosshair' : 'hexagon'}
+          size={Math.min(34, size / 2.5)}
+          color={rarityColor(item.rarity)}
+        />
       )}
     </View>
+  );
+}
+export function WishButton({
+  wished,
+  name,
+  onPress,
+  size = 20,
+}: {
+  wished: boolean;
+  name: string;
+  onPress(): void;
+  size?: number;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${wished ? 'Remove' : 'Add'} ${name} ${wished ? 'from' : 'to'} wishlist`}
+      hitSlop={12}
+      onPress={onPress}
+    >
+      <Ionicons
+        name={wished ? 'heart' : 'heart-outline'}
+        size={size}
+        color={wished ? C.accent : C.subtle}
+      />
+    </Pressable>
   );
 }
 export function OfferCard({
@@ -163,41 +246,38 @@ export function OfferCard({
 }) {
   const tint = rarityColor(offer.item.rarity);
   return (
-    <View style={styles.offer}>
-      <LinearGradient colors={[`${tint}18`, C.surface]} style={styles.offerInner}>
+    <Pressable
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`View ${offer.item.name}`}
+      style={({ pressed }) => [
+        styles.offer,
+        { borderColor: `${tint}40`, opacity: pressed ? 0.85 : 1 },
+      ]}
+    >
+      <LinearGradient
+        colors={[`${tint}30`, `${tint}08`, C.surface]}
+        locations={[0, 0.55, 1]}
+        style={styles.offerInner}
+      >
         <View style={S.between}>
-          <Text style={[S.eyebrow, { color: tint, fontSize: 8, letterSpacing: 1.2 }]}>
-            {offer.discountPercent !== undefined
-              ? `−${offer.discountPercent}%`
-              : (offer.item.rarity?.toUpperCase() ?? 'COLLECTION')}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${wished ? 'Remove' : 'Add'} ${offer.item.name} ${wished ? 'from' : 'to'} wishlist`}
-            hitSlop={8}
-            onPress={onWish}
-          >
-            <Feather name="heart" size={18} color={wished ? C.accent : C.subtle} />
-          </Pressable>
+          {offer.discountPercent !== undefined ? (
+            <View style={styles.discount}>
+              <Text style={styles.discountText}>−{offer.discountPercent}%</Text>
+            </View>
+          ) : (
+            <RarityIcon rarity={offer.item.rarity} />
+          )}
+          <WishButton wished={wished} name={offer.item.name} onPress={onWish} />
         </View>
-        <Pressable
-          onPress={onOpen}
-          accessibilityRole="button"
-          accessibilityLabel={`View ${offer.item.name}`}
-        >
-          <ItemArt item={offer.item} size={100} />
-          <Text numberOfLines={2} style={[S.h3, { minHeight: 39, fontSize: 14 }]}>
-            {offer.item.name}
-          </Text>
-          {offer.originalPrices?.length ? (
-            <Text style={[S.small, { textDecorationLine: 'line-through', marginBottom: 4 }]}>
-              {offer.originalPrices.map((p) => `${p.amount} ${p.symbol}`).join(' + ')}
-            </Text>
-          ) : null}
-          <MoneyText prices={offer.prices} />
-        </Pressable>
+        <ItemArt item={offer.item} size={92} />
+        <Text numberOfLines={2} style={styles.offerName}>
+          {offer.item.name}
+        </Text>
+        {offer.originalPrices?.length ? <MoneyText prices={offer.originalPrices} strike /> : null}
+        <MoneyText prices={offer.prices} />
       </LinearGradient>
-    </View>
+    </Pressable>
   );
 }
 export function OfferGrid({
@@ -230,10 +310,12 @@ export function Timer({
   expiresAt,
   offset = 0,
   small = false,
+  color = C.ink,
 }: {
   expiresAt: number;
   offset?: number;
   small?: boolean;
+  color?: string;
 }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -243,11 +325,11 @@ export function Timer({
   return (
     <Text
       style={{
-        color: C.mint,
-        fontSize: small ? 13 : 25,
-        fontWeight: '700',
+        color,
+        fontSize: small ? 13 : 26,
+        fontWeight: small ? '600' : '800',
         fontVariant: ['tabular-nums'],
-        letterSpacing: small ? 0 : 1,
+        letterSpacing: small ? 0 : 0.5,
       }}
     >
       {countdown(expiresAt, now, offset)}
@@ -260,14 +342,16 @@ export function Empty({
   icon = 'inbox',
 }: {
   title: string;
-  detail: string;
-  icon?: React.ComponentProps<typeof Feather>['name'];
+  detail?: string;
+  icon?: IconName;
 }) {
   return (
     <View style={styles.empty}>
-      <Feather name={icon} size={28} color={C.subtle} />
+      <View style={styles.emptyIcon}>
+        <Feather name={icon} size={22} color={C.muted} />
+      </View>
       <Text style={[S.h3, { textAlign: 'center' }]}>{title}</Text>
-      <Text style={[S.body, { textAlign: 'center' }]}>{detail}</Text>
+      {detail ? <Text style={[S.body, { textAlign: 'center' }]}>{detail}</Text> : null}
     </View>
   );
 }
@@ -282,9 +366,8 @@ export function Resource<T>({
 }) {
   if (!value)
     return (
-      <View style={styles.empty}>
+      <View style={styles.loading}>
         <ActivityIndicator color={C.accent} />
-        <Text style={S.body}>No snapshot loaded yet. Refresh or reconnect your account.</Text>
       </View>
     );
   if (value.status === 'error')
@@ -294,7 +377,7 @@ export function Resource<T>({
 export function ProgressBar({
   value,
   max = 1,
-  color = C.mint,
+  color = C.accent,
 }: {
   value: number;
   max?: number;
@@ -306,7 +389,7 @@ export function ProgressBar({
       <View
         style={{
           backgroundColor: color,
-          height: 5,
+          height: 6,
           width: `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`,
           borderRadius: 6,
         }}
@@ -324,58 +407,134 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
+
+export function ModalPage({ children }: { children: React.ReactNode }) {
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={S.page} edges={['top', 'bottom', 'left', 'right']}>
+        {children}
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+export function ModalHeader({
+  eyebrow,
+  title,
+  detail,
+  closeLabel,
+  onClose,
+}: {
+  eyebrow?: string;
+  title: string;
+  detail?: string;
+  closeLabel: string;
+  onClose(): void;
+}) {
+  return (
+    <View style={styles.modalHeader}>
+      <View style={{ flex: 1, gap: 2 }}>
+        {eyebrow ? (
+          <Text style={S.eyebrow} numberOfLines={1}>
+            {eyebrow}
+          </Text>
+        ) : null}
+        <Text style={S.h2} numberOfLines={1}>
+          {title}
+        </Text>
+        {detail ? (
+          <Text style={S.small} numberOfLines={1}>
+            {detail}
+          </Text>
+        ) : null}
+      </View>
+      <IconButton icon="x" label={closeLabel} onPress={onClose} />
+    </View>
+  );
+}
 const styles = StyleSheet.create({
   button: {
-    minHeight: 49,
-    borderRadius: 13,
-    paddingHorizontal: 17,
-    paddingVertical: 13,
+    minHeight: 50,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 9,
+    gap: 8,
   },
-  buttonText: { color: C.ink, fontSize: 14, fontWeight: '700' },
+  buttonSecondary: { backgroundColor: C.raised, borderWidth: 1, borderColor: C.border },
+  buttonText: { fontSize: 15, fontWeight: '700' },
   iconButton: {
-    width: 43,
-    height: 43,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 13,
-    backgroundColor: C.surface,
+    backgroundColor: C.raised,
   },
   badge: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    borderRadius: 999,
+    paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  dot: { width: 5, height: 5, borderRadius: 3 },
-  badgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  tabs: { gap: 8, paddingVertical: 1 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  badgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
+  tabs: { gap: 8, paddingRight: 4 },
   tab: {
-    minHeight: 40,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderRadius: 12,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    justifyContent: 'center',
+    backgroundColor: C.surface,
     borderWidth: 1,
     borderColor: C.border,
   },
-  tabSelected: { backgroundColor: C.raised, borderColor: C.subtle },
-  tabText: { fontSize: 12, color: C.subtle, fontWeight: '600' },
-  offer: { borderRadius: 17, borderColor: C.border, borderWidth: 1, overflow: 'hidden' },
-  offerInner: { padding: 13, paddingBottom: 18 },
+  tabSelected: { backgroundColor: C.ink, borderColor: C.ink },
+  tabText: { fontSize: 13, color: C.muted, fontWeight: '600' },
+  tabTextSelected: { color: C.background },
+  offer: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', backgroundColor: C.surface },
+  offerInner: { padding: 12, gap: 8 },
+  offerName: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 18, minHeight: 36 },
+  discount: {
+    backgroundColor: C.accent,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  discountText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   gridCell: { width: '48%', flexGrow: 1, maxWidth: '50%' },
   empty: {
-    padding: 25,
+    paddingVertical: 30,
+    paddingHorizontal: 22,
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     borderRadius: 18,
     backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
   },
-  progress: { height: 5, borderRadius: 6, backgroundColor: C.border, overflow: 'hidden' },
+  emptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.raised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loading: { paddingVertical: 28, alignItems: 'center' },
+  progress: { height: 6, borderRadius: 6, backgroundColor: C.raised, overflow: 'hidden' },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
 });
