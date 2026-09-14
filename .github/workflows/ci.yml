@@ -1,0 +1,29 @@
+name: Outpost checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bootstrap SDK-aligned dependencies (commit the resulting lockfile)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            node scripts/setup.mjs
+          fi
+      - run: npm test
+      - run: npm run check:syntax
+      - run: npm run typecheck
+      - run: npx expo-doctor
+      - run: npx expo export --platform android
+      - run: npx expo export --platform ios
+      - run: npx expo export --platform web

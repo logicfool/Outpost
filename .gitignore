@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+.test-build/
+dist/
+android/
+ios/
+.env*
+*.log
+*.jks
+*.keystore
+*.p12
+*.mobileprovision

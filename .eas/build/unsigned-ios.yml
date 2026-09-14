@@ -1,0 +1,37 @@
+build:
+  name: Unsigned iOS device IPA (for sideload signing)
+  steps:
+    - eas/checkout
+    - eas/install_node_modules
+    - eas/prebuild:
+        inputs:
+          clean: true
+    - run:
+        name: Install CocoaPods
+        working_directory: ./ios
+        command: pod install
+    - run:
+        name: Build unsigned iPhone app
+        working_directory: ./ios
+        command: |
+          set -o pipefail
+          xcodebuild -workspace Outpost.xcworkspace -scheme Outpost -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -200
+    - run:
+        name: Package IPA
+        working_directory: ./ios
+        command: |
+          rm -rf Payload Outpost-unsigned.ipa
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Outpost.app Payload/
+          zip -qry Outpost-unsigned.ipa Payload
+          ls -lh Outpost-unsigned.ipa
+    - eas/upload_artifact:
+        name: Upload IPA
+        inputs:
+          type: application-archive
+          path: |
+            /Users/expo/workingdir/build/valorantTracker/ios/Outpost-unsigned.ipa
+            valorantTracker/ios/Outpost-unsigned.ipa
+            ios/Outpost-unsigned.ipa

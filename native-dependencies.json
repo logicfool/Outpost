@@ -1,0 +1,22 @@
+[
+  "react",
+  "react-native",
+  "react-dom",
+  "react-native-web",
+  "@expo/metro-runtime",
+  "expo-crypto",
+  "expo-secure-store",
+  "expo-sqlite",
+  "expo-notifications",
+  "expo-background-task",
+  "expo-task-manager",
+  "expo-screen-capture",
+  "expo-status-bar",
+  "expo-linear-gradient",
+  "expo-dev-client",
+  "react-native-safe-area-context",
+  "react-native-webview",
+  "@expo/vector-icons",
+  "expo-video",
+  "@react-native-cookies/cookies"
+]
