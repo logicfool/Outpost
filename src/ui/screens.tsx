@@ -56,7 +56,7 @@ import {
   Timer,
   WishButton,
 } from './components';
-import { C, S, rarityColor } from './theme';
+import { rarityColor, useTheme, useThemedStyles, type Palette } from './theme';
 
 export type ScreenName = 'store' | 'collection' | 'progress' | 'matches' | 'account';
 type Props = {
@@ -87,7 +87,7 @@ const duration = (ms?: number) =>
   ms ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s` : undefined;
 const winRate = (wins: number, games: number) =>
   games ? `${((wins * 100) / games).toFixed(1)}%` : '-';
-const resultTone = (result?: MatchDetail['result']) =>
+const resultTone = (result: MatchDetail['result'] | undefined, C: Palette) =>
   result === 'WIN' ? C.mint : result === 'LOSS' ? C.accent : C.gold;
 const resultLabel = (result?: MatchDetail['result']) =>
   result === 'WIN'
@@ -99,6 +99,8 @@ const resultLabel = (result?: MatchDetail['result']) =>
         : 'Unknown';
 const fill = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } as const;
 function Page({ model, children }: { model: AppModel; children: React.ReactNode }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <ScrollView
       contentContainerStyle={S.content}
@@ -116,6 +118,8 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
   );
 }
 function Heading({ eyebrow, title }: { eyebrow: string; title: React.ReactNode }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <View style={{ gap: 4 }}>
       <Text style={S.eyebrow}>{eyebrow}</Text>
@@ -138,6 +142,9 @@ function Countdown({
   color: string;
   icon: React.ComponentProps<typeof Feather>['name'];
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <LinearGradient
       colors={[`${color}2E`, `${color}08`]}
@@ -156,6 +163,9 @@ function Countdown({
   );
 }
 function Wallet({ model }: { model: AppModel }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <Resource section={model.snapshot?.wallet} title="Balances">
       {(balances) => (
@@ -177,6 +187,9 @@ function Wallet({ model }: { model: AppModel }) {
   );
 }
 function AgentFrame({ image, size = 48 }: { image?: string; size?: number }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <View style={[styles.agentFrame, { width: size, height: size, borderRadius: size / 4 }]}>
       {image ? (
@@ -194,12 +207,16 @@ function AgentFrame({ image, size = 48 }: { image?: string; size?: number }) {
 function MiniStat({
   label,
   value,
-  color = C.ink,
+  color,
 }: {
   label: string;
   value: string | number | null;
   color?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  color ??= C.ink;
+
   return (
     <View style={{ flex: 1, alignItems: 'center', gap: 2 }}>
       <Text style={[styles.miniValue, { color }]}>{value ?? '-'}</Text>
@@ -208,6 +225,9 @@ function MiniStat({
   );
 }
 export function StoreScreen({ model, onItem }: Props) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const [bundleLimit, setBundleLimit] = useState(12);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
@@ -271,7 +291,10 @@ export function StoreScreen({ model, onItem }: Props) {
                       accessibilityLabel={bundle.name}
                     />
                   ) : null}
-                  <LinearGradient colors={['#0B101800', '#0B1018F0']} style={fill} />
+                  <LinearGradient
+                    colors={[`${C.background}00`, `${C.background}F0`]}
+                    style={fill}
+                  />
                   <View style={styles.bundleInfo}>
                     <Text style={[S.eyebrow, { color: C.ink }]}>FEATURED BUNDLE</Text>
                     <Text style={S.h2} numberOfLines={2}>
@@ -411,6 +434,9 @@ function ItemTile({
   onWish?(): void;
   label?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <Pressable
       onPress={onOpen}
@@ -437,6 +463,9 @@ function ItemTile({
   );
 }
 export function CollectionScreen({ model, onItem, onNavigate }: Props) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const [tab, setTab] = useState<'owned' | 'wishlist' | 'catalog' | 'equipped'>('owned'),
     [query, setQuery] = useState('');
   const [kind, setKind] = useState<
@@ -626,6 +655,9 @@ function BattlePassRewards({
   model: AppModel;
   onItem(item: CatalogItem): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   if (model.snapshot?.progression.status !== 'ready') return null;
   const active = model.snapshot.progression.data.contracts.find((c) => c.currentBattlepass);
   const def = active ? model.catalog.contracts[active.id] : undefined;
@@ -669,6 +701,7 @@ function BattlePassRewards({
   );
 }
 function Stat({ label, value }: { label: string; value: string | number | null }) {
+  const { C, S, isDark } = useTheme();
   return (
     <View style={{ flex: 1, gap: 4 }}>
       <Text style={S.small}>{label}</Text>
@@ -677,6 +710,8 @@ function Stat({ label, value }: { label: string; value: string | number | null }
   );
 }
 function BattlePassSummary({ model }: { model: AppModel }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <Resource title="Battle Pass" section={model.snapshot?.progression}>
       {(progress) => {
@@ -717,6 +752,8 @@ function BattlePassSummary({ model }: { model: AppModel }) {
   );
 }
 function LevelCard({ model }: { model: AppModel }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <Resource title="Account level" section={model.snapshot?.xp}>
       {(xp) => (
@@ -729,6 +766,9 @@ function LevelCard({ model }: { model: AppModel }) {
   );
 }
 export function ProgressScreen({ model, onItem }: Props) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <Page model={model}>
       <Heading eyebrow="SEASON PROGRESS" title="Battle Pass" />
@@ -839,6 +879,9 @@ function ProfileBanner({ model, onNavigate }: { model: AppModel; onNavigate: Nav
   );
 }
 function RankOverview({ model, onOpen }: { model: AppModel; onOpen(): void }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <Resource title="Rank" section={model.snapshot?.rank}>
       {(rank) => (
@@ -914,6 +957,9 @@ export function CareerModal({
   onClose(): void;
   embedded?: boolean;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const career = rank?.career ?? [];
   const [queue, setQueue] = useState('competitive'),
     [open, setOpen] = useState<string | null>(null);
@@ -1078,7 +1124,10 @@ export function MatchCard({
   detail?: MatchDetail;
   onPress(): void;
 }) {
-  const tone = detail ? resultTone(detail.result) : C.border,
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
+  const tone = detail ? resultTone(detail.result, C) : C.border,
     map = detail?.map ?? match.map,
     image = detail?.mapImage ?? match.mapImage;
   return (
@@ -1090,7 +1139,7 @@ export function MatchCard({
     >
       {image ? <Image source={{ uri: image }} style={fill} resizeMode="cover" /> : null}
       <LinearGradient
-        colors={['#131A25F7', '#131A25E0', '#131A25A6']}
+        colors={[`${C.surface}F7`, `${C.surface}EE`, `${C.surface}C0`]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={fill}
@@ -1162,6 +1211,9 @@ function PlayerRow({
   onOpen(): void;
   ownId?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const you = player.subject === ownId,
     label = playerLabel(player, ownId);
   const kd = player.kills !== null && player.deaths ? player.kills / player.deaths : null,
@@ -1231,6 +1283,9 @@ export function MatchReport({
   subject?: string;
   embedded?: boolean;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const [detail, setDetail] = useState<MatchDetail | null>(null),
     [error, setError] = useState<string | null>(null),
     [tab, setTab] = useState<'scoreboard' | 'rounds' | 'duels'>('scoreboard');
@@ -1255,7 +1310,7 @@ export function MatchReport({
   const own = detail?.teams.find((t) => t.id === detail.teamId),
     other = detail?.teams.find((t) => t.id !== detail.teamId),
     teamGame = detail?.teams.length === 2;
-  const tone = resultTone(detail?.result);
+  const tone = resultTone(detail?.result, C);
   const content = (
     <ModalPage>
       <ModalHeader
@@ -1277,7 +1332,7 @@ export function MatchReport({
               ) : (
                 <LinearGradient colors={[`${tone}40`, C.surface]} style={fill} />
               )}
-              <LinearGradient colors={['#0B101840', '#0B1018E6']} style={fill} />
+              <LinearGradient colors={[`${C.background}80`, `${C.background}F2`]} style={fill} />
               <Text style={[S.eyebrow, { color: tone }]}>
                 {resultLabel(detail.result).toUpperCase()}
               </Text>
@@ -1562,6 +1617,9 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   );
 }
 export function AccountScreen({ model, onLink }: Props) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const [confirm, setConfirm] = useState<'remove' | 'cache' | null>(null),
     [working, setWorking] = useState(false);
   const active = model.active!;
@@ -1666,6 +1724,22 @@ export function AccountScreen({ model, onLink }: Props) {
           onPress={() => onLink()}
         />
         {active.demo && <Button title="Leave demo" secondary onPress={model.leaveDemo} />}
+        <SectionHeader title="Appearance" />
+        <View style={S.card}>
+          <Tabs
+            value={model.settings.theme ?? 'navy'}
+            onChange={(choice) => void model.setTheme(choice)}
+            items={[
+              { id: 'navy', label: 'Navy' },
+              { id: 'dark', label: 'Dark' },
+              { id: 'light', label: 'Light' },
+              { id: 'system', label: 'System' },
+            ]}
+          />
+          <Text style={S.small}>
+            Theme applies to all screens, dialogs and chat. System follows your device appearance.
+          </Text>
+        </View>
         <SectionHeader title="Notifications" />
         <View style={S.card}>
           <Setting
@@ -1712,12 +1786,13 @@ export function AccountScreen({ model, onLink }: Props) {
             valorant-api.com.
           </Text>
           <Text style={S.body}>
-            Your Riot password is never stored. Session tokens and sign-in cookies stay in the
-            device's secure storage, and cached data never leaves this device. Removing an account
-            deletes its local data but does not sign it out on Riot's side. Demo mode uses made-up
-            data.
+            Your Riot password is never stored. Session tokens and sign-in cookies stay in secure
+            storage. Chats are encrypted locally with a separate key for each account. Sending a
+            whisper transmits it to Riot and the recipient; syncing history reads messages Riot
+            retains. Removing an account deletes its local data but does not sign it out on Riot's
+            side. Demo mode uses made-up data.
           </Text>
-          <Text style={S.small}>Outpost 0.3.1</Text>
+          <Text style={S.small}>Outpost 0.4.0</Text>
         </View>
       </Page>
       <Modal
@@ -1735,8 +1810,8 @@ export function AccountScreen({ model, onLink }: Props) {
             </Text>
             <Text style={S.body}>
               {confirm === 'remove'
-                ? 'Its saved session, history, wishlist and notifications will be deleted from this device.'
-                : 'Cached store data, catalog and history will be cleared. Accounts and wishlists stay.'}
+                ? 'Its saved session, game history, encrypted messages, wishlist and notifications will be deleted from this device.'
+                : 'Cached game data, artwork and catalog will be cleared. Accounts, saved chats and wishlists stay.'}
             </Text>
             <Button
               title={working ? 'Working…' : 'Confirm'}
@@ -1763,6 +1838,7 @@ function Setting({
   onChange(value: boolean): void;
   disabled?: boolean;
 }) {
+  const { C, S, isDark } = useTheme();
   return (
     <View style={S.row}>
       <View style={{ flex: 1, gap: 3 }}>
@@ -1781,6 +1857,9 @@ function Setting({
   );
 }
 function SkinVideo({ uri }: { uri: string }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
   });
@@ -1799,6 +1878,9 @@ export function ItemModal({
   model: AppModel;
   onClose(): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const item = original ? hydrateItem(model.catalog, original) : null;
   const [preview, setPreview] = useState<CatalogMedia | null>(null);
   useEffect(() => setPreview(null), [item?.id]);
@@ -1939,246 +2021,253 @@ export function ItemModal({
     </Modal>
   );
 }
-const styles = StyleSheet.create({
-  countdown: {
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  countdownIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wallet: { flexDirection: 'row', gap: 8 },
-  currency: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  balance: { color: C.ink, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  bundle: {
-    height: 200,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-    justifyContent: 'flex-end',
-  },
-  bundleInfo: { padding: 16, gap: 6 },
-  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  tileCell: { width: '48%', flexGrow: 1, maxWidth: '50%' },
-  archiveCard: {
-    width: '48%',
-    flexGrow: 1,
-    maxWidth: '50%',
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    overflow: 'hidden',
-    paddingBottom: 12,
-    gap: 10,
-  },
-  archiveImage: { width: '100%', height: 90, backgroundColor: C.raised },
-  tile: {
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    padding: 12,
-    paddingBottom: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    gap: 8,
-    overflow: 'hidden',
-  },
-  tileName: { color: C.ink, fontSize: 13, fontWeight: '600', lineHeight: 17, minHeight: 34 },
-  tileBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3 },
-  search: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: 14,
-  },
-  searchInput: { flex: 1, color: C.ink, fontSize: 15, paddingVertical: 12 },
-  rewardCard: {
-    width: 130,
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 12,
-    gap: 6,
-  },
-  nextReward: { backgroundColor: C.raised, borderRadius: 14, padding: 10 },
-  banner: {
-    backgroundColor: C.surface,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.border,
-    overflow: 'hidden',
-  },
-  bannerArt: { height: 120, backgroundColor: C.raised },
-  bannerBody: { paddingHorizontal: 16, paddingBottom: 16, marginTop: -28, gap: 14 },
-  bannerAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: C.surface,
-    backgroundColor: C.raised,
-  },
-  levelPill: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: '#0B1018B3',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  levelText: { color: C.ink, fontSize: 12, fontWeight: '700' },
-  rankRow: { flexDirection: 'row', alignItems: 'center' },
-  rankCol: { flex: 1, alignItems: 'center', gap: 6, paddingHorizontal: 6 },
-  rankDivider: { width: 1, alignSelf: 'stretch', backgroundColor: C.border, marginVertical: 8 },
-  rankIcon: { width: 64, height: 64 },
-  rankIconLarge: { width: 88, height: 88 },
-  rankIconEmpty: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: C.raised,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bigStat: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  miniValue: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  miniLabel: { color: C.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 0.8 },
-  liveCard: {
-    overflow: 'hidden',
-    minHeight: 76,
-    backgroundColor: C.surface,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  liveIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  matchCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  matchBody: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, paddingLeft: 16 },
-  matchStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  agentFrame: {
-    backgroundColor: C.raised,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resultText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
-  matchScore: { color: C.ink, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  rr: { fontWeight: '700', fontSize: 12, fontVariant: ['tabular-nums'] },
-  reportHero: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    minHeight: 170,
-    padding: 18,
-    justifyContent: 'flex-end',
-    gap: 4,
-    backgroundColor: C.surface,
-  },
-  heroScore: {
-    color: C.ink,
-    fontSize: 44,
-    fontWeight: '800',
-    letterSpacing: -1,
-    fontVariant: ['tabular-nums'],
-  },
-  playerCard: {
-    backgroundColor: C.surface,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 12,
-    paddingLeft: 16,
-    gap: 12,
-    overflow: 'hidden',
-  },
-  playerStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
-  roundLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  roundLabel: { width: 52, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
-  roundNumber: { width: 26, textAlign: 'center', color: C.subtle, fontSize: 10 },
-  roundCell: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    backgroundColor: C.raised,
-    borderWidth: 1,
-    borderColor: C.raised,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  duelScore: { fontSize: 17, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  duelBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', gap: 2 },
-  scrim: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#000000B3',
-    padding: 24,
-  },
-  detailHero: {
-    borderRadius: 22,
-    padding: 18,
-    minHeight: 240,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  videoShell: {
-    backgroundColor: '#000',
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  video: { width: '100%', aspectRatio: 16 / 9 },
-  mediaChip: {
-    width: 148,
-    backgroundColor: C.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 10,
-    gap: 6,
-  },
-});
+const makeStyles = (C: Palette) =>
+  StyleSheet.create({
+    countdown: {
+      borderRadius: 18,
+      padding: 16,
+      borderWidth: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    countdownIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    wallet: { flexDirection: 'row', gap: 8 },
+    currency: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: C.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+    },
+    balance: { color: C.ink, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    bundle: {
+      height: 200,
+      borderRadius: 18,
+      overflow: 'hidden',
+      backgroundColor: C.surface,
+      borderWidth: 1,
+      borderColor: C.border,
+      justifyContent: 'flex-end',
+    },
+    bundleInfo: { padding: 16, gap: 6 },
+    tileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    tileCell: { width: '48%', flexGrow: 1, maxWidth: '50%' },
+    archiveCard: {
+      width: '48%',
+      flexGrow: 1,
+      maxWidth: '50%',
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+      paddingBottom: 12,
+      gap: 10,
+    },
+    archiveImage: { width: '100%', height: 90, backgroundColor: C.raised },
+    tile: {
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      padding: 12,
+      paddingBottom: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      gap: 8,
+      overflow: 'hidden',
+    },
+    tileName: { color: C.ink, fontSize: 13, fontWeight: '600', lineHeight: 17, minHeight: 34 },
+    tileBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3 },
+    search: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: C.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 14,
+    },
+    searchInput: { flex: 1, color: C.ink, fontSize: 15, paddingVertical: 12 },
+    rewardCard: {
+      width: 130,
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 12,
+      gap: 6,
+    },
+    nextReward: { backgroundColor: C.raised, borderRadius: 14, padding: 10 },
+    banner: {
+      backgroundColor: C.surface,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+    },
+    bannerArt: { height: 120, backgroundColor: C.raised },
+    bannerBody: { paddingHorizontal: 16, paddingBottom: 16, marginTop: -28, gap: 14 },
+    bannerAvatar: {
+      width: 56,
+      height: 56,
+      borderRadius: 14,
+      borderWidth: 2,
+      borderColor: C.surface,
+      backgroundColor: C.raised,
+    },
+    levelPill: {
+      position: 'absolute',
+      top: 12,
+      right: 12,
+      backgroundColor: `${C.background}E6`,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    levelText: { color: C.ink, fontSize: 12, fontWeight: '700' },
+    rankRow: { flexDirection: 'row', alignItems: 'center' },
+    rankCol: { flex: 1, alignItems: 'center', gap: 6, paddingHorizontal: 6 },
+    rankDivider: { width: 1, alignSelf: 'stretch', backgroundColor: C.border, marginVertical: 8 },
+    rankIcon: { width: 64, height: 64 },
+    rankIconLarge: { width: 88, height: 88 },
+    rankIconEmpty: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: C.raised,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bigStat: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    miniValue: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    miniLabel: { color: C.subtle, fontSize: 10, fontWeight: '600', letterSpacing: 0.8 },
+    liveCard: {
+      overflow: 'hidden',
+      minHeight: 76,
+      backgroundColor: C.surface,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    liveIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    matchCard: {
+      borderRadius: 16,
+      overflow: 'hidden',
+      backgroundColor: C.surface,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    matchBody: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      padding: 12,
+      paddingLeft: 16,
+    },
+    matchStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+    agentFrame: {
+      backgroundColor: C.raised,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    resultText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
+    matchScore: { color: C.ink, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    rr: { fontWeight: '700', fontSize: 12, fontVariant: ['tabular-nums'] },
+    reportHero: {
+      borderRadius: 20,
+      overflow: 'hidden',
+      minHeight: 170,
+      padding: 18,
+      justifyContent: 'flex-end',
+      gap: 4,
+      backgroundColor: C.surface,
+    },
+    heroScore: {
+      color: C.ink,
+      fontSize: 44,
+      fontWeight: '800',
+      letterSpacing: -1,
+      fontVariant: ['tabular-nums'],
+    },
+    playerCard: {
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 12,
+      paddingLeft: 16,
+      gap: 12,
+      overflow: 'hidden',
+    },
+    playerStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4 },
+    roundLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    roundLabel: { width: 52, fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+    roundNumber: { width: 26, textAlign: 'center', color: C.subtle, fontSize: 10 },
+    roundCell: {
+      width: 26,
+      height: 26,
+      borderRadius: 6,
+      backgroundColor: C.raised,
+      borderWidth: 1,
+      borderColor: C.raised,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    duelScore: { fontSize: 17, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    duelBar: { flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', gap: 2 },
+    scrim: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#000000B3',
+      padding: 24,
+    },
+    detailHero: {
+      borderRadius: 22,
+      padding: 18,
+      minHeight: 240,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    videoShell: {
+      backgroundColor: '#000',
+      borderRadius: 18,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    video: { width: '100%', aspectRatio: 16 / 9 },
+    mediaChip: {
+      width: 148,
+      backgroundColor: C.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 10,
+      gap: 6,
+    },
+  });

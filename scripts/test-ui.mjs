@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.3.1');
+const out = path.join(root, 'docs', 'validation-0.4.0');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -230,6 +230,82 @@ try {
       assert.ok(dimensions.document <= dimensions.viewport, JSON.stringify(dimensions));
       await shot(`profile-${width}`);
     }
+  });
+  await check('all themes apply immediately and light theme persists across restart', async () => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const mode of ['Dark', 'Light', 'Navy']) {
+      await tab('Settings');
+      await tab(mode);
+      await page.waitForTimeout(100);
+      const expected = {
+        Dark: 'rgb(7, 7, 7)',
+        Light: 'rgb(245, 246, 248)',
+        Navy: 'rgb(11, 16, 24)',
+      }[mode];
+      assert.ok(
+        await page
+          .locator('div')
+          .evaluateAll(
+            (nodes, color) =>
+              nodes.some(
+                (n) =>
+                  getComputedStyle(n).backgroundColor === color &&
+                  n.getBoundingClientRect().height > 500,
+              ),
+            expected,
+          ),
+      );
+      await tab('Profile');
+      await shot(`profile-theme-${mode.toLowerCase()}`);
+      if (mode === 'Light') {
+        await click('View live game details');
+        await shot('live-light');
+        await click('Back from live match');
+        await click('Change player card and title');
+        await shot('identity-light');
+        await click('Back from identity editor');
+      }
+    }
+    await tab('Settings');
+    await tab('Light');
+    await page.reload({ waitUntil: 'networkidle' });
+    await click('Try the demo');
+    await tab('Settings');
+    assert.equal(
+      await page.getByRole('tab', { name: 'Light', exact: true }).getAttribute('aria-selected'),
+      'true',
+    );
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await tab('System');
+    await page.waitForTimeout(150);
+    await shot('settings-system-dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.waitForTimeout(150);
+    await shot('settings-system-light');
+    await tab('Light');
+  });
+  await check('saved messages survive app restart without connecting to Riot', async () => {
+    await click('Open friends and chat');
+    await tab('Saved · 1');
+    await page
+      .getByRole('button', { name: /^Message/ })
+      .first()
+      .click();
+    await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
+    await shot('saved-chat-offline-light');
+    assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
+    await click('Reconnect chat');
+    await page.getByRole('button', { name: 'View player profile', exact: true }).waitFor();
+    await click('Sync Riot history');
+    await page.getByText('Demo: no Riot server was contacted.', { exact: true }).waitFor();
+    await click('Delete saved conversation');
+    await click('Keep messages');
+    await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
+    await click('Delete saved conversation');
+    await click('Delete local messages');
+    await page.getByText('No messages saved yet', { exact: true }).waitFor();
+    await click('Back from conversation');
+    await click('Back from friends');
   });
   assert.equal(errors.length, 0, JSON.stringify(errors));
 } catch (e) {

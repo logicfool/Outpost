@@ -19,5 +19,7 @@
   "@expo/vector-icons",
   "expo-video",
   "@react-native-cookies/cookies",
-  "expo-image"
+  "expo-image",
+  "expo-system-ui",
+  "expo-file-system"
 ]

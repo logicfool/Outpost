@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -10,103 +10,100 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import {
-  authorizationUrl,
   decodeJwtClaimsUnverified,
   isCallback,
   isLoginNavigationAllowed,
-  parseCallback,
   REGIONS,
 } from '../core/auth';
-import { AppError, number, safeError, token } from '../core/validation';
-import type { LoginAttempt, LoginTokens, Region } from '../core/types';
+import { LoginFlow, type LoginState } from '../core/loginFlow';
+import { recordLogin } from '../core/diagnostics';
+import { AppError, number, token } from '../core/validation';
+import type { Region } from '../core/types';
 import { randomHex } from '../platform/secure';
-import { captureRiotReauthCookies } from '../platform/cookies';
+import { captureRiotReauthCookies, clearRiotWebCookies } from '../platform/cookies';
 import { Button, ModalHeader, ModalPage, Tabs } from './components';
-import { C, S } from './theme';
+import { useTheme, type Palette } from './theme';
 import type { LoginProps } from './Login.types';
+
 export default function Login({ onClose, onLink, expectedId }: LoginProps) {
-  const [phase, setPhase] = useState<'start' | 'browser' | 'exchange'>('start'),
-    [advanced, setAdvanced] = useState(false);
+  const { C, S, isDark } = useTheme();
+
+  const [state, setState] = useState<LoginState>({ phase: 'start' });
   const [region, setRegion] = useState<'auto' | Region>('auto'),
-    [error, setError] = useState<string | null>(null),
-    [origin, setOrigin] = useState('https://auth.riotgames.com');
+    [advanced, setAdvanced] = useState(false);
   const [access, setAccess] = useState(''),
-    [idToken, setIdToken] = useState('');
-  const attempt = useRef<LoginAttempt | null>(null),
-    consumed = useRef(false),
-    alive = useRef(true);
-  React.useEffect(
-    () => () => {
-      alive.current = false;
-      accessRef.current = '';
-    },
-    [],
-  );
-  const accessRef = useRef('');
-  accessRef.current = access;
-  const close = () => {
-    if (phase !== 'exchange') onClose();
-  };
-  const finish = async (tokens: LoginTokens) => {
-    setPhase('exchange');
-    setError(null);
-    setAccess('');
-    setIdToken('');
-    try {
-      await onLink(tokens, region === 'auto' ? undefined : region, expectedId);
-      if (alive.current) onClose();
-    } catch (e) {
-      if (alive.current) {
-        setError(safeError(e).message);
-        setPhase('start');
-      }
-    }
-  };
-  const begin = () => {
-    consumed.current = false;
-    attempt.current = { state: randomHex(), nonce: randomHex(), createdAt: Date.now() };
-    setError(null);
-    setPhase('browser');
-  };
-  const navigate = (url: string): boolean => {
-    if (isCallback(url)) {
-      if (!consumed.current && attempt.current) {
-        consumed.current = true;
-        try {
-          const tokens = parseCallback(url, attempt.current);
-          void captureRiotReauthCookies()
-            .then((cookies) => finish({ ...tokens, reauthCookies: cookies }))
-            .catch(() => finish(tokens));
-        } catch (e) {
-          setError(safeError(e).message);
-          setPhase('start');
+    [idToken, setIdToken] = useState(''),
+    [origin, setOrigin] = useState('https://auth.riotgames.com');
+  const latest = useRef({ onLink, region, expectedId });
+  latest.current = { onLink, region, expectedId };
+  const alive = useRef(true),
+    currentUrl = useRef('');
+  const flowRef = useRef<LoginFlow | null>(null);
+  if (!flowRef.current)
+    flowRef.current = new LoginFlow({
+      attempt: () => ({ state: randomHex(), nonce: randomHex(), createdAt: Date.now() }),
+      clearBrowser: clearRiotWebCookies,
+      captureCookies: captureRiotReauthCookies,
+      save: (tokens) => {
+        const value = latest.current;
+        return value.onLink(
+          tokens,
+          value.region === 'auto' ? undefined : value.region,
+          value.expectedId,
+        );
+      },
+      emit: (value) => {
+        if (alive.current) {
+          setState(value);
+          if (value.phase !== 'start') {
+            setAccess('');
+            setIdToken('');
+          }
         }
-      }
-      return false;
-    }
-    return isLoginNavigationAllowed(url);
+      },
+      diagnostic: recordLogin,
+    });
+  const flow = flowRef.current;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      flow.dispose();
+    };
+  }, [flow]);
+  const working = state.phase === 'preparing' || state.phase === 'exchange';
+  const close = () => {
+    if (!working) onClose();
   };
+  const navigate = (url: string) => flow.navigate(url);
   return (
     <Modal animationType="slide" onRequestClose={close}>
       <ModalPage>
         <ModalHeader
-          title={expectedId ? 'Reconnect account' : 'Connect Riot account'}
-          detail={phase === 'browser' ? origin : undefined}
-          closeLabel={phase === 'exchange' ? 'Verification in progress' : 'Close sign-in'}
+          title={
+            state.phase === 'success'
+              ? 'Account connected'
+              : expectedId
+                ? 'Reconnect account'
+                : 'Add Riot account'
+          }
+          detail={state.phase === 'browser' ? origin : undefined}
+          closeLabel={working ? 'Verification in progress' : 'Close sign-in'}
           onClose={close}
         />
-        {phase === 'start' && (
+        {state.phase === 'start' && (
           <ScrollView contentContainerStyle={S.content} keyboardShouldPersistTaps="handled">
             <View style={{ gap: 8 }}>
               <Text style={S.title}>Sign in with Riot</Text>
               <Text style={S.body}>
-                You will sign in on Riot's own page. Outpost never sees your password.
+                Use the Riot account you want to add. Existing accounts stay saved separately.
               </Text>
             </View>
-            {error && (
-              <Text accessibilityRole="alert" style={{ color: C.accent, lineHeight: 21 }}>
-                {error}
-              </Text>
+            {state.error && (
+              <View style={S.card} accessibilityRole="alert">
+                <Text style={[S.body, { color: C.accent }]}>{state.error}</Text>
+                <Text style={S.small}>{state.code}</Text>
+              </View>
             )}
             <View style={{ gap: 10 }}>
               <Text style={S.h3}>Region</Text>
@@ -119,8 +116,16 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
                 ]}
               />
             </View>
-            <Button title="Continue to Riot sign-in" icon="arrow-up-right" onPress={begin} />
-            <Pressable onPress={() => setAdvanced(!advanced)}>
+            <Button
+              title="Continue to Riot sign-in"
+              icon="arrow-up-right"
+              onPress={() => void flow.begin()}
+            />
+            <Text style={S.small}>
+              A fresh Riot browser session opens each time so another saved account cannot silently
+              sign you in.
+            </Text>
+            <Pressable accessibilityRole="button" onPress={() => setAdvanced(!advanced)}>
               <Text style={[S.small, { textAlign: 'center', padding: 10 }]}>
                 Use an access token instead {advanced ? '−' : '+'}
               </Text>
@@ -128,7 +133,7 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             {advanced && (
               <View style={S.card}>
                 <Text style={S.body}>
-                  Paste your own access token. Pick a region if you don't add an ID token.
+                  Paste only your own token. Select a region when you do not supply an ID token.
                 </Text>
                 <TextInput
                   style={S.input}
@@ -162,18 +167,22 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
                     try {
                       token(access);
                       const expires = number(decodeJwtClaimsUnverified(access).exp) * 1000;
-                      if (!expires || expires <= Date.now() + 30000)
+                      if (expires <= Date.now() + 30000)
                         throw new AppError(
                           'SESSION_EXPIRED',
-                          'This token has expired. Use Riot sign-in instead.',
+                          'This token has expired. Use Riot sign-in.',
                         );
-                      void finish({
+                      void flow.manual({
                         accessToken: access,
                         idToken: idToken || undefined,
                         expiresAt: Math.min(expires, Date.now() + 3600000),
                       });
-                    } catch (e) {
-                      setError(safeError(e).message);
+                    } catch {
+                      setState({
+                        phase: 'start',
+                        error: 'This token is invalid or expired. Use Riot sign-in.',
+                        code: 'AUTH_TOKEN',
+                      });
                     }
                   }}
                 />
@@ -181,12 +190,12 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             )}
           </ScrollView>
         )}
-        {phase === 'browser' && attempt.current && (
+        {state.phase === 'browser' && state.url && (
           <WebView
-            key={attempt.current.state}
-            source={{ uri: authorizationUrl(attempt.current) }}
+            key={state.url}
+            source={{ uri: state.url }}
             incognito={false}
-            cacheEnabled
+            cacheEnabled={false}
             sharedCookiesEnabled
             thirdPartyCookiesEnabled
             mixedContentMode="never"
@@ -222,36 +231,66 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
               }
               return navigate(request.url);
             }}
-            onNavigationStateChange={(state) => {
-              if (isCallback(state.url)) navigate(state.url);
+            onNavigationStateChange={(event) => {
+              if (isCallback(event.url)) navigate(event.url);
               else {
+                currentUrl.current = event.url;
                 try {
-                  setOrigin(new URL(state.url).origin);
+                  setOrigin(new URL(event.url).origin);
                 } catch {}
               }
             }}
-            onOpenWindow={() => {
-              setError(
-                'This sign-in option opens an external window. Use your Riot account sign-in instead.',
-              );
-              setPhase('start');
-            }}
-            onError={() => {
-              setError('Riot sign-in could not be loaded. Try again.');
-              setPhase('start');
-            }}
+            onOpenWindow={() =>
+              flow.browserError(
+                'This option requires an external window. Use Riot username/password sign-in in this window.',
+              )
+            }
+            onError={() => flow.browserError('Riot sign-in could not be loaded. Try again.')}
             onHttpError={(event) => {
-              if (event.nativeEvent.statusCode >= 400) {
-                setError('Riot sign-in is unavailable right now. Try again later.');
-                setPhase('start');
-              }
+              if (
+                event.nativeEvent.statusCode >= 400 &&
+                event.nativeEvent.url === currentUrl.current
+              )
+                flow.browserError('Riot sign-in is temporarily unavailable. Try again.');
             }}
+            onContentProcessDidTerminate={() =>
+              flow.browserError('The sign-in window was closed by the system. Please retry.')
+            }
           />
         )}
-        {phase === 'exchange' && (
-          <View style={[S.flex, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
+        {working && (
+          <View
+            style={[
+              S.flex,
+              { alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
+            ]}
+          >
             <ActivityIndicator size="large" color={C.accent} />
-            <Text style={S.h3}>Connecting your account…</Text>
+            <Text style={S.h3}>
+              {state.phase === 'preparing'
+                ? 'Opening a fresh sign-in…'
+                : 'Verifying and saving account…'}
+            </Text>
+            <Text style={[S.body, { textAlign: 'center' }]}>
+              Your existing linked accounts are not removed.
+            </Text>
+          </View>
+        )}
+        {state.phase === 'success' && state.account && (
+          <View style={[S.content, { paddingTop: 28 }]}>
+            <Text style={S.title}>{expectedId ? 'Account reconnected' : 'Account added'}</Text>
+            <View style={S.card}>
+              <Text style={S.h2}>
+                {state.account.gameName} #{state.account.tagLine}
+              </Text>
+              <Text style={S.body}>{state.account.region.toUpperCase()} · Saved and selected</Text>
+              <Text style={S.small}>
+                {state.account.canReauth
+                  ? 'Session renewal is enabled for this account.'
+                  : 'Riot did not provide reusable cookies. This account may need sign-in after expiry.'}
+              </Text>
+            </View>
+            <Button title="Done - view account" icon="check" onPress={onClose} />
           </View>
         )}
       </ModalPage>

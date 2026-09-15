@@ -1,6 +1,6 @@
-import type { LoginTokens, Region } from '../core/types';
+import type { Account, LoginTokens, Region } from '../core/types';
 export interface LoginProps {
   onClose(): void;
-  onLink(tokens: LoginTokens, region?: Region, expectedId?: string): Promise<void>;
+  onLink(tokens: LoginTokens, region?: Region, expectedId?: string): Promise<Account>;
   expectedId?: string;
 }

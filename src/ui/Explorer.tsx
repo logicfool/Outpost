@@ -37,7 +37,7 @@ import {
 import { CareerModal, MatchCard, MatchReport } from './screens';
 import { playerLabel } from '../core/playerNames';
 import { PlayerCover } from './profileViews';
-import { C, S } from './theme';
+import { useTheme, type Palette } from './theme';
 
 type PanelProps = { model: AppModel; onNavigate: Navigate; onBack(): void };
 const time = (at: number) =>
@@ -51,6 +51,8 @@ const statusName: Record<Friend['presence'], string> = {
   offline: 'Offline',
 };
 function RankSummary({ rank, onCareer }: { rank: Ranked; onCareer(): void }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -104,6 +106,8 @@ function RankSummary({ rank, onCareer }: { rank: Ranked; onCareer(): void }) {
   );
 }
 function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { player: PlayerRef }) {
+  const { C, S, isDark } = useTheme();
+
   const [data, setData] = useState<PlayerProfile | null>(null),
     [error, setError] = useState<string | null>(null),
     [version, setVersion] = useState(0);
@@ -247,6 +251,8 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
   );
 }
 function LivePanel({ model, onBack, onNavigate }: PanelProps) {
+  const { C, S, isDark } = useTheme();
+
   const polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
   const [ranks, setRanks] = useState<Record<string, Ranked>>({});
@@ -404,6 +410,8 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
 }
 
 function IdentityPanel({ model, onBack }: PanelProps) {
+  const { C, S, isDark } = useTheme();
+
   const [base, setBase] = useState<Loadout | null>(null),
     [tab, setTab] = useState<'card' | 'title'>('card');
   const [cardId, setCardId] = useState<string | undefined>(),
@@ -613,22 +621,40 @@ function IdentityPanel({ model, onBack }: PanelProps) {
   );
 }
 function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
-  const [filter, setFilter] = useState<'all' | 'online'>('online'),
+  const { C, S } = useTheme();
+  const [filter, setFilter] = useState<'all' | 'online' | 'saved'>('online'),
     [search, setSearch] = useState('');
   const { chat } = model,
     connected = chat.status === 'ready',
     busy = chat.status === 'connecting' || chat.status === 'authenticating';
-  const friends = chat.friends.filter(
-    (f) =>
-      (filter === 'all' || f.presence !== 'offline') &&
-      `${f.name}#${f.tag}`.toLowerCase().includes(search.toLowerCase()),
+  const saved = model.savedConversations.filter((c) => c.count > 0);
+  const rows =
+    filter === 'saved'
+      ? saved.map((c) => ({
+          subject: c.subject,
+          friend: chat.friends.find((f) => f.subject === c.subject) ?? c.friend,
+          count: c.count,
+          unread: c.unread,
+        }))
+      : chat.friends
+          .filter((f) => filter === 'all' || f.presence !== 'offline')
+          .map((f) => ({
+            subject: f.subject,
+            friend: f,
+            count: 0,
+            unread: chat.unread[f.subject] ?? 0,
+          }));
+  const friends = rows.filter((row) =>
+    `${row.friend?.name ?? 'Saved conversation'}#${row.friend?.tag ?? ''}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   );
   return (
     <ModalPage>
       <ModalHeader title="Friends & chat" closeLabel="Back from friends" onClose={onBack} />
       <FlatList
         data={friends}
-        keyExtractor={(f) => f.subject}
+        keyExtractor={(row) => row.subject}
         contentContainerStyle={S.content}
         ListHeaderComponent={
           <View style={{ gap: 14, paddingBottom: 8 }}>
@@ -636,12 +662,13 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
               <View style={[S.between, { flexWrap: 'wrap', rowGap: 8 }]}>
                 <Text style={[S.h2, { flexShrink: 1 }]}>Your Riot friends</Text>
                 <Badge
-                  text={connected ? 'CONNECTED' : busy ? 'CONNECTING' : 'DISCONNECTED'}
+                  text={connected ? 'CONNECTED' : busy ? 'CONNECTING' : 'OFFLINE'}
                   color={connected ? C.mint : C.gold}
                 />
               </View>
               <Text style={S.body}>
-                See who’s online and message friends while Outpost is open.
+                Messages are saved on this device, separately for each account. Connect to see live
+                presence, send whispers or sync Riot history.
               </Text>
               {chat.error && <Text style={[S.body, { color: C.gold }]}>{chat.error}</Text>}
               <Button
@@ -651,9 +678,14 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
                 onPress={() => (connected ? model.disconnectChat() : void model.connectChat())}
               />
             </View>
+            {chat.storageError && (
+              <Text accessibilityRole="alert" style={[S.body, { color: C.accent }]}>
+                {chat.storageError}
+              </Text>
+            )}
             {model.active?.demo && (
               <Text style={S.small}>
-                Demo friends and messages are simulated. Nothing is sent to Riot.
+                Demo conversations are simulated. No messages are sent to Riot.
               </Text>
             )}
             <Tabs
@@ -665,6 +697,7 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
                   label: `Online · ${chat.friends.filter((f) => f.presence !== 'offline').length}`,
                 },
                 { id: 'all', label: `All friends · ${chat.friends.length}` },
+                { id: 'saved', label: `Saved · ${saved.length}` },
               ]}
             />
             <TextInput
@@ -678,56 +711,69 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
             />
           </View>
         }
-        renderItem={({ item: friend }) => (
+        renderItem={({ item: row }) => (
           <View style={[S.card, { marginBottom: 12 }]}>
-            {friend.card?.wideArt && (
+            {row.friend?.card?.wideArt && (
               <Image
-                source={{ uri: friend.card.wideArt }}
+                source={{ uri: row.friend.card.wideArt }}
                 style={{ width: '100%', height: 75, borderRadius: 12, opacity: 0.85 }}
                 resizeMode="cover"
               />
             )}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`View ${friend.name} profile`}
-              onPress={() => onNavigate({ type: 'player', player: friend })}
+              accessibilityLabel={`View ${row.friend?.name ?? 'saved friend'} profile`}
+              disabled={!connected || !chat.friends.some((f) => f.subject === row.subject)}
+              onPress={() => row.friend && onNavigate({ type: 'player', player: row.friend })}
               style={S.between}
             >
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={S.h3}>
-                  {friend.name}
-                  <Text style={{ color: C.subtle }}> #{friend.tag}</Text>
+                  {row.friend?.name ?? 'Saved conversation'}
+                  <Text style={{ color: C.subtle }}>
+                    {row.friend?.tag ? ` #${row.friend.tag}` : ''}
+                  </Text>
                 </Text>
                 <Text
-                  style={[S.small, { color: friend.presence === 'offline' ? C.subtle : C.mint }]}
+                  style={[
+                    S.small,
+                    { color: connected && row.friend?.presence !== 'offline' ? C.mint : C.subtle },
+                  ]}
                 >
-                  {statusName[friend.presence]}
-                  {friend.map ? ` · ${friend.map}` : ''}
+                  {connected && row.friend ? statusName[row.friend.presence] : 'Offline'}
+                  {row.friend?.map ? ` · ${row.friend.map}` : ''}
+                  {row.count ? ` · ${row.count} saved messages` : ''}
                 </Text>
               </View>
               <Feather name="chevron-right" size={20} color={C.subtle} />
             </Pressable>
             <Button
-              title={`Message${chat.unread[friend.subject] ? ` · ${chat.unread[friend.subject]} unread` : ''}`}
+              title={`Message${row.unread ? ` · ${row.unread} unread` : ''}`}
               secondary
               icon="message-circle"
-              onPress={() => onNavigate({ type: 'chat', subject: friend.subject })}
+              onPress={() => onNavigate({ type: 'chat', subject: row.subject })}
             />
           </View>
         )}
         ListEmptyComponent={
           <Empty
             title={
-              connected
-                ? 'No friends in this view'
-                : busy
-                  ? 'Connecting to Riot…'
-                  : 'Connect to load friends'
+              filter === 'saved'
+                ? model.historyLoading
+                  ? 'Opening saved history…'
+                  : 'No saved conversations yet'
+                : connected
+                  ? 'No friends in this view'
+                  : busy
+                    ? 'Connecting to Riot…'
+                    : 'Connect to load friends'
             }
             detail={
-              connected
-                ? 'Try All friends or a different search.'
-                : 'Your friends will appear after Riot chat connects.'
+              filter === 'saved'
+                ? 'Messages you send, receive or sync are kept until you delete them or remove this account.'
+                : connected
+                  ? 'Try All friends or a different search.'
+                  : 'Saved conversations remain available without connecting.'
             }
             icon="users"
           />
@@ -737,21 +783,28 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
   );
 }
 function ChatPanel({ subject, model, onBack, onNavigate }: PanelProps & { subject: string }) {
-  const friend = model.chat.friends.find((f) => f.subject === subject),
-    messages = model.chat.messages[subject] ?? [];
+  const { C, S } = useTheme();
+  const liveFriend = model.chat.friends.find((f) => f.subject === subject);
+  const friend = liveFriend ?? model.savedConversations.find((c) => c.subject === subject)?.friend;
+  const messages = model.chat.messages[subject] ?? [],
+    archive = model.chat.archive?.[subject];
   const [body, setBody] = useState(''),
     [error, setError] = useState<string | null>(null),
-    [sending, setSending] = useState(false);
+    [sending, setSending] = useState(false),
+    [more, setMore] = useState(false),
+    [confirm, setConfirm] = useState(false);
   const scroll = useRef<ScrollView>(null),
-    mounted = useRef(true);
+    mounted = useRef(true),
+    follow = useRef(true);
   useEffect(() => {
     mounted.current = true;
     model.markChatRead(subject);
+    void model.loadChatMessages(subject);
     return () => {
       mounted.current = false;
       model.markChatRead();
     };
-  }, [subject, model.markChatRead]);
+  }, [subject, model.markChatRead, model.loadChatMessages]);
   useEffect(() => {
     model.markChatRead(subject);
   }, [messages.length, subject, model.markChatRead]);
@@ -760,6 +813,7 @@ function ChatPanel({ subject, model, onBack, onNavigate }: PanelProps & { subjec
     setSending(true);
     setError(null);
     const sent = body;
+    follow.current = true;
     try {
       await model.sendChat(subject, sent);
       if (mounted.current) setBody((previous) => (previous === sent ? '' : previous));
@@ -769,68 +823,171 @@ function ChatPanel({ subject, model, onBack, onNavigate }: PanelProps & { subjec
       if (mounted.current) setSending(false);
     }
   };
+  const sync = async () => {
+    setError(null);
+    try {
+      await model.syncChatHistory(subject);
+    } catch (e) {
+      if (mounted.current) setError(safeError(e).message);
+    }
+  };
+  const older = async () => {
+    setMore(true);
+    follow.current = false;
+    await model.loadChatMessages(subject, model.historyCursors[subject]);
+    if (mounted.current) setMore(false);
+  };
+  const erase = async () => {
+    setConfirm(false);
+    try {
+      await model.clearChatHistory(subject);
+    } catch (e) {
+      if (mounted.current) setError(safeError(e).message);
+    }
+  };
   return (
     <ModalPage>
       <ModalHeader
-        title={friend ? `${friend.name} #${friend.tag}` : 'Conversation'}
-        detail={friend ? statusName[friend.presence] : undefined}
+        title={
+          friend ? `${friend.name}${friend.tag ? ' #' + friend.tag : ''}` : 'Saved conversation'
+        }
+        detail={
+          model.chat.status === 'ready' && liveFriend
+            ? statusName[liveFriend.presence]
+            : 'Saved on this device'
+        }
         closeLabel="Back from conversation"
         onClose={onBack}
       />
       <KeyboardAvoidingView style={S.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ paddingHorizontal: 18, paddingVertical: 10, gap: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 10, gap: 8 }}>
           <Text style={S.small}>
-            Messages are kept only in memory. “Sent” means written to the connection, not a delivery
-            or read receipt.
+            Saved on this device until deleted. Sync retrieves the history Riot currently returns.
+            Sent is not a delivery or read receipt.
           </Text>
-          {friend && (
+          <View style={[S.row, { flexWrap: 'wrap' }]}>
+            {liveFriend && (
+              <Button
+                title="View player profile"
+                secondary
+                onPress={() => onNavigate({ type: 'player', player: liveFriend })}
+              />
+            )}
             <Button
-              title="View player profile"
+              title={archive?.status === 'loading' ? 'Syncing Riot history…' : 'Sync Riot history'}
               secondary
-              onPress={() => onNavigate({ type: 'player', player: friend })}
+              disabled={
+                model.chat.status !== 'ready' || !liveFriend || archive?.status === 'loading'
+              }
+              onPress={() => void sync()}
             />
+          </View>
+          {archive?.message && (
+            <Text
+              accessibilityRole={archive.status === 'error' ? 'alert' : undefined}
+              style={[S.small, archive.status === 'error' && { color: C.gold }]}
+            >
+              {archive.message}
+            </Text>
           )}
           {model.chat.status !== 'ready' && (
-            <Button title="Reconnect chat" secondary onPress={() => void model.connectChat()} />
+            <Button
+              title="Reconnect chat"
+              secondary
+              disabled={
+                model.chat.status === 'connecting' || model.chat.status === 'authenticating'
+              }
+              onPress={() => void model.connectChat()}
+            />
           )}
         </View>
         <ScrollView
           ref={scroll}
-          contentContainerStyle={{ padding: 18, gap: 12, flexGrow: 1 }}
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+          contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
+          onContentSizeChange={() => {
+            if (follow.current) scroll.current?.scrollToEnd({ animated: true });
+          }}
         >
+          {model.historyCursors[subject] && (
+            <Button
+              title={more ? 'Loading saved messages…' : 'Load older saved messages'}
+              secondary
+              disabled={more}
+              onPress={() => void older()}
+            />
+          )}
           {!messages.length && (
             <Empty
-              title="Start a conversation"
-              detail="Only messages received during this app session appear here."
+              title="No messages saved yet"
+              detail="Send a message or connect and sync available Riot history."
               icon="message-circle"
             />
           )}
-          {messages.map((message) => (
-            <View
-              key={`${message.direction}:${message.id}`}
-              style={{
-                alignSelf: message.direction === 'outgoing' ? 'flex-end' : 'flex-start',
-                maxWidth: '88%',
-                backgroundColor: message.direction === 'outgoing' ? `${C.accent}22` : C.surface,
-                borderRadius: 18,
-                padding: 14,
-                gap: 6,
-              }}
-            >
-              <Text selectable style={[S.body, { color: C.ink }]}>
-                {message.body}
-              </Text>
-              <Text style={S.small}>
-                {time(message.at)}
-                {message.direction === 'outgoing'
-                  ? ` · ${message.state === 'sent' ? 'Sent' : message.state === 'failed' ? 'Unconfirmed - not retried' : 'Sending…'}`
-                  : ''}
-              </Text>
-            </View>
+          {messages.map((message, index) => (
+            <React.Fragment key={`${message.direction}:${message.id}`}>
+              {(!index ||
+                new Date(messages[index - 1]!.at).toDateString() !==
+                  new Date(message.at).toDateString()) && (
+                <Text style={[S.small, { textAlign: 'center', marginVertical: 4 }]}>
+                  {new Date(message.at).toLocaleDateString()}
+                </Text>
+              )}
+              <View
+                style={{
+                  alignSelf: message.direction === 'outgoing' ? 'flex-end' : 'flex-start',
+                  maxWidth: '88%',
+                  backgroundColor: message.direction === 'outgoing' ? `${C.accent}18` : C.surface,
+                  borderRadius: 18,
+                  borderWidth: 1,
+                  borderColor: C.border,
+                  padding: 14,
+                  gap: 6,
+                }}
+              >
+                <Text selectable style={[S.body, { color: C.ink }]}>
+                  {message.body}
+                </Text>
+                <Text style={S.small}>
+                  {time(message.at)}
+                  {message.serverStored
+                    ? ' · Riot history'
+                    : message.source === 'riot-client'
+                      ? ' · Riot client'
+                      : message.direction === 'outgoing'
+                        ? ` · ${message.state === 'sent' ? 'Sent' : message.state === 'failed' ? 'Unconfirmed - not retried' : 'Sending…'}`
+                        : ''}
+                </Text>
+              </View>
+            </React.Fragment>
           ))}
         </ScrollView>
-        {error && <Text style={[S.body, { paddingHorizontal: 18, color: C.gold }]}>{error}</Text>}
+        {(error || model.chat.storageError) && (
+          <Text
+            accessibilityRole="alert"
+            style={[S.body, { paddingHorizontal: 16, color: C.gold }]}
+          >
+            {error ?? model.chat.storageError}
+          </Text>
+        )}
+        {confirm ? (
+          <View style={[S.card, { marginHorizontal: 16 }]}>
+            <Text style={S.body}>
+              Delete this conversation from this device? This does not delete Riot’s copy. Chat
+              disconnects before deletion.
+            </Text>
+            <Button title="Delete local messages" onPress={() => void erase()} />
+            <Button title="Keep messages" secondary onPress={() => setConfirm(false)} />
+          </View>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Delete saved conversation"
+            onPress={() => setConfirm(true)}
+            style={{ paddingHorizontal: 16, paddingVertical: 8 }}
+          >
+            <Text style={S.small}>Delete saved conversation</Text>
+          </Pressable>
+        )}
         <View
           style={[
             S.row,
@@ -849,7 +1006,7 @@ function ChatPanel({ subject, model, onBack, onNavigate }: PanelProps & { subjec
           />
           <Button
             title={sending ? '…' : 'Send'}
-            disabled={sending || !body.trim() || !friend || model.chat.status !== 'ready'}
+            disabled={sending || !body.trim() || !liveFriend || model.chat.status !== 'ready'}
             onPress={() => void send()}
             icon="send"
           />

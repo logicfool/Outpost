@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { requestDiagnostics } from '../core/diagnostics';
 import { Button } from './components';
-import { S } from './theme';
+import { useTheme, type Palette } from './theme';
 export function DiagnosticsPanel() {
+  const { C, S, isDark } = useTheme();
+
   const [open, setOpen] = useState(false),
     [rows, setRows] = useState(requestDiagnostics);
   return (

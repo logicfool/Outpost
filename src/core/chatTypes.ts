@@ -26,12 +26,19 @@ export interface ChatMessage {
   at: number;
   direction: 'incoming' | 'outgoing';
   state: 'received' | 'sending' | 'sent' | 'failed';
+  source?: 'outpost' | 'live' | 'riot-archive' | 'riot-client';
+  serverStored?: boolean;
 }
 export interface ChatState {
   status: 'disconnected' | 'connecting' | 'authenticating' | 'ready' | 'error';
   error?: string;
   errorCode?: string;
   retryAt?: number;
+  storageError?: string;
+  archive?: Record<
+    string,
+    { status: 'loading' | 'ready' | 'error'; message?: string; count?: number; at?: number }
+  >;
   unread: Record<string, number>;
   friends: Friend[];
   messages: Record<string, ChatMessage[]>;
@@ -57,3 +64,20 @@ export type ChatTransport = (
   config: Pick<ChatBootstrap, 'host' | 'port'>,
   events: ChatEvents,
 ) => ChatConnection;
+
+export interface ChatHooks {
+  saveMessage?(message: ChatMessage): Promise<void>;
+  newId?(): string;
+}
+export interface Conversation {
+  subject: string;
+  friend?: Friend;
+  lastAt: number;
+  count: number;
+  unread: number;
+}
+export interface MessageCursor {
+  at: number;
+  id: string;
+  direction: string;
+}

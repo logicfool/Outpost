@@ -2,8 +2,9 @@ import React from 'react';
 import { Modal, Text, View } from 'react-native';
 import type { LoginProps } from './Login.types';
 import { Button } from './components';
-import { S } from './theme';
+import { useTheme, type Palette } from './theme';
 export default function Login({ onClose }: LoginProps) {
+  const { C, S, isDark } = useTheme();
   return (
     <Modal onRequestClose={onClose}>
       <View style={[S.page, S.content, { justifyContent: 'center' }]}>

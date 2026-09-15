@@ -1,4 +1,5 @@
 import { nativeFetcher } from './network';
+import { removeChatStorage } from './chatStorage';
 import { PlayerScope } from '../core/playerScope';
 import type { IdentityEdit } from '../core/playerTypes';
 import type { Loadout } from '../core/types';
@@ -49,7 +50,20 @@ export class Runtime {
     await this.repository.saveCatalog(fresh);
     return fresh;
   }
-  async link(input: LoginTokens, region?: Region, expectedId?: string): Promise<Account> {
+  private linkQueue: Promise<unknown> = Promise.resolve();
+  private linkingAccounts = new Set<string>();
+  link(input: LoginTokens, region?: Region, expectedId?: string): Promise<Account> {
+    const work = this.linkQueue
+      .catch(() => {})
+      .then(() => this.linkAccount(input, region, expectedId));
+    this.linkQueue = work;
+    return work;
+  }
+  private async linkAccount(
+    input: LoginTokens,
+    region?: Region,
+    expectedId?: string,
+  ): Promise<Account> {
     if (Platform.OS === 'web')
       throw new AppError('NATIVE_REQUIRED', 'Real Riot sign-in is disabled on web.');
     const session = await connectAccount(this.http, input, region);
@@ -65,17 +79,36 @@ export class Runtime {
         `Remove one of the ${MAX_ACCOUNTS} linked accounts before adding another.`,
       );
     const old = existing.find((a) => a.puuid === session.account.puuid);
+    if (old && !expectedId)
+      throw new AppError(
+        'ACCOUNT_ALREADY_LINKED',
+        'This Riot account is already linked. Select it in Settings, or sign in with a different Riot account.',
+      );
     if (old) session.account.addedAt = old.addedAt;
-    await vault.write(session);
+    const id = session.account.puuid,
+      initializing = this.clientFlights.get(id);
+    this.linkingAccounts.add(id);
     try {
-      await this.repository.saveAccount(session.account);
-    } catch (error) {
-      if (!old) await vault.remove(session.account.puuid);
-      throw error;
+      this.invalidate(id);
+      await Promise.allSettled(
+        [initializing, this.flights.get(id), this.identityFlights.get(id)].filter(
+          (p): p is Promise<any> => !!p,
+        ),
+      );
+      const oldSession = old ? await vault.read(id) : null;
+      await vault.write(session);
+      try {
+        await this.repository.saveAccount(session.account);
+      } catch (error) {
+        if (oldSession) await vault.write(oldSession);
+        else await vault.remove(id);
+        throw error;
+      }
+      return session.account;
+    } finally {
+      this.linkingAccounts.delete(id);
+      this.invalidate(id);
     }
-    this.invalidate(session.account.puuid);
-    await this.flights.get(session.account.puuid)?.catch(() => {});
-    return session.account;
   }
   private invalidate(id: string) {
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
@@ -87,6 +120,11 @@ export class Runtime {
     this.lastSync.delete(id);
   }
   async client(id: string): Promise<RiotClient> {
+    if (this.linkingAccounts.has(id))
+      throw new AppError(
+        'SESSION_LINKING',
+        'This account is being reconnected. Refresh after sign-in completes.',
+      );
     const existing = this.clients.get(id);
     if (existing?.isActive()) return existing;
     const rejected = this.rejectedSessions.has(id) || existing?.needsReauth() === true;
@@ -222,6 +260,7 @@ export class Runtime {
     }
   }
   async remove(id: string): Promise<void> {
+    await this.linkQueue.catch(() => {});
     const initializing = this.clientFlights.get(id);
     this.invalidate(id);
     await initializing?.catch(() => {});
@@ -229,6 +268,7 @@ export class Runtime {
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
     await cancelAccountNotifications(id);
+    await removeChatStorage(id);
     await vault.remove(id);
     await this.repository.removeAccount(id);
   }

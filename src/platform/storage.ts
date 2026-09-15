@@ -4,6 +4,7 @@ import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core
 import { DEFAULT_SETTINGS, MAX_ACCOUNTS } from '../core/types';
 import { AppError, uuid } from '../core/validation';
 import { historyEntry } from '../core/normalize';
+import { themePreference } from '../core/theme';
 import type { Repository } from './storage.types';
 let singleton: Promise<Repository> | undefined;
 export function openRepository(): Promise<Repository> {
@@ -46,6 +47,19 @@ async function create(): Promise<Repository> {
       )
     ).map((r) => r.item_id);
   return {
+    selectedAccount() {
+      return readJson<string>('SELECT data FROM settings WHERE key = ?', 'selectedAccount');
+    },
+    async selectAccount(id) {
+      if (id) uuid(id);
+      await write(async () => {
+        await db.runAsync(
+          'INSERT INTO settings(key,data) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data',
+          'selectedAccount',
+          JSON.stringify(id),
+        );
+      });
+    },
     async accounts() {
       const rows = await db.getAllAsync<{ data: string }>('SELECT data FROM accounts ORDER BY id');
       return rows.map((r) => JSON.parse(r.data) as Account);
@@ -146,11 +160,12 @@ async function create(): Promise<Repository> {
       return listWishes(id);
     },
     async settings() {
-      return {
+      const value = {
         ...DEFAULT_SETTINGS,
         ...((await readJson<Settings>('SELECT data FROM settings WHERE key = ?', 'preferences')) ??
           {}),
       };
+      return { ...value, theme: themePreference(value.theme) };
     },
     async saveSettings(settings) {
       await write(async () => {

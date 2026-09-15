@@ -1,58 +1,54 @@
-import { StyleSheet } from 'react-native';
+import React, { createContext, createElement, useContext, useMemo, type ReactNode } from 'react';
+import { StyleSheet, useColorScheme } from 'react-native';
+import {
+  PALETTES,
+  resolveTheme,
+  type Palette,
+  type ThemePreference,
+  type ThemeMode,
+} from '../core/theme';
+export type { Palette } from '../core/theme';
 
-export const C = {
-  background: '#0B1018',
-  surface: '#131A25',
-  raised: '#1B2431',
-  border: '#232E3D',
-  ink: '#ECE8E1',
-  muted: '#A7AFBC',
-  subtle: '#8C98A8',
-  accent: '#FF4655',
-  mint: '#4FD1A5',
-  violet: '#A78BFA',
-  gold: '#F5C451',
-  blue: '#7CC4FF',
-};
-export const S = StyleSheet.create({
-  flex: { flex: 1 },
-  page: { flex: 1, backgroundColor: C.background },
-  content: { paddingHorizontal: 16, paddingTop: 8, gap: 16, paddingBottom: 24 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  between: {
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  title: { color: C.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.8 },
-  h2: { color: C.ink, fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
-  h3: { color: C.ink, fontSize: 15, fontWeight: '600' },
-  body: { color: C.muted, fontSize: 14, lineHeight: 21 },
-  small: { color: C.subtle, fontSize: 12, lineHeight: 17 },
-  eyebrow: { color: C.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.6 },
-  card: {
-    width: '100%',
-    minWidth: 0,
-    backgroundColor: C.surface,
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    gap: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.surface,
-    color: C.ink,
-    padding: 14,
-    borderRadius: 14,
-    fontSize: 15,
-  },
-  divider: { height: 1, backgroundColor: C.border },
-});
+const sharedStyles = (C: Palette) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    page: { flex: 1, backgroundColor: C.background },
+    content: { paddingHorizontal: 16, paddingTop: 8, gap: 16, paddingBottom: 24 },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    between: {
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    title: { color: C.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.8 },
+    h2: { color: C.ink, fontSize: 20, fontWeight: '700', letterSpacing: -0.3 },
+    h3: { color: C.ink, fontSize: 15, fontWeight: '600' },
+    body: { color: C.muted, fontSize: 14, lineHeight: 21 },
+    small: { color: C.subtle, fontSize: 12, lineHeight: 17 },
+    eyebrow: { color: C.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.6 },
+    card: {
+      width: '100%',
+      minWidth: 0,
+      backgroundColor: C.surface,
+      borderRadius: 18,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      gap: 12,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: C.border,
+      backgroundColor: C.surface,
+      color: C.ink,
+      padding: 14,
+      borderRadius: 14,
+      fontSize: 15,
+    },
+    divider: { height: 1, backgroundColor: C.border },
+  });
 const MEDIA = 'https://media.valorant-api.com';
 const TIERS: Record<string, { color: string; icon: string }> = {
   Select: {
@@ -82,8 +78,40 @@ export const CURRENCY_ICONS: Record<string, string> = {
   KC: `${MEDIA}/currencies/85ca954a-41f2-ce94-9b45-8ca3dd39a00d/displayicon.png`,
 };
 export function rarityColor(rarity?: string): string {
-  return (rarity && TIERS[rarity]?.color) || C.subtle;
+  return (rarity && TIERS[rarity]?.color) || '#8792A3';
 }
 export function rarityIcon(rarity?: string): string | undefined {
   return rarity ? TIERS[rarity]?.icon : undefined;
+}
+
+const themes = Object.fromEntries(
+  (['navy', 'dark', 'light'] as const).map((mode) => [
+    mode,
+    { C: PALETTES[mode], S: sharedStyles(PALETTES[mode]), mode, isDark: mode !== 'light' },
+  ]),
+) as Record<
+  ThemeMode,
+  { C: Palette; S: ReturnType<typeof sharedStyles>; mode: ThemeMode; isDark: boolean }
+>;
+const ThemeContext = createContext(themes.navy);
+export function ThemeProvider({
+  preference,
+  children,
+}: {
+  preference?: ThemePreference;
+  children: ReactNode;
+}) {
+  const system = useColorScheme();
+  return createElement(
+    ThemeContext.Provider,
+    { value: themes[resolveTheme(preference, system)] },
+    children,
+  );
+}
+export function useTheme() {
+  return useContext(ThemeContext);
+}
+export function useThemedStyles<T>(factory: (palette: Palette) => T): T {
+  const { C } = useTheme();
+  return useMemo(() => factory(C), [C, factory]);
 }

@@ -4,9 +4,11 @@ import {
   enableAppSwitcherProtectionAsync,
   disableAppSwitcherProtectionAsync,
 } from 'expo-screen-capture';
-import { C } from './theme';
+import { useTheme, type Palette } from './theme';
 
 export function PrivacyGuard() {
+  const { C, S, isDark } = useTheme();
+
   useEffect(() => {
     if (Platform.OS !== 'ios') return;
     void enableAppSwitcherProtectionAsync(1).catch(() => {});

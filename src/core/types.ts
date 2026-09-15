@@ -244,10 +244,15 @@ export interface HistoryEntry {
 export interface Settings {
   reminders: boolean;
   backgroundSync: boolean;
+  theme?: import('./theme').ThemePreference;
 }
 export const MAX_ACCOUNTS = 10;
 export const XP_PER_LEVEL = 5000;
-export const DEFAULT_SETTINGS: Settings = { reminders: false, backgroundSync: false };
+export const DEFAULT_SETTINGS: Settings = {
+  reminders: false,
+  backgroundSync: false,
+  theme: 'navy',
+};
 export const EMPTY_CATALOG: Catalog = {
   items: {},
   bundles: {},

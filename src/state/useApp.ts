@@ -79,11 +79,12 @@ export function useApp() {
       try {
         const runtime = await getRuntime(),
           list = await runtime.repository.accounts(),
-          prefs = await runtime.repository.settings();
+          prefs = await runtime.repository.settings(),
+          selected = await runtime.repository.selectedAccount();
         if (mounted) {
           setAccounts(list);
           setSettings(prefs);
-          setActive(list[0] ?? null);
+          setActive(list.find((a) => a.puuid === selected) ?? list[0] ?? null);
         }
       } catch (error) {
         if (mounted) setMessage(safeError(error).message);
@@ -204,6 +205,10 @@ export function useApp() {
   }, [refresh]);
   const switchAccount = useCallback(
     (account: Account | null) => {
+      if (!account?.demo)
+        void getRuntime()
+          .then((r) => r.repository.selectAccount(account?.puuid ?? null))
+          .catch(() => {});
       social.disconnectChat();
       clearDiagnostics();
       epoch.current++;
@@ -221,6 +226,7 @@ export function useApp() {
         account = await runtime.link(tokens, region, expectedId);
       setAccounts(await runtime.repository.accounts());
       switchAccount(account);
+      return account;
     },
     [switchAccount],
   );
@@ -288,6 +294,18 @@ export function useApp() {
       }
     },
     [settings, snapshot, wishlist],
+  );
+  const setTheme = useCallback(
+    async (theme: import('../core/theme').ThemePreference) => {
+      const next = { ...settings, theme };
+      setSettings(next);
+      try {
+        await (await getRuntime()).repository.saveSettings(next);
+      } catch {
+        setMessage('The theme could not be saved. Please retry.');
+      }
+    },
+    [settings],
   );
   const clearCache = useCallback(async () => {
     try {
@@ -480,6 +498,7 @@ export function useApp() {
     busy,
     message,
     dismissMessage: () => setMessage(null),
+    setTheme,
     refresh,
     switchAccount,
     enterDemo: () => switchAccount(DEMO_ACCOUNT),

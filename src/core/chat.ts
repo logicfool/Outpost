@@ -6,6 +6,7 @@ import type {
   Friend,
   ChatConnection,
   ChatTransport,
+  ChatHooks,
 } from './chatTypes';
 import { AppError, safeError } from './validation';
 import {
@@ -19,6 +20,15 @@ import {
   type XmlNode,
 } from './xmppXml';
 import { friendPresence, presencePriority } from './chatPresence';
+import {
+  ARCHIVE_NS,
+  CARBONS_NS,
+  chatTimestamp,
+  mergeMessages,
+  messageKey,
+  parseArchiveResult,
+  parseCarbon,
+} from './messageHistory';
 
 export class RiotChat {
   private socket?: ChatConnection;
@@ -33,6 +43,17 @@ export class RiotChat {
   private lastSend = -Infinity;
   private openConversation?: string;
   private counter = 0;
+  private owner?: string;
+  private historyRequests = new Map<
+    string,
+    {
+      friend: Friend;
+      timer: ReturnType<typeof setTimeout>;
+      resolve(count: number): void;
+      reject(error: AppError): void;
+    }
+  >();
+  private historyTimes = new Map<string, number>();
   private roster = new Map<string, Friend>();
   private resources = new Map<string, Map<string, Partial<Friend>>>();
   private state: ChatState = { status: 'disconnected', unread: {}, friends: [], messages: {} };
@@ -42,6 +63,7 @@ export class RiotChat {
     private emit: (state: ChatState) => void,
     private onFriends: (friends: Friend[]) => void = () => {},
     private now: () => number = Date.now,
+    private hooks: ChatHooks = {},
   ) {}
   get snapshot() {
     return this.state;
@@ -63,7 +85,8 @@ export class RiotChat {
     });
   }
   start(credentials: ChatBootstrap) {
-    this.disconnect();
+    this.disconnect(!!this.owner && this.owner !== credentials.subject);
+    this.owner = credentials.subject;
     if (credentials.expiresAt <= this.now() + 30000)
       throw new AppError('SESSION_EXPIRED', 'Renew the Riot session before connecting chat.');
     this.credentials = credentials;
@@ -112,7 +135,8 @@ export class RiotChat {
         },
       });
     } catch (e) {
-      this.fail(safeError(e).message);
+      const error = safeError(e);
+      this.fail(error.message, error.code);
     }
   }
   private openStream() {
@@ -199,6 +223,11 @@ export class RiotChat {
       this.fail('Riot denied friends or chat access for this session.');
       return;
     }
+    if (name === 'iq' && this.phase === 'ready' && id && this.historyRequests.has(id)) {
+      void this.receiveHistory(node).catch(() => {});
+      return;
+    }
+    if (name === 'iq' && id === 'outpost-carbons') return;
     if (name === 'iq' && (this.phase === 'roster' || this.phase === 'ready')) {
       const query = child(node, 'query');
       if (
@@ -231,6 +260,7 @@ export class RiotChat {
     this.phase = 'ready';
     clearTimeout(this.timer);
     this.update({ status: 'ready', error: undefined });
+    this.sendRaw(`<iq type="set" id="outpost-carbons"><enable xmlns="${CARBONS_NS}"/></iq>`);
     const epoch = this.generation;
     this.heartbeat = setInterval(() => {
       if (epoch !== this.generation) return;
@@ -320,19 +350,25 @@ export class RiotChat {
     this.update({ friends });
   }
   private applyMessage(node: XmlNode) {
+    if (this.credentials) {
+      const copy = parseCarbon(
+        node,
+        `${this.credentials.subject}@${this.credentials.domain}`,
+        [...this.roster.values()],
+        this.now(),
+      );
+      if (copy) {
+        void this.addMessage(copy).catch(() => {});
+        return;
+      }
+    }
     const jid = parseJid(node.attrs.from ?? ''),
       friend = jid && this.roster.get(jid.subject);
     if (!jid || !friend || jid.bare !== friend.jid) return;
     if (node.attrs.type === 'error') {
       const messages = this.state.messages[jid.subject] ?? [];
-      this.update({
-        messages: {
-          ...this.state.messages,
-          [jid.subject]: messages.map((m) =>
-            m.direction === 'outgoing' && m.id === node.attrs.id ? { ...m, state: 'failed' } : m,
-          ),
-        },
-      });
+      const failed = messages.find((m) => m.direction === 'outgoing' && m.id === node.attrs.id);
+      if (failed) void this.addMessage({ ...failed, state: 'failed' }, false).catch(() => {});
       return;
     }
     if (node.attrs.type && node.attrs.type !== 'chat' && node.attrs.type !== 'normal') return;
@@ -345,32 +381,159 @@ export class RiotChat {
       )
     )
       return;
-    const stamp = Date.parse(child(node, 'delay')?.attrs.stamp ?? ''),
-      at = Number.isFinite(stamp) && stamp <= this.now() ? stamp : this.now();
-    this.addMessage({
+    const stamp = chatTimestamp(node.attrs.stamp ?? child(node, 'delay')?.attrs.stamp),
+      at = stamp !== undefined && stamp <= this.now() ? stamp : this.now();
+    void this.addMessage({
       id,
       subject: jid.subject,
       body,
       at,
       direction: 'incoming',
       state: 'received',
-    });
+      source: 'live',
+    }).catch(() => {});
   }
-  private addMessage(message: ChatMessage) {
+  private async persistMessage(message: ChatMessage) {
+    try {
+      await this.hooks.saveMessage?.(message);
+    } catch {
+      this.update({
+        storageError: 'A message could not be saved to local history. Check available storage.',
+      });
+      throw new AppError('CHAT_STORAGE', 'The message could not be saved locally.');
+    }
+  }
+  private async addMessage(message: ChatMessage, notify = true) {
+    const old = this.state.messages[message.subject] ?? [],
+      exists = old.some((m) => messageKey(m) === messageKey(message));
     const messages = { ...this.state.messages };
     if (Object.keys(messages).length >= 50 && !messages[message.subject])
       delete messages[Object.keys(messages)[0]!];
-    messages[message.subject] = [...(messages[message.subject] ?? []), message].slice(-200);
+    messages[message.subject] = mergeMessages(old, [message]);
     this.update({
       messages,
       unread:
-        message.direction === 'incoming' && this.openConversation !== message.subject
+        notify &&
+        !exists &&
+        message.direction === 'incoming' &&
+        this.openConversation !== message.subject
           ? {
               ...this.state.unread,
               [message.subject]: Math.min(999, (this.state.unread[message.subject] ?? 0) + 1),
             }
           : this.state.unread,
     });
+    await this.persistMessage(message);
+  }
+  hydrateMessages(subject: string, messages: ChatMessage[]) {
+    this.update({
+      messages: {
+        ...this.state.messages,
+        [subject]: mergeMessages(messages, this.state.messages[subject] ?? []),
+      },
+    });
+  }
+  async requestHistory(subject: string): Promise<number> {
+    const c = this.credentials,
+      friend = this.roster.get(subject);
+    if (this.phase !== 'ready' || !c || !friend || !this.socket)
+      throw new AppError(
+        'CHAT_OFFLINE',
+        'Connect Riot chat and select a current friend to sync server history.',
+      );
+    if (
+      this.historyRequests.size >= 2 ||
+      [...this.historyRequests.values()].some((r) => r.friend.subject === subject)
+    )
+      throw new AppError('CHAT_HISTORY_BUSY', 'A history sync is already running.');
+    if ((this.historyTimes.get(subject) ?? 0) > this.now())
+      throw new AppError(
+        'CHAT_COOLDOWN',
+        'Wait 15 seconds before syncing this conversation again.',
+      );
+    this.historyTimes.set(subject, this.now() + 15000);
+    const id = `outpost-history-${++this.counter}`;
+    this.update({ archive: { ...this.state.archive, [subject]: { status: 'loading' } } });
+    return new Promise<number>((resolve, reject) => {
+      const fail = (error: AppError) => {
+        this.historyRequests.delete(id);
+        this.update({
+          archive: {
+            ...this.state.archive,
+            [subject]: { status: 'error', message: error.message },
+          },
+        });
+        reject(error);
+      };
+      const timer = setTimeout(
+        () =>
+          fail(
+            new AppError(
+              'CHAT_HISTORY_TIMEOUT',
+              'Riot did not answer the history request. Your saved messages are unchanged.',
+            ),
+          ),
+        20000,
+      );
+      this.historyRequests.set(id, { friend, timer, resolve, reject: fail });
+      this.sendRaw(
+        `<iq type="get" id="${id}"><query xmlns="${ARCHIVE_NS}"><with>${xml(friend.jid)}</with></query></iq>`,
+      );
+    });
+  }
+  private async receiveHistory(node: XmlNode): Promise<void> {
+    const request = this.historyRequests.get(node.attrs.id ?? ''),
+      c = this.credentials;
+    if (!request || !c) return;
+    const ownBare = `${c.subject}@${c.domain}`;
+    if (
+      node.attrs.from &&
+      node.attrs.from !== c.domain &&
+      parseJid(node.attrs.from)?.bare !== ownBare
+    )
+      return;
+    if (!['result', 'error'].includes(node.attrs.type ?? '')) return;
+    const generation = this.generation;
+    clearTimeout(request.timer);
+    this.historyRequests.delete(node.attrs.id!);
+    try {
+      if (node.attrs.type === 'error')
+        throw new AppError(
+          'CHAT_HISTORY_UNAVAILABLE',
+          'Riot did not allow this history request. Local history is still available.',
+        );
+      const messages = parseArchiveResult(node, ownBare, request.friend, this.now());
+      for (const message of messages) {
+        if (generation !== this.generation)
+          throw new AppError('CHAT_OFFLINE', 'History sync stopped when the connection changed.');
+        await this.persistMessage(message);
+      }
+      if (generation !== this.generation)
+        throw new AppError('CHAT_OFFLINE', 'The chat connection changed.');
+      this.update({
+        messages: {
+          ...this.state.messages,
+          [request.friend.subject]: mergeMessages(
+            this.state.messages[request.friend.subject] ?? [],
+            messages,
+          ),
+        },
+        archive: {
+          ...this.state.archive,
+          [request.friend.subject]: {
+            status: 'ready',
+            count: messages.length,
+            at: this.now(),
+            message: messages.length
+              ? `${messages.length} messages returned by Riot. Saved history is deduplicated.`
+              : 'Riot returned no retained messages for this conversation.',
+          },
+        },
+      });
+      request.resolve(messages.length);
+    } catch (reason) {
+      request.reject(safeError(reason));
+    }
   }
   async send(subject: string, value: string): Promise<void> {
     if (this.credentials && this.credentials.expiresAt <= this.now()) {
@@ -388,8 +551,17 @@ export class RiotChat {
       throw new AppError('CHAT_COOLDOWN', 'Wait a second before sending another message.');
     this.lastSend = this.now();
     const epoch = this.generation,
-      id = `outpost-${this.now()}-${++this.counter}`;
-    this.addMessage({ id, subject, body, at: this.now(), direction: 'outgoing', state: 'sending' });
+      id = `outpost-${this.hooks.newId?.() ?? `${this.now()}-${++this.counter}`}`;
+    const outgoing: ChatMessage = {
+      id,
+      subject,
+      body,
+      at: this.now(),
+      direction: 'outgoing',
+      state: 'sending',
+      source: 'outpost',
+    };
+    const socket = this.socket;
     const settle = (state: 'sent' | 'failed') =>
       this.update({
         messages: {
@@ -400,7 +572,17 @@ export class RiotChat {
         },
       });
     try {
-      await this.socket.write(
+      await this.addMessage(outgoing);
+      if (
+        epoch !== this.generation ||
+        this.phase !== 'ready' ||
+        this.socket !== socket ||
+        !this.roster.has(subject) ||
+        !this.credentials ||
+        this.credentials.expiresAt <= this.now()
+      )
+        throw new AppError('CHAT_OFFLINE', 'The connection changed before sending.');
+      await socket.write(
         `<message type="chat" to="${xml(friend.jid)}" id="${xml(id)}"><body>${xml(body)}</body></message>`,
       );
       if (epoch !== this.generation)
@@ -409,8 +591,10 @@ export class RiotChat {
           'The connection changed while sending. Delivery is unconfirmed.',
         );
       settle('sent');
+      await this.persistMessage({ ...outgoing, state: 'sent' });
     } catch {
       if (epoch === this.generation) settle('failed');
+      await this.persistMessage({ ...outgoing, state: 'failed' }).catch(() => {});
       throw new AppError(
         'CHAT_SEND',
         'The message could not be confirmed as sent. It was not retried automatically.',
@@ -427,6 +611,18 @@ export class RiotChat {
       this.update({ unread: { ...this.state.unread, [subject]: 0 } });
   }
   disconnect(clear = false) {
+    for (const request of this.historyRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(
+        new AppError('CHAT_OFFLINE', 'History sync stopped because chat disconnected.'),
+      );
+    }
+    this.historyRequests.clear();
+    this.historyTimes.clear();
+    for (const entries of Object.values(this.state.messages))
+      for (const m of entries)
+        if (m.state === 'sending')
+          void this.persistMessage({ ...m, state: 'failed' }).catch(() => {});
     this.generation++;
     this.phase = 'closed';
     this.openConversation = undefined;

@@ -1,13 +1,20 @@
 import type { Repository } from './storage.types';
 import type { Settings, Catalog } from '../core/types';
 import { DEFAULT_SETTINGS } from '../core/types';
+import { themePreference } from '../core/theme';
 import { AppError } from '../core/validation';
 let settings: Settings = { ...DEFAULT_SETTINGS },
   catalog: Catalog | null = null;
+try {
+  if (typeof localStorage !== 'undefined')
+    settings.theme = themePreference(localStorage.getItem('outpost.theme'));
+} catch {}
 const unavailable = async (): Promise<never> => {
   throw new AppError('NATIVE_REQUIRED', 'Real account access is available only in the native app.');
 };
 const repository: Repository = {
+  selectedAccount: async () => null,
+  selectAccount: async () => {},
   accounts: async () => [],
   saveAccount: unavailable,
   removeAccount: unavailable,
@@ -18,7 +25,11 @@ const repository: Repository = {
   toggleWish: unavailable,
   settings: async () => settings,
   saveSettings: async (s) => {
-    settings = s;
+    settings = { ...s, theme: themePreference(s.theme) };
+    try {
+      if (typeof localStorage !== 'undefined')
+        localStorage.setItem('outpost.theme', settings.theme!);
+    } catch {}
   },
   catalog: async () => catalog,
   saveCatalog: async (c) => {

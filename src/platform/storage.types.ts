@@ -1,6 +1,8 @@
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
 export interface Repository {
   accounts(): Promise<Account[]>;
+  selectedAccount(): Promise<string | null>;
+  selectAccount(id: string | null): Promise<void>;
   saveAccount(account: Account): Promise<void>;
   removeAccount(id: string): Promise<void>;
   snapshot(id: string): Promise<Snapshot | null>;

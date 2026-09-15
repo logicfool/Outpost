@@ -15,7 +15,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { CatalogItem, Money, Section as DataSection, StoreOffer } from '../core/types';
 import { artworkCandidates } from '../core/artwork';
 import { countdown, currencySymbol } from '../core/normalize';
-import { C, CURRENCY_ICONS, S, rarityColor, rarityIcon } from './theme';
+import {
+  CURRENCY_ICONS,
+  rarityColor,
+  rarityIcon,
+  useTheme,
+  useThemedStyles,
+  type Palette,
+} from './theme';
 type IconName = React.ComponentProps<typeof Feather>['name'];
 export function Button({
   title,
@@ -30,6 +37,9 @@ export function Button({
   disabled?: boolean;
   icon?: IconName;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const color = secondary ? C.ink : '#FFFFFF';
   return (
     <Pressable
@@ -53,13 +63,17 @@ export function IconButton({
   icon,
   label,
   onPress,
-  color = C.ink,
+  color,
 }: {
   icon: IconName;
   label: string;
   onPress(): void;
   color?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  color ??= C.ink;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -72,7 +86,10 @@ export function IconButton({
     </Pressable>
   );
 }
-export function Badge({ text, color = C.mint }: { text: string; color?: string }) {
+export function Badge({ text, color }: { text: string; color?: string }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  color ??= C.mint;
   return (
     <View style={[styles.badge, { backgroundColor: `${color}1F` }]}>
       <View style={[styles.dot, { backgroundColor: color }]} />
@@ -89,6 +106,9 @@ export function Tabs<T extends string>({
   value: T;
   onChange(id: NoInfer<T>): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <ScrollView
       horizontal
@@ -102,6 +122,7 @@ export function Tabs<T extends string>({
           <Pressable
             key={item.id}
             accessibilityRole="tab"
+            aria-selected={selected}
             accessibilityState={{ selected }}
             onPress={() => onChange(item.id)}
             style={[styles.tab, selected && styles.tabSelected]}
@@ -114,6 +135,7 @@ export function Tabs<T extends string>({
   );
 }
 export function SectionHeader({ title, detail }: { title: string; detail?: string }) {
+  const { C, S, isDark } = useTheme();
   return (
     <View style={S.between}>
       <Text style={[S.h2, { flexShrink: 1 }]}>{title}</Text>
@@ -122,11 +144,14 @@ export function SectionHeader({ title, detail }: { title: string; detail?: strin
   );
 }
 export function CurrencyIcon({ symbol, size = 16 }: { symbol: string; size?: number }) {
+  const { C, S, isDark } = useTheme();
+
   const uri = CURRENCY_ICONS[symbol];
   return uri ? (
     <Image
       source={{ uri }}
       style={{ width: size, height: size }}
+      tintColor={C.ink}
       resizeMode="contain"
       accessibilityLabel={symbol}
     />
@@ -156,6 +181,8 @@ export function MoneyText({
   large?: boolean;
   strike?: boolean;
 }) {
+  const { C, S, isDark } = useTheme();
+
   if (!prices.length) return <Text style={S.small}>Price unavailable</Text>;
   const size = strike ? 12 : large ? 20 : 15;
   return (
@@ -188,6 +215,8 @@ export function ItemArt({
   size?: number;
   style?: ViewStyle;
 }) {
+  const { C, S, isDark } = useTheme();
+
   const urls = artworkCandidates(item),
     key = urls.join('|');
   const [index, setIndex] = useState(0),
@@ -255,6 +284,8 @@ export function WishButton({
   onPress(): void;
   size?: number;
 }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -281,6 +312,9 @@ export function OfferCard({
   onWish(): void;
   onOpen(): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const tint = rarityColor(offer.item.rarity);
   return (
     <Pressable
@@ -328,6 +362,9 @@ export function OfferGrid({
   onWish(id: string): void;
   onOpen(item: CatalogItem): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   const [width, setWidth] = useState(0);
   return (
     <View style={styles.grid} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -351,13 +388,16 @@ export function Timer({
   expiresAt,
   offset = 0,
   small = false,
-  color = C.ink,
+  color,
 }: {
   expiresAt: number;
   offset?: number;
   small?: boolean;
   color?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  color ??= C.ink;
+
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -386,6 +426,8 @@ export function Empty({
   detail?: string;
   icon?: IconName;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
@@ -405,6 +447,9 @@ export function Resource<T>({
   title: string;
   children(data: T): React.ReactNode;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   if (!value)
     return (
       <View style={styles.loading}>
@@ -430,12 +475,15 @@ export function Resource<T>({
 export function ProgressBar({
   value,
   max = 1,
-  color = C.accent,
+  color,
 }: {
   value: number;
   max?: number;
   color?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  color ??= C.accent;
   value = max > 0 ? value / max : 0;
   return (
     <View style={styles.progress}>
@@ -451,6 +499,7 @@ export function ProgressBar({
   );
 }
 export function InfoRow({ label, value }: { label: string; value: string }) {
+  const { C, S, isDark } = useTheme();
   return (
     <View style={S.between}>
       <Text style={S.body}>{label}</Text>
@@ -462,6 +511,8 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export function ModalPage({ children }: { children: React.ReactNode }) {
+  const { C, S, isDark } = useTheme();
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={S.page} edges={['top', 'bottom', 'left', 'right']}>
@@ -483,6 +534,9 @@ export function ModalHeader({
   closeLabel: string;
   onClose(): void;
 }) {
+  const { C, S, isDark } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <View style={styles.modalHeader}>
       <View style={{ flex: 1, gap: 2 }}>
@@ -504,91 +558,92 @@ export function ModalHeader({
     </View>
   );
 }
-const styles = StyleSheet.create({
-  button: {
-    minHeight: 50,
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  buttonSecondary: { backgroundColor: C.raised, borderWidth: 1, borderColor: C.border },
-  buttonText: { fontSize: 15, fontWeight: '600', flexShrink: 1, textAlign: 'center' },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: C.raised,
-  },
-  badge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  badgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
-  tabs: { gap: 8, paddingRight: 4 },
-  tab: {
-    minHeight: 40,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    justifyContent: 'center',
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  tabSelected: { backgroundColor: C.ink, borderColor: C.ink },
-  tabText: { fontSize: 13, color: C.muted, fontWeight: '600' },
-  tabTextSelected: { color: C.background },
-  offer: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', backgroundColor: C.surface },
-  offerInner: { padding: 12, gap: 8 },
-  offerName: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 18, minHeight: 36 },
-  discount: {
-    backgroundColor: C.accent,
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  discountText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  gridCell: { width: '48%', minWidth: 0 },
-  empty: {
-    paddingVertical: 30,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 18,
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  emptyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: C.raised,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loading: { paddingVertical: 28, alignItems: 'center' },
-  progress: { height: 6, borderRadius: 6, backgroundColor: C.raised, overflow: 'hidden' },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
-  },
-});
+const makeStyles = (C: Palette) =>
+  StyleSheet.create({
+    button: {
+      minHeight: 50,
+      borderRadius: 14,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 8,
+    },
+    buttonSecondary: { backgroundColor: C.raised, borderWidth: 1, borderColor: C.border },
+    buttonText: { fontSize: 15, fontWeight: '600', flexShrink: 1, textAlign: 'center' },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: C.raised,
+    },
+    badge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    dot: { width: 6, height: 6, borderRadius: 3 },
+    badgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
+    tabs: { gap: 8, paddingRight: 4 },
+    tab: {
+      minHeight: 40,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 18,
+      justifyContent: 'center',
+      backgroundColor: C.surface,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    tabSelected: { backgroundColor: C.ink, borderColor: C.ink },
+    tabText: { fontSize: 13, color: C.muted, fontWeight: '600' },
+    tabTextSelected: { color: C.background },
+    offer: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', backgroundColor: C.surface },
+    offerInner: { padding: 12, gap: 8 },
+    offerName: { color: C.ink, fontSize: 14, fontWeight: '600', lineHeight: 18, minHeight: 36 },
+    discount: {
+      backgroundColor: C.accent,
+      borderRadius: 6,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+    },
+    discountText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+    grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    gridCell: { width: '48%', minWidth: 0 },
+    empty: {
+      paddingVertical: 30,
+      paddingHorizontal: 22,
+      alignItems: 'center',
+      gap: 10,
+      borderRadius: 18,
+      backgroundColor: C.surface,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    emptyIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: C.raised,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    loading: { paddingVertical: 28, alignItems: 'center' },
+    progress: { height: 6, borderRadius: 6, backgroundColor: C.raised, overflow: 'hidden' },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: C.border,
+    },
+  });

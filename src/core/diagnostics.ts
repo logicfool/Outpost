@@ -51,3 +51,13 @@ export function requestDiagnostics(): RequestDiagnostic[] {
 export function clearDiagnostics(): void {
   records.length = 0;
 }
+
+export function recordLogin(stage: string, code: string) {
+  recordRequest({
+    at: Date.now(),
+    service: 'Login ' + stage,
+    method: 'STATE',
+    code,
+    durationMs: 0,
+  });
+}

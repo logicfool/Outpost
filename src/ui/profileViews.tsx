@@ -10,7 +10,7 @@ import type { PlayerRef } from '../core/playerTypes';
 import type { AppModel } from '../state/useApp';
 import { useLivePolling } from '../state/useLivePolling';
 import { Button, ProgressBar, SectionHeader } from './components';
-import { C, S } from './theme';
+import { useTheme, type Palette } from './theme';
 
 export function PlayerCover({
   player,
@@ -27,6 +27,8 @@ export function PlayerCover({
   ownId?: string;
   note?: string;
 }) {
+  const { C, S, isDark } = useTheme();
+
   const card = player.card ? hydrateItem(catalog, player.card) : undefined;
   const title = player.title ? hydrateItem(catalog, player.title) : undefined;
   const image = card?.wideArt ?? card?.wallpaper ?? card?.image;
@@ -72,7 +74,7 @@ export function PlayerCover({
               position: 'absolute',
               top: 8,
               right: 8,
-              backgroundColor: '#070B12DD',
+              backgroundColor: `${C.surface}EE`,
               padding: 11,
               borderRadius: 22,
             }}
@@ -127,6 +129,8 @@ export function PlayerCover({
   );
 }
 export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void }) {
+  const { C, S, isDark } = useTheme();
+
   const polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
   const game = section?.status === 'ready' ? section.data : undefined;
