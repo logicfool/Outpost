@@ -1,8 +1,8 @@
+import { Image } from './CachedImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -35,6 +35,7 @@ import {
   Tabs,
 } from './components';
 import { CareerModal, MatchCard, MatchReport } from './screens';
+import { playerLabel } from '../core/playerNames';
 import { PlayerCover } from './profileViews';
 import { C, S } from './theme';
 
@@ -179,11 +180,15 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     <ModalPage>
       <ModalHeader title="Player profile" closeLabel="Back from player profile" onClose={onBack} />
       <ScrollView contentContainerStyle={S.content}>
-        <PlayerCover player={data?.player ?? player} catalog={model.catalog} />
+        <PlayerCover
+          player={data?.player ?? player}
+          ownId={model.active?.puuid}
+          catalog={model.catalog}
+        />
         <Text style={S.small}>
           {data?.identitySource === 'friend'
             ? 'Identity from your friend’s reported presence.'
-            : 'Card and level as reported in the selected match. Private fields are not requested.'}
+            : 'Card and level last seen in a match.'}
         </Text>
         {error && (
           <Empty title="Some profile data is unavailable" detail={error} icon="alert-circle" />
@@ -340,7 +345,7 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                         onPress={() => onNavigate({ type: 'player', player: p })}
                         disabled={!!p.hidden}
                         accessibilityRole="button"
-                        accessibilityLabel={`View ${p.name} profile`}
+                        accessibilityLabel={`View ${playerLabel(p, model.active?.puuid)} profile`}
                         style={[S.card, S.row]}
                       >
                         {p.agentImage ? (
@@ -350,8 +355,8 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                         )}
                         <View style={{ flex: 1, gap: 4 }}>
                           <Text style={[S.h3, p.self && { color: C.gold }]}>
-                            {p.name}
-                            {p.tag ? ` #${p.tag}` : ''}
+                            {playerLabel(p, model.active?.puuid)}
+                            {p.subject !== model.active?.puuid && p.tag ? ` #${p.tag}` : ''}
                           </Text>
                           <Text style={S.small}>
                             {p.agent ?? 'Choosing agent'}
@@ -509,15 +514,14 @@ function IdentityPanel({ model, onBack }: PanelProps) {
               catalog={model.catalog}
             />
             <Text style={S.body}>
-              Select an owned player card to change both its banner and full artwork. Applying also
-              changes your identity in VALORANT. There is no separate profile photo.
+              Choose an owned card or title. Apply updates your VALORANT loadout.
             </Text>
             {card?.wallpaper && (
               <View style={S.card}>
                 <Text style={S.small}>FULL PLAYER CARD ARTWORK</Text>
                 <Image
                   source={{ uri: card.wallpaper }}
-                  style={{ width: '100%', height: 260 }}
+                  style={{ width: '100%', height: 180 }}
                   resizeMode="contain"
                 />
               </View>
@@ -560,7 +564,13 @@ function IdentityPanel({ model, onBack }: PanelProps) {
         }
         ListEmptyComponent={
           <Empty
-            title={base ? 'No matching owned items' : 'Loading equipped identity'}
+            title={
+              base
+                ? 'No matching owned items'
+                : message
+                  ? 'Equipped identity unavailable'
+                  : 'Loading equipped identity'
+            }
             detail={
               model.snapshot?.collection.status === 'error'
                 ? model.snapshot.collection.message
@@ -623,16 +633,15 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
         ListHeaderComponent={
           <View style={{ gap: 14, paddingBottom: 8 }}>
             <View style={S.card}>
-              <View style={S.between}>
-                <Text style={S.h2}>Your Riot friends</Text>
+              <View style={[S.between, { flexWrap: 'wrap', rowGap: 8 }]}>
+                <Text style={[S.h2, { flexShrink: 1 }]}>Your Riot friends</Text>
                 <Badge
                   text={connected ? 'CONNECTED' : busy ? 'CONNECTING' : 'DISCONNECTED'}
                   color={connected ? C.mint : C.gold}
                 />
               </View>
               <Text style={S.body}>
-                Connect to see friends’ presence and send direct messages from your phone. Chat
-                works while Outpost is open; closing the app does not keep a chat connection alive.
+                See who’s online and message friends while Outpost is open.
               </Text>
               {chat.error && <Text style={[S.body, { color: C.gold }]}>{chat.error}</Text>}
               <Button

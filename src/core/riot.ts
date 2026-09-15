@@ -1,6 +1,7 @@
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
 import { PlayerScope } from './playerScope';
+import { hasPlayerName, nameAliases } from './playerNames';
 import { glzOrigin, normalizeLive } from './live';
 import { catalogWithContent } from './rank';
 import type { PlayerRef, PlayerProfile, IdentityEdit } from './playerTypes';
@@ -124,6 +125,8 @@ async function section<T>(loader: () => Promise<T>): Promise<Section<T>> {
 }
 export class RiotClient {
   private cache = new SingleFlightCache();
+  private aliases = new Map<string, { name: string; tag: string; until: number }>();
+  private loadoutEndpoint: 'v3' | 'v2' = 'v3';
   private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
   private sessionRejected = false;
@@ -142,6 +145,9 @@ export class RiotClient {
     ),
   ) {
     validateSession(session);
+  }
+  updateCatalog(catalog: Catalog) {
+    this.catalog = catalog;
   }
   isActive() {
     return !this.disposed && !this.sessionRejected && sessionActive(this.session);
@@ -222,28 +228,36 @@ export class RiotClient {
     return normalizeRank(result.data, catalog);
   }
   private async resolveNames<T extends PlayerRef>(players: T[]): Promise<T[]> {
-    const ids = [...new Set(players.filter((p) => !p.hidden).map((p) => uuid(p.subject)))].slice(
-      0,
-      20,
-    );
-    if (!ids.length) return players;
-    try {
-      const response = await this.read('/name-service/v2/players', 5 * 60000, 'PUT', ids);
-      const aliases = new Map(
-        array(response.data)
-          .map(object)
-          .filter((p) => ids.includes(text(p.Subject).toLowerCase()))
-          .map((p) => [text(p.Subject).toLowerCase(), p]),
-      );
-      return players.map((p) => {
-        const alias = p.hidden ? undefined : aliases.get(p.subject);
-        return alias
-          ? { ...p, name: text(alias.GameName, p.name), tag: text(alias.TagLine, p.tag) }
-          : p;
-      });
-    } catch {
-      return players;
-    }
+    const self = this.session.account;
+    const ids = [
+      ...new Set(
+        players
+          .filter(
+            (p) =>
+              !p.hidden &&
+              p.subject !== self.puuid &&
+              (this.aliases.get(p.subject)?.until ?? 0) < Date.now(),
+          )
+          .map((p) => uuid(p.subject)),
+      ),
+    ].slice(0, 20);
+    if (ids.length)
+      try {
+        const response = await this.read('/name-service/v2/players', 5 * 60000, 'PUT', ids);
+        for (const [id, alias] of nameAliases(response.data, ids)) {
+          if (this.aliases.size >= 1500) this.aliases.delete(this.aliases.keys().next().value!);
+          this.aliases.set(id, { ...alias, until: Date.now() + 10 * 60000 });
+        }
+      } catch {}
+    return players.map((player) => {
+      if (player.subject === self.puuid)
+        return { ...player, name: self.gameName, tag: self.tagLine };
+      if (player.hidden) return { ...player, name: 'Hidden player', tag: '' };
+      const alias = this.aliases.get(player.subject);
+      return alias
+        ? { ...player, name: alias.name, tag: alias.tag }
+        : { ...player, name: hasPlayerName(player.name) ? player.name : 'Name unavailable' };
+    });
   }
   async liveGame(): Promise<LiveGame> {
     const id = this.session.account.puuid;
@@ -354,7 +368,12 @@ export class RiotClient {
     if (!this.scope.allowsMatch(subject, id))
       throw new AppError('MATCH_SCOPE', 'Open a match from this player’s loaded history.');
     const raw = await this.read(`/match-details/v1/matches/${id}`, 24 * 60 * 60000);
-    const detail = normalizeMatchDetail(raw.data, subject, this.catalog);
+    const detail = normalizeMatchDetail(
+      raw.data,
+      subject,
+      this.catalog,
+      this.session.account.puuid,
+    );
     detail.players = await this.resolveNames(detail.players);
     for (const player of detail.players) this.scope.remember(player);
     detail.duels = detail.duels.map((duel) => ({
@@ -403,24 +422,30 @@ export class RiotClient {
       identitySource: entry.source,
     };
   }
+  private async rawLoadout() {
+    const base = `/personalization/${this.loadoutEndpoint}/players/${this.session.account.puuid}/playerloadout`;
+    try {
+      return { path: base, raw: (await this.read(base, 0)).data };
+    } catch (error) {
+      const e = safeError(error);
+      if (this.loadoutEndpoint !== 'v3' || ![404, 405, 410].includes(e.status ?? 0)) throw e;
+      const path = `/personalization/v2/players/${this.session.account.puuid}/playerloadout`;
+      const raw = (await this.read(path, 0)).data;
+      normalizeLoadout(raw, this.catalog);
+      this.loadoutEndpoint = 'v2';
+      return { path, raw };
+    }
+  }
   async loadout(): Promise<Loadout> {
-    return normalizeLoadout(
-      (
-        await this.read(
-          `/personalization/v2/players/${this.session.account.puuid}/playerloadout`,
-          0,
-        )
-      ).data,
-      this.catalog,
-    );
+    const { raw } = await this.rawLoadout();
+    return { ...normalizeLoadout(raw, this.catalog), endpoint: this.loadoutEndpoint };
   }
   async saveIdentity(edit: IdentityEdit): Promise<Loadout> {
     if (this.identityWrite)
       throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current identity change to finish.');
     const run = async () => {
-      const id = this.session.account.puuid,
-        path = `/personalization/v2/players/${id}/playerloadout`;
-      const current = (await this.read(path, 0)).data;
+      const id = this.session.account.puuid;
+      const { path, raw: current } = await this.rawLoadout();
       const owned = async (type: string) => {
         const response = object((await this.read(`/store/v1/entitlements/${id}/${type}`, 0)).data);
         const entries = Array.isArray(response.Entitlements)

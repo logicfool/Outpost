@@ -16,7 +16,7 @@ import { vault, randomHex } from './secure';
 import { cancelAccountNotifications, updateStoreNotifications } from './notifications';
 export class Runtime {
   readonly http = new HttpClient(nativeFetcher);
-  readonly publicClient = new CatalogClient(this.http);
+  readonly publicClient = new CatalogClient(new HttpClient(nativeFetcher));
   catalog: Catalog = { ...EMPTY_CATALOG };
   private clients = new Map<string, RiotClient>();
   private scopes = new Map<string, PlayerScope>();
@@ -28,14 +28,24 @@ export class Runtime {
   private lastSync = new Map<string, number>();
   constructor(readonly repository: Repository) {}
   async loadCatalog(force = false): Promise<Catalog> {
-    if (!force && this.catalog.fetchedAt > Date.now() - 86400000) return this.catalog;
+    if (
+      !force &&
+      this.catalog.schemaVersion === 4 &&
+      this.catalog.fetchedAt > Date.now() - (this.catalog.failedPaths?.length ? 30000 : 86400000)
+    )
+      return this.catalog;
     const cached = await this.repository.catalog();
 
-    if (!force && cached?.schemaVersion === 3 && cached.fetchedAt > Date.now() - 86400000)
+    if (
+      !force &&
+      cached?.schemaVersion === 4 &&
+      cached.fetchedAt > Date.now() - (cached.failedPaths?.length ? 30000 : 86400000)
+    )
       return (this.catalog = cached);
-    const fresh = await this.publicClient.load();
+    const fresh = await this.publicClient.load(cached ?? this.catalog);
     if (!Object.keys(fresh.items).length) return (this.catalog = cached ?? { ...EMPTY_CATALOG });
     this.catalog = fresh;
+    for (const client of this.clients.values()) client.updateCatalog(fresh);
     await this.repository.saveCatalog(fresh);
     return fresh;
   }
@@ -157,6 +167,7 @@ export class Runtime {
       );
     const generation = this.generations.get(id) ?? 0;
     const run = async () => {
+      await this.loadCatalog();
       const client = await this.client(id);
       const snapshot = await client.snapshot();
       if (generation !== (this.generations.get(id) ?? 0))

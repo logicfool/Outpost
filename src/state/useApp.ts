@@ -1,4 +1,7 @@
+import { clearDiagnostics } from '../core/diagnostics';
 import { useSocial } from './useSocial';
+import { priorityArtwork } from '../core/artwork';
+import { warmArtwork, clearArtworkCache } from '../platform/artwork';
 import type { IdentityEdit, PlayerProfile, PlayerRef } from '../core/playerTypes';
 import type { LiveGame, Loadout, Section } from '../core/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +29,12 @@ import {
 } from '../platform/notifications';
 export function useApp() {
   const [linkRevision, setLinkRevision] = useState(0);
+  const [observedIdentity, setObservedIdentity] = useState<{
+    accountId: string;
+    player: PlayerRef;
+    at: number;
+    source: 'match' | 'loadout';
+  } | null>(null);
   const [booting, setBooting] = useState(true),
     [accounts, setAccounts] = useState<Account[]>([]),
     [active, setActive] = useState<Account | null>(null);
@@ -43,6 +52,27 @@ export function useApp() {
     demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
   const social = useSocial(active, catalog);
+  useEffect(() => {
+    if (snapshot?.loadout.status === 'ready' && snapshot.loadout.data.card) {
+      const current = snapshot.loadout;
+      setObservedIdentity({
+        accountId: snapshot.accountId,
+        player: {
+          subject: snapshot.accountId,
+          name: active?.gameName ?? 'You',
+          tag: active?.tagLine ?? '',
+          card: current.data.card,
+          title: current.data.title,
+        },
+        at: current.fetchedAt,
+        source: 'loadout',
+      });
+    }
+  }, [snapshot?.accountId, snapshot?.loadout, active?.gameName, active?.tagLine]);
+  useEffect(
+    () => warmArtwork(priorityArtwork(snapshot, catalog)),
+    [snapshot?.accountId, snapshot?.store, snapshot?.loadout, catalog],
+  );
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -175,6 +205,7 @@ export function useApp() {
   const switchAccount = useCallback(
     (account: Account | null) => {
       social.disconnectChat();
+      clearDiagnostics();
       epoch.current++;
       activeRef.current = account;
       setActive(account);
@@ -263,6 +294,7 @@ export function useApp() {
       social.disconnectChat();
       const runtime = await getRuntime();
       await runtime.clearCache();
+      await clearArtworkCache();
       setSnapshot(null);
       setHistory([]);
       setCatalog({ ...EMPTY_CATALOG });
@@ -277,8 +309,17 @@ export function useApp() {
     const account = activeRef.current;
     if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
     if (account.demo) return demoMatch(id, subject);
-    const runtime = await getRuntime();
-    return (await runtime.client(account.puuid)).matchDetail(id, subject);
+    const stamp = epoch.current,
+      runtime = await getRuntime();
+    const detail = await (await runtime.client(account.puuid)).matchDetail(id, subject);
+    const own = detail.players.find((p) => p.subject === account.puuid);
+    if (own?.card && epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+      setObservedIdentity((previous) =>
+        previous?.accountId === account.puuid && previous.at >= detail.startedAt
+          ? previous
+          : { accountId: account.puuid, player: own, at: detail.startedAt, source: 'match' },
+      );
+    return detail;
   }, []);
   const moreMatches = useCallback(async (): Promise<void> => {
     const account = activeRef.current;
@@ -427,6 +468,7 @@ export function useApp() {
   }, []);
   return {
     ...social,
+    observedIdentity: observedIdentity?.accountId === active?.puuid ? observedIdentity : null,
     booting,
     accounts,
     active,

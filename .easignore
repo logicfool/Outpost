@@ -25,3 +25,5 @@ references/
 preview/
 .DS_Store
 **/.DS_Store
+
+docs/validation-*/

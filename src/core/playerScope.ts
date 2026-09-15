@@ -1,5 +1,6 @@
 import type { PlayerRef } from './playerTypes';
 import { AppError, uuid } from './validation';
+import { mergePlayerIdentity } from './playerNames';
 
 export class PlayerScope {
   private players = new Map<
@@ -23,7 +24,7 @@ export class PlayerScope {
     }
     const old = this.players.get(id);
     this.players.set(id, {
-      player: { ...old?.player, ...player, subject: id },
+      player: mergePlayerIdentity(old?.player, { ...player, subject: id }),
       source: id === this.self ? 'account' : source,
     });
   }

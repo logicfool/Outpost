@@ -1,7 +1,7 @@
+import { Image } from './CachedImage';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +13,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { CatalogItem, Money, Section as DataSection, StoreOffer } from '../core/types';
+import { artworkCandidates } from '../core/artwork';
 import { countdown, currencySymbol } from '../core/normalize';
 import { C, CURRENCY_ICONS, S, rarityColor, rarityIcon } from './theme';
 type IconName = React.ComponentProps<typeof Feather>['name'];
@@ -92,6 +93,7 @@ export function Tabs<T extends string>({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={{ flexGrow: 0, flexShrink: 0 }}
       contentContainerStyle={styles.tabs}
     >
       {items.map((item) => {
@@ -114,8 +116,8 @@ export function Tabs<T extends string>({
 export function SectionHeader({ title, detail }: { title: string; detail?: string }) {
   return (
     <View style={S.between}>
-      <Text style={S.h2}>{title}</Text>
-      {detail ? <Text style={S.small}>{detail}</Text> : null}
+      <Text style={[S.h2, { flexShrink: 1 }]}>{title}</Text>
+      {detail ? <Text style={[S.small, { flexShrink: 0 }]}>{detail}</Text> : null}
     </View>
   );
 }
@@ -186,24 +188,58 @@ export function ItemArt({
   size?: number;
   style?: ViewStyle;
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [item.image]);
+  const urls = artworkCandidates(item),
+    key = urls.join('|');
+  const [index, setIndex] = useState(0),
+    [loading, setLoading] = useState(true),
+    [retry, setRetry] = useState(0);
+  useEffect(() => {
+    setIndex(0);
+    setLoading(true);
+  }, [key]);
+  const uri = urls[index];
   return (
-    <View style={[{ height: size, alignItems: 'center', justifyContent: 'center' }, style]}>
-      {item.image && !failed ? (
+    <View
+      style={[
+        { width: '100%', height: size, alignItems: 'center', justifyContent: 'center' },
+        style,
+      ]}
+    >
+      {uri ? (
         <Image
-          source={{ uri: item.image }}
-          resizeMode="contain"
-          style={{ width: '92%', height: '92%' }}
+          key={`${uri}:${retry}`}
+          source={{ uri }}
+          contentFit="contain"
+          style={{ width: '100%', height: '100%' }}
           accessibilityLabel={item.name}
-          onError={() => setFailed(true)}
+          onLoad={() => setLoading(false)}
+          onError={() => {
+            setLoading(true);
+            setIndex((n) => n + 1);
+          }}
         />
       ) : (
-        <Feather
-          name={item.kind === 'skin' || item.kind === 'chroma' ? 'crosshair' : 'hexagon'}
-          size={Math.min(34, size / 2.5)}
-          color={rarityColor(item.rarity)}
-        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Retry artwork for ${item.name}`}
+          disabled={!urls.length}
+          onPress={() => {
+            setIndex(0);
+            setLoading(true);
+            setRetry((n) => n + 1);
+          }}
+          style={{ alignItems: 'center', gap: 4 }}
+        >
+          <Feather
+            name={item.kind === 'title' ? 'type' : urls.length ? 'refresh-cw' : 'image'}
+            size={Math.min(28, size / 2.5)}
+            color={C.muted}
+          />
+          {urls.length > 0 && <Text style={S.small}>Retry image</Text>}
+        </Pressable>
+      )}
+      {uri && loading && (
+        <ActivityIndicator size="small" color={C.subtle} style={{ position: 'absolute' }} />
       )}
     </View>
   );
@@ -292,10 +328,14 @@ export function OfferGrid({
   onWish(id: string): void;
   onOpen(item: CatalogItem): void;
 }) {
+  const [width, setWidth] = useState(0);
   return (
-    <View style={styles.grid}>
+    <View style={styles.grid} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       {offers.map((offer, index) => (
-        <View key={`${offer.id}:${index}`} style={styles.gridCell}>
+        <View
+          key={`${offer.id}:${index}`}
+          style={[styles.gridCell, width > 0 && { width: (width - 12) / 2 }]}
+        >
           <OfferCard
             offer={offer}
             wished={wishlist.includes(offer.item.canonicalId)}
@@ -372,7 +412,19 @@ export function Resource<T>({
       </View>
     );
   if (value.status === 'error')
-    return <Empty icon="alert-circle" title={`${title} unavailable`} detail={value.message} />;
+    return (
+      <View style={[S.card, S.row, { alignItems: 'flex-start' }]} accessibilityRole="alert">
+        <Feather name="alert-circle" color={C.gold} size={20} />
+        <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+          <Text style={S.h3}>{title} unavailable</Text>
+          <Text style={S.body}>{value.message}</Text>
+          <Text style={S.small}>
+            {value.code}
+            {value.retryAt ? ` · Retry after ${new Date(value.retryAt).toLocaleTimeString()}` : ''}
+          </Text>
+        </View>
+      </View>
+    );
   return <>{children(value.data)}</>;
 }
 export function ProgressBar({
@@ -464,7 +516,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   buttonSecondary: { backgroundColor: C.raised, borderWidth: 1, borderColor: C.border },
-  buttonText: { fontSize: 15, fontWeight: '700' },
+  buttonText: { fontSize: 15, fontWeight: '600', flexShrink: 1, textAlign: 'center' },
   iconButton: {
     width: 40,
     height: 40,
@@ -486,7 +538,8 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
   tabs: { gap: 8, paddingRight: 4 },
   tab: {
-    height: 36,
+    minHeight: 40,
+    paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 18,
     justifyContent: 'center',
@@ -508,7 +561,7 @@ const styles = StyleSheet.create({
   },
   discountText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  gridCell: { width: '48%', flexGrow: 1, maxWidth: '50%' },
+  gridCell: { width: '48%', minWidth: 0 },
   empty: {
     paddingVertical: 30,
     paddingHorizontal: 22,

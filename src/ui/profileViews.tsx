@@ -1,5 +1,8 @@
-import React from 'react';
-import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
+import { Image } from './CachedImage';
+import React, { useState } from 'react';
+import { playerLabel } from '../core/playerNames';
+import { hydrateItem } from '../core/catalog';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Catalog } from '../core/types';
@@ -14,40 +17,51 @@ export function PlayerCover({
   catalog,
   xp,
   onEdit,
+  ownId,
+  note,
 }: {
   player: PlayerRef;
   catalog: Catalog;
   xp?: number;
   onEdit?(): void;
+  ownId?: string;
+  note?: string;
 }) {
-  const card = player.card ? (catalog.items[player.card.id] ?? player.card) : undefined;
-  const title = player.title ? (catalog.items[player.title.id] ?? player.title) : undefined;
+  const card = player.card ? hydrateItem(catalog, player.card) : undefined;
+  const title = player.title ? hydrateItem(catalog, player.title) : undefined;
   const image = card?.wideArt ?? card?.wallpaper ?? card?.image;
+  const [expanded, setExpanded] = useState(false);
+  const you = player.subject === ownId;
   return (
     <View
       style={{
+        width: '100%',
         backgroundColor: C.surface,
-        borderRadius: 24,
+        borderRadius: 20,
         borderWidth: 1,
         borderColor: C.border,
         overflow: 'hidden',
       }}
     >
-      <View style={{ height: 170, backgroundColor: C.raised }}>
+      <View
+        style={
+          image
+            ? { width: '100%', aspectRatio: 3.1, backgroundColor: C.raised }
+            : { height: 56, backgroundColor: C.raised }
+        }
+      >
         {image ? (
           <Image
             accessibilityLabel={card?.name ?? 'Equipped player card'}
             source={{ uri: image }}
-            resizeMode="cover"
+            contentFit="cover"
+            priority="high"
             style={{ width: '100%', height: '100%' }}
           />
         ) : (
-          <LinearGradient
-            colors={[`${C.accent}30`, C.surface]}
-            style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-          >
-            <Feather name="image" size={34} color={C.subtle} />
-          </LinearGradient>
+          <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 16 }}>
+            <Text style={S.small}>Player card not available</Text>
+          </View>
         )}
         {onEdit && (
           <Pressable
@@ -56,28 +70,28 @@ export function PlayerCover({
             onPress={onEdit}
             style={{
               position: 'absolute',
-              top: 12,
-              right: 12,
-              backgroundColor: '#070B12CC',
-              padding: 10,
-              borderRadius: 18,
+              top: 8,
+              right: 8,
+              backgroundColor: '#070B12DD',
+              padding: 11,
+              borderRadius: 22,
             }}
           >
             <Feather name="edit-2" size={18} color={C.ink} />
           </Pressable>
         )}
       </View>
-      <View style={{ padding: 18, gap: 9 }}>
-        <Text style={[S.h2, { fontSize: 25 }]} numberOfLines={2}>
-          {player.hidden ? 'Hidden player' : player.name}
-          {!player.hidden && player.tag ? (
-            <Text style={{ color: C.subtle }}> #{player.tag}</Text>
+      <View style={{ padding: 16, gap: 8 }}>
+        <Text style={[S.h2, { fontSize: 23 }]} numberOfLines={2}>
+          {ownId ? playerLabel(player, ownId) : player.hidden ? 'Hidden player' : player.name}
+          {!player.hidden && !you && player.tag ? (
+            <Text style={{ color: C.muted, fontSize: 17 }}> #{player.tag}</Text>
           ) : null}
         </Text>
         {title && !title.name.startsWith('Unresolved') && (
           <Text style={[S.body, { color: C.gold }]}>{title.name}</Text>
         )}
-        <View style={S.between}>
+        <View style={[S.between, { flexWrap: 'wrap', gap: 4 }]}>
           <Text style={S.small}>
             {player.hideLevel
               ? 'Level hidden'
@@ -88,7 +102,26 @@ export function PlayerCover({
           {xp !== undefined && <Text style={S.small}>{xp.toLocaleString()} / 5,000 XP</Text>}
         </View>
         {xp !== undefined && <ProgressBar value={xp} max={5000} />}
-        {!image && <Text style={S.small}>Equipped card artwork has not been returned yet.</Text>}
+        {note && <Text style={S.small}>{note}</Text>}
+        {card?.wallpaper && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Toggle full player card"
+            onPress={() => setExpanded((v) => !v)}
+            style={{ paddingVertical: 4 }}
+          >
+            <Text style={[S.small, { color: C.muted }]}>
+              {expanded ? 'Hide full artwork ↑' : 'View full artwork ↓'}
+            </Text>
+          </Pressable>
+        )}
+        {expanded && card?.wallpaper && (
+          <Image
+            source={{ uri: card.wallpaper }}
+            contentFit="contain"
+            style={{ width: '100%', height: 340 }}
+          />
+        )}
       </View>
     </View>
   );

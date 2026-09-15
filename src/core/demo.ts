@@ -1,4 +1,5 @@
 import { DEMO_ART } from './demoAssets';
+import { DEMO_ACCESSORIES } from './demoAccessories';
 import type {
   Account,
   Catalog,
@@ -57,10 +58,7 @@ export function demoCatalog(): Catalog {
       ...DEMO_ART.skins[name],
     };
   });
-  for (const [index, name] of ['Pocket Sage', 'Good Luck'].entries()) {
-    const id = `00000000-0000-4000-8002-${String(index + 1).padStart(12, '0')}`;
-    items[id] = { id, canonicalId: id, name, kind: 'buddy' };
-  }
+  for (const item of DEMO_ACCESSORIES) items[item.id] = item;
   for (const item of [...DEMO_ART.cards, ...DEMO_ART.titles]) items[item.id] = item;
   for (const skin of Object.values(items).filter((i) => i.kind === 'skin'))
     for (const chroma of skin.chromas ?? [])
@@ -70,7 +68,18 @@ export function demoCatalog(): Catalog {
     bundles: DEMO_ART.bundles,
     maps: DEMO_ART.maps,
     tiers: DEMO_ART.tiers,
-    contracts: {},
+    contracts: {
+      'demo-pass': {
+        id: 'demo-pass',
+        name: 'After-hours battle pass',
+        levels: Array.from({ length: 55 }, (_, i) => ({
+          xp: i ? 28000 : 0,
+          rewardId: i % 3 === 2 ? CURRENCIES.RP : DEMO_ACCESSORIES[i % DEMO_ACCESSORIES.length]!.id,
+          rewardType: i % 3 === 2 ? 'Currency' : 'Item',
+          rewardAmount: 1,
+        })),
+      },
+    },
     seasons: {},
     fetchedAt: 0,
   };
@@ -148,13 +157,13 @@ export function makeDemo(now = Date.now()): {
           offers: offers.slice(4),
         },
       ],
-      accessories: [
-        {
-          id: 'demo-accessory',
-          item: Object.values(catalog.items)[8]!,
-          prices: [{ currencyId: CURRENCIES.KC, symbol: 'KC', amount: 4500 }],
-        },
-      ],
+      accessories: DEMO_ACCESSORIES.map((item) => ({
+        id: item.id,
+        item,
+        prices: [
+          { currencyId: CURRENCIES.KC, symbol: 'KC', amount: item.kind === 'buddy' ? 7500 : 4000 },
+        ],
+      })),
       accessoriesExpireAt: now + 2 * 86400000,
       nightMarket: {
         expiresAt: now + 8 * 86400000,

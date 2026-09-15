@@ -18,5 +18,6 @@
   "react-native-webview",
   "@expo/vector-icons",
   "expo-video",
-  "@react-native-cookies/cookies"
+  "@react-native-cookies/cookies",
+  "expo-image"
 ]

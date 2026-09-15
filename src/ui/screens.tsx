@@ -1,10 +1,12 @@
+import { Image } from './CachedImage';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 import type { Navigate } from './explorerTypes';
+import { playerLabel } from '../core/playerNames';
 import { PlayerCover, LiveCard } from './profileViews';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Modal,
   Platform,
   Pressable,
@@ -33,7 +35,7 @@ import type {
 } from '../core/types';
 import { MAX_ACCOUNTS, XP_PER_LEVEL } from '../core/types';
 import { safeError } from '../core/validation';
-import { catalogItem } from '../core/catalog';
+import { catalogItem, hydrateItem } from '../core/catalog';
 import { queueName, walletOverview } from '../core/normalize';
 import {
   Badge,
@@ -206,12 +208,13 @@ function MiniStat({
   );
 }
 export function StoreScreen({ model, onItem }: Props) {
+  const [bundleLimit, setBundleLimit] = useState(12);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
   );
   const grid = (offers: StoreOffer[]) => (
     <OfferGrid
-      offers={offers}
+      offers={offers.map((o) => ({ ...o, item: hydrateItem(model.catalog, o.item) }))}
       wishlist={model.wishlist}
       onWish={(id) => void model.toggleWish(id)}
       onOpen={onItem}
@@ -298,6 +301,7 @@ export function StoreScreen({ model, onItem }: Props) {
           <View style={styles.tileGrid}>
             {Object.entries(model.catalog.bundles)
               .sort((a, b) => a[1].name.localeCompare(b[1].name))
+              .slice(0, bundleLimit)
               .map(([id, bundle]) => (
                 <View key={id} style={styles.archiveCard}>
                   {bundle.image ? (
@@ -322,6 +326,13 @@ export function StoreScreen({ model, onItem }: Props) {
                 </View>
               ))}
           </View>
+          {Object.keys(model.catalog.bundles).length > bundleLimit && (
+            <Button
+              title="Show more bundles"
+              secondary
+              onPress={() => setBundleLimit((n) => n + 12)}
+            />
+          )}
         </>
       )}
       {tab === 'accessories' && (
@@ -623,6 +634,7 @@ function BattlePassRewards({
     .map((level, index) => ({
       index,
       xp: level.xp,
+      amount: level.rewardAmount,
       item: level.rewardId ? catalogItem(model.catalog, level.rewardId) : undefined,
     }))
     .filter((v) => v.item);
@@ -648,6 +660,7 @@ function BattlePassRewards({
             {reward.item && <ItemArt item={reward.item} size={72} />}
             <Text style={[S.h3, { fontSize: 13 }]} numberOfLines={2}>
               {reward.item?.name}
+              {reward.amount && reward.amount > 1 ? ` ×${reward.amount}` : ''}
             </Text>
           </Pressable>
         ))}
@@ -663,46 +676,43 @@ function Stat({ label, value }: { label: string; value: string | number | null }
     </View>
   );
 }
-function RankCard({ model, stats }: { model: AppModel; stats?: boolean }) {
+function BattlePassSummary({ model }: { model: AppModel }) {
   return (
-    <Resource title="Rank" section={model.snapshot?.rank}>
-      {(rank) => (
-        <View style={S.card}>
-          <View style={S.between}>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={S.small}>CURRENT RANK</Text>
-              <Text style={S.h2}>{rank.name}</Text>
-              <Text style={S.body}>{rank.rr === null ? '-' : `${rank.rr} RR`}</Text>
+    <Resource title="Battle Pass" section={model.snapshot?.progression}>
+      {(progress) => {
+        const pass = progress.contracts.find((c) => c.currentBattlepass);
+        if (!pass)
+          return (
+            <View style={S.card}>
+              <Text style={S.h3}>No current pass returned</Text>
+              <Text style={S.body}>Refresh to check the active act.</Text>
             </View>
-            {rank.image ? (
-              <Image
-                source={{ uri: rank.image }}
-                style={{ width: 72, height: 72 }}
-                resizeMode="contain"
-              />
-            ) : (
-              <Feather name="award" size={44} color={C.gold} />
-            )}
-          </View>
-          {stats && (
-            <>
-              <View style={S.divider} />
-              <View style={S.row}>
-                <Stat label="WINS" value={rank.wins} />
-                <Stat label="GAMES" value={rank.games} />
-                <Stat
-                  label="WIN RATE"
-                  value={
-                    rank.wins !== null && rank.games
-                      ? `${Math.round((rank.wins / rank.games) * 100)}%`
-                      : null
-                  }
-                />
+          );
+        const total = model.catalog.contracts[pass.id]?.levels.length;
+        return (
+          <View style={[S.card, { gap: 14 }]}>
+            <View style={[S.between, { alignItems: 'flex-start' }]}>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Text style={S.small}>CURRENT BATTLE PASS</Text>
+                <Text style={S.h2}>{pass.name}</Text>
               </View>
-            </>
-          )}
-        </View>
-      )}
+              <Badge text="ACTIVE" color={C.mint} />
+            </View>
+            <View style={[S.row, { alignItems: 'baseline' }]}>
+              <Text style={[S.title, { fontSize: 34 }]}>Tier {pass.level}</Text>
+              {total && <Text style={S.body}>of {total}</Text>}
+            </View>
+            {total && <ProgressBar value={pass.level} max={total} />}
+            <Text style={S.small}>
+              {total && pass.level >= total
+                ? 'All reported tiers completed'
+                : pass.nextLevelXp
+                  ? `${pass.xp.toLocaleString()} / ${pass.nextLevelXp.toLocaleString()} XP to next tier`
+                  : 'Progress reported by Riot'}
+            </Text>
+          </View>
+        );
+      }}
     </Resource>
   );
 }
@@ -710,12 +720,9 @@ function LevelCard({ model }: { model: AppModel }) {
   return (
     <Resource title="Account level" section={model.snapshot?.xp}>
       {(xp) => (
-        <View style={[S.card, S.between]}>
-          <View style={{ gap: 4 }}>
-            <Text style={S.small}>ACCOUNT LEVEL</Text>
-            <Text style={S.title}>{xp.level}</Text>
-          </View>
-          <Text style={S.body}>{xp.xp.toLocaleString()} XP</Text>
+        <View style={[S.between, { paddingHorizontal: 4 }]}>
+          <Text style={S.body}>Account level {xp.level}</Text>
+          <Text style={S.small}>{xp.xp.toLocaleString()} / 5,000 XP</Text>
         </View>
       )}
     </Resource>
@@ -725,48 +732,53 @@ export function ProgressScreen({ model, onItem }: Props) {
   return (
     <Page model={model}>
       <Heading eyebrow="SEASON PROGRESS" title="Battle Pass" />
-      <RankCard model={model} stats />
+      <BattlePassSummary model={model} />
       <LevelCard model={model} />
       <BattlePassRewards model={model} onItem={onItem} />
       <Resource title="Contracts" section={model.snapshot?.progression}>
         {(progress) => (
           <>
-            <SectionHeader title="Contracts" />
+            {progress.contracts.some((c) => !c.currentBattlepass) && (
+              <SectionHeader title="Other contracts" />
+            )}
             {progress.contracts.length ? (
-              progress.contracts.map((contract) => (
-                <View style={S.card} key={contract.id}>
-                  {contract.currentBattlepass && <Badge text="ACTIVE" color={C.accent} />}
-                  <View style={S.between}>
-                    <Text style={[S.h3, { flex: 1 }]}>{contract.name}</Text>
-                    <Text style={S.h3}>Tier {contract.level}</Text>
-                  </View>
-                  {contract.nextLevelXp !== undefined && (
-                    <>
-                      <ProgressBar value={contract.xp} max={contract.nextLevelXp} />
-                      <Text style={S.small}>
-                        {contract.xp.toLocaleString()} / {contract.nextLevelXp.toLocaleString()} XP
-                      </Text>
-                    </>
-                  )}
-                  {contract.nextReward && (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`View next reward ${contract.nextReward.name}`}
-                      style={[S.row, styles.nextReward]}
-                      onPress={() => onItem(contract.nextReward!)}
-                    >
-                      <ItemArt item={contract.nextReward} size={52} style={{ width: 76 }} />
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={S.small}>NEXT REWARD</Text>
-                        <Text style={S.h3} numberOfLines={1}>
-                          {contract.nextReward.name}
+              progress.contracts
+                .filter((contract) => !contract.currentBattlepass)
+                .map((contract) => (
+                  <View style={S.card} key={contract.id}>
+                    {contract.currentBattlepass && <Badge text="ACTIVE" color={C.accent} />}
+                    <View style={S.between}>
+                      <Text style={[S.h3, { flex: 1 }]}>{contract.name}</Text>
+                      <Text style={S.h3}>Tier {contract.level}</Text>
+                    </View>
+                    {contract.nextLevelXp !== undefined && (
+                      <>
+                        <ProgressBar value={contract.xp} max={contract.nextLevelXp} />
+                        <Text style={S.small}>
+                          {contract.xp.toLocaleString()} / {contract.nextLevelXp.toLocaleString()}{' '}
+                          XP
                         </Text>
-                      </View>
-                      <Feather name="chevron-right" size={18} color={C.subtle} />
-                    </Pressable>
-                  )}
-                </View>
-              ))
+                      </>
+                    )}
+                    {contract.nextReward && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`View next reward ${contract.nextReward.name}`}
+                        style={[S.row, styles.nextReward]}
+                        onPress={() => onItem(contract.nextReward!)}
+                      >
+                        <ItemArt item={contract.nextReward} size={52} style={{ width: 76 }} />
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={S.small}>NEXT REWARD</Text>
+                          <Text style={S.h3} numberOfLines={1}>
+                            {contract.nextReward.name}
+                          </Text>
+                        </View>
+                        <Feather name="chevron-right" size={18} color={C.subtle} />
+                      </Pressable>
+                    )}
+                  </View>
+                ))
             ) : (
               <Empty title="No active contracts" detail="Pull down to refresh." icon="flag" />
             )}
@@ -811,11 +823,16 @@ function ProfileBanner({ model, onNavigate }: { model: AppModel; onNavigate: Nav
         subject: model.active!.puuid,
         name: model.active!.gameName,
         tag: model.active!.tagLine,
-        card: loadout?.card,
-        title: loadout?.title,
+        card: loadout?.card ?? model.observedIdentity?.player.card,
+        title: loadout?.title ?? model.observedIdentity?.player.title,
         level: xp?.level,
       }}
       catalog={model.catalog}
+      note={
+        !loadout?.card && model.observedIdentity
+          ? `Last ${model.observedIdentity.source === 'match' ? 'match' : 'equipped'} identity · ${date(model.observedIdentity.at)}`
+          : undefined
+      }
       xp={xp?.xp}
       onEdit={() => onNavigate({ type: 'identity' })}
     />
@@ -1138,27 +1155,31 @@ function PlayerRow({
   player,
   ally,
   onOpen,
+  ownId,
 }: {
   player: MatchPlayer;
   ally: boolean;
   onOpen(): void;
+  ownId?: string;
 }) {
+  const you = player.subject === ownId,
+    label = playerLabel(player, ownId);
   const kd = player.kills !== null && player.deaths ? player.kills / player.deaths : null,
-    stripe = player.self ? C.gold : ally ? C.mint : C.accent;
+    stripe = you ? C.gold : ally ? C.mint : C.accent;
   return (
     <Pressable
       onPress={onOpen}
       disabled={!!player.hidden}
       accessibilityRole="button"
-      accessibilityLabel={`View ${player.hidden ? 'hidden player' : player.name} profile`}
-      style={[styles.playerCard, player.self && { borderColor: `${C.gold}59` }]}
+      accessibilityLabel={`View ${label} profile`}
+      style={[styles.playerCard, you && { borderColor: `${C.gold}59` }]}
     >
       <View style={[S.row, { gap: 12 }]}>
         <AgentFrame image={player.agentImage} size={44} />
         <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[S.h3, player.self && { color: C.gold }]} numberOfLines={1}>
-            {player.name}
-            {player.tag ? (
+          <Text style={[S.h3, you && { color: C.gold }]} numberOfLines={1}>
+            {label}
+            {!you && player.tag ? (
               <Text style={{ color: C.subtle, fontWeight: '400' }}> #{player.tag}</Text>
             ) : null}
           </Text>
@@ -1331,6 +1352,7 @@ export function MatchReport({
                               <PlayerRow
                                 key={player.subject}
                                 player={player}
+                                ownId={model.active?.puuid}
                                 ally={team === own}
                                 onOpen={() => onNavigate({ type: 'player', player })}
                               />
@@ -1342,6 +1364,7 @@ export function MatchReport({
                     <PlayerRow
                       key={player.subject}
                       player={player}
+                      ownId={model.active?.puuid}
                       ally={player.self}
                       onOpen={() => onNavigate({ type: 'player', player })}
                     />
@@ -1664,6 +1687,7 @@ export function AccountScreen({ model, onLink }: Props) {
           />
         </View>
         <SectionHeader title="Data" />
+        <DiagnosticsPanel />
         <Button
           title="Clear cached data"
           secondary
@@ -1693,7 +1717,7 @@ export function AccountScreen({ model, onLink }: Props) {
             deletes its local data but does not sign it out on Riot's side. Demo mode uses made-up
             data.
           </Text>
-          <Text style={S.small}>Outpost 0.3.0</Text>
+          <Text style={S.small}>Outpost 0.3.1</Text>
         </View>
       </Page>
       <Modal
@@ -1767,7 +1791,7 @@ function SkinVideo({ uri }: { uri: string }) {
   );
 }
 export function ItemModal({
-  item,
+  item: original,
   model,
   onClose,
 }: {
@@ -1775,6 +1799,7 @@ export function ItemModal({
   model: AppModel;
   onClose(): void;
 }) {
+  const item = original ? hydrateItem(model.catalog, original) : null;
   const [preview, setPreview] = useState<CatalogMedia | null>(null);
   useEffect(() => setPreview(null), [item?.id]);
   const shown = preview ?? item,

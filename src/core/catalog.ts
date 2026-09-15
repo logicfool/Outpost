@@ -15,6 +15,7 @@ export const CATALOG_PATHS = [
   'competitivetiers',
   'contracts',
   'seasons',
+  'currencies',
 ] as const;
 export type CatalogPath = (typeof CATALOG_PATHS)[number];
 function dataList(value: unknown) {
@@ -43,7 +44,7 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
-    schemaVersion: 3,
+    schemaVersion: 4,
     fetchedAt: now,
   };
   const add = (id: string, item: CatalogItem) => {
@@ -109,6 +110,7 @@ export function buildCatalog(
     ['playercards', 'card'],
     ['playertitles', 'title'],
     ['agents', 'agent'],
+    ['currencies', 'currency'],
   ];
   for (const [path, kind] of categories)
     for (const raw of dataList(responses[path])) {
@@ -122,13 +124,29 @@ export function buildCatalog(
             ? text(entry.titleText, text(entry.displayName))
             : text(entry.displayName),
         kind,
-        image: safeImage(entry.displayIcon) ?? safeImage(entry.smallArt),
+        image:
+          safeImage(entry.displayIcon) ??
+          safeImage(entry.smallArt) ??
+          safeImage(entry.fullTransparentIcon) ??
+          safeImage(entry.fullIcon),
+        imageFallbacks: [
+          safeImage(entry.fullTransparentIcon),
+          safeImage(entry.fullIcon),
+          safeImage(entry.smallArt),
+          safeImage(entry.largeIcon),
+        ].filter((u): u is string => !!u),
         wallpaper: safeImage(entry.largeArt) ?? safeImage(entry.fullPortrait),
         wideArt: safeImage(entry.wideArt),
       };
       add(item.id, item);
       for (const level of array(entry.levels).map(object))
-        add(text(level.uuid), { ...item, image: safeImage(level.displayIcon) ?? item.image });
+        add(text(level.uuid), {
+          ...item,
+          image: item.image ?? safeImage(level.displayIcon),
+          imageFallbacks: [safeImage(level.displayIcon), ...(item.imageFallbacks ?? [])].filter(
+            (u): u is string => !!u,
+          ),
+        });
     }
   for (const raw of dataList(responses.bundles)) {
     const e = object(raw);
@@ -170,12 +188,18 @@ export function buildCatalog(
   for (const raw of dataList(responses.contracts)) {
     const e = object(raw),
       content = object(e.content);
-    const levels: { xp: number; rewardId?: string }[] = [];
+    const levels: { xp: number; rewardId?: string; rewardAmount?: number; rewardType?: string }[] =
+      [];
     for (const chapter of array(content.chapters).map(object))
       for (const level of array(chapter.levels).map(object))
         levels.push({
           xp: number(level.xp),
           rewardId: text(object(level.reward).uuid) || undefined,
+          rewardAmount:
+            typeof object(level.reward).amount === 'number'
+              ? number(object(level.reward).amount)
+              : undefined,
+          rewardType: text(object(level.reward).type) || undefined,
         });
     catalog.contracts[text(e.uuid)] = {
       id: text(e.uuid),
@@ -202,6 +226,22 @@ export function catalogItem(
   id: string,
   fallbackKind: ItemKind = 'unknown',
 ): CatalogItem {
+  const key = id.toLowerCase(),
+    currency = (
+      {
+        'e59aa87c-4cbf-517a-5983-6e81511be9b7': 'Radianite Points',
+        '85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741': 'VALORANT Points',
+        '85ca954a-41f2-ce94-9b45-8ca3dd39a00d': 'Kingdom Credits',
+      } as Record<string, string>
+    )[key];
+  if (currency && !catalog.items[key])
+    return {
+      id: key,
+      canonicalId: key,
+      name: currency,
+      kind: 'currency',
+      image: `https://media.valorant-api.com/currencies/${key}/displayicon.png`,
+    };
   return (
     (Object.hasOwn(catalog.items, id.toLowerCase())
       ? catalog.items[id.toLowerCase()]
@@ -212,6 +252,31 @@ export function catalogItem(
       name: `Unresolved item · ${id.slice(0, 8) || 'unknown'}`,
     }
   );
+}
+export function hydrateItem(catalog: Catalog, item: CatalogItem): CatalogItem {
+  const fresh = catalogItem(catalog, item.id, item.kind);
+  if (fresh.name.startsWith('Unresolved')) return item;
+  return {
+    ...item,
+    ...fresh,
+    image: fresh.image ?? item.image,
+    imageFallbacks: [...new Set([...(fresh.imageFallbacks ?? []), ...(item.imageFallbacks ?? [])])],
+    wideArt: fresh.wideArt ?? item.wideArt,
+    wallpaper: fresh.wallpaper ?? item.wallpaper,
+  };
+}
+export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Catalog {
+  if (!previous) return fresh;
+  return {
+    ...fresh,
+    items: { ...previous.items, ...fresh.items },
+    maps: { ...previous.maps, ...fresh.maps },
+    bundles: { ...previous.bundles, ...fresh.bundles },
+    tiers: { ...previous.tiers, ...fresh.tiers },
+    contracts: { ...previous.contracts, ...fresh.contracts },
+    seasons: { ...previous.seasons, ...fresh.seasons },
+    currentSeasonId: fresh.currentSeasonId ?? previous.currentSeasonId,
+  };
 }
 export class CatalogClient {
   private cache = new SingleFlightCache();
@@ -228,21 +293,28 @@ export class CatalogClient {
       return version;
     });
   }
-  async load(): Promise<Catalog> {
-    return this.cache.get('catalog', 24 * 60 * 60 * 1000, async () => {
+  async load(previous?: Catalog): Promise<Catalog> {
+    return this.cache.get('catalog', 30000, async () => {
+      const failed: string[] = [];
       const entries = await Promise.all(
         CATALOG_PATHS.map(async (path) => {
           try {
-            return [
-              path,
-              (await this.http.json(`${PUBLIC_ORIGIN}/v1/${path}?language=en-US`)).data,
-            ] as const;
+            const data = await this.cache.get(`category:${path}`, 24 * 60 * 60 * 1000, async () => {
+              const result = (await this.http.json(`${PUBLIC_ORIGIN}/v1/${path}?language=en-US`))
+                .data;
+              if (!Array.isArray(object(result).data)) throw new Error('Invalid catalog category');
+              return result;
+            });
+            return [path, data] as const;
           } catch {
+            failed.push(path);
             return [path, undefined] as const;
           }
         }),
       );
-      return buildCatalog(Object.fromEntries(entries));
+      const fresh = buildCatalog(Object.fromEntries(entries));
+      fresh.failedPaths = failed;
+      return mergeCatalog(previous, fresh);
     });
   }
 }

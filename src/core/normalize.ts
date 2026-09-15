@@ -317,6 +317,7 @@ export function normalizeMatchDetail(
   raw: unknown,
   accountId: string,
   catalog: Catalog,
+  signedInId = accountId,
 ): MatchDetail {
   const r = object(raw),
     info = object(r.matchInfo),
@@ -362,9 +363,12 @@ export function normalizeMatchDetail(
       const subject = text(p.subject).toLowerCase(),
         stats = object(p.stats),
         identity = object(p.playerIdentity),
-        hidden = (p.incognito === true || identity.Incognito === true) && subject !== me,
+        hidden =
+          (p.incognito === true || identity.Incognito === true) &&
+          subject !== signedInId.toLowerCase(),
         hideLevel =
-          (p.hideAccountLevel === true || identity.HideAccountLevel === true) && subject !== me,
+          (p.hideAccountLevel === true || identity.HideAccountLevel === true) &&
+          subject !== signedInId.toLowerCase(),
         agent = catalogItem(catalog, text(p.characterId), 'agent');
       const score = nullableNumber(stats.score),
         rounds = nullableNumber(stats.roundsPlayed),

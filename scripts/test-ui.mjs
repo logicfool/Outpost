@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation');
+const out = path.join(root, 'docs', 'validation-0.3.1');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -37,7 +37,13 @@ const server = http.createServer(async (request, response) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const baseUrl = `http://127.0.0.1:${server.address().port}/`;
 await fs.mkdir(out, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  args:
+    process.env.OUTPOST_LOW_MEMORY === '1'
+      ? ['--single-process', '--no-zygote', '--disable-gpu', '--js-flags=--max-old-space-size=192']
+      : [],
+});
 const context = await browser.newContext({
   viewport: { width: 390, height: 844 },
   deviceScaleFactor: 1,
@@ -46,6 +52,10 @@ const page = await context.newPage();
 const errors = [],
   failures = [],
   checks = [];
+let crashed = false;
+page.on('crash', () => {
+  crashed = true;
+});
 page.on('pageerror', (e) => errors.push({ message: e.message, stack: e.stack }));
 page.on('requestfailed', (r) => failures.push({ url: r.url(), reason: r.failure()?.errorText }));
 const click = (name) => page.getByRole('button', { name, exact: true }).click();
@@ -79,6 +89,7 @@ try {
     await click('View live game details');
     await page.getByText('10 players returned.', { exact: false }).waitFor();
     await page.getByRole('button', { name: 'View Lumen profile', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'View You profile', exact: true }).waitFor();
     await shot('live-roster');
     await click('View Lumen profile');
     await page.getByRole('button', { name: 'View rank history', exact: true }).waitFor();
@@ -98,6 +109,10 @@ try {
     await page.getByRole('button', { name: 'Open Ascent match', exact: true }).waitFor();
     await click('Open Ascent match');
     await page.getByText('Player’s team', { exact: true }).waitFor();
+    assert.equal(
+      await page.getByRole('button', { name: 'View You profile', exact: true }).count(),
+      1,
+    );
     await tab('Rounds');
     await shot('rounds');
     await tab('Duels');
@@ -164,6 +179,46 @@ try {
     await shot('skin-levels');
     await click('Close item details');
   });
+  await check('Battle Pass has pass progress rather than an unrelated rank panel', async () => {
+    await tab('Battle Pass');
+    await page.getByText('CURRENT BATTLE PASS', { exact: true }).waitFor();
+    await page.getByText('Radianite Points', { exact: true }).first().waitFor();
+    assert.equal(await page.getByText('Unresolved item', { exact: false }).count(), 0);
+    assert.equal(await page.getByText('CURRENT RANK', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('Rank unavailable', { exact: true }).count(), 0);
+    await shot('battle-pass');
+  });
+  await check('accessory tiles load images with measurable width', async () => {
+    await tab('Store');
+    await tab('Accessories');
+    await page.waitForFunction(
+      () => {
+        const offers = [...document.querySelectorAll('button[aria-label^="View "]')];
+        return (
+          offers.length === 4 &&
+          offers.every((offer) =>
+            [...offer.querySelectorAll('img')].some(
+              (img) =>
+                img.complete && img.naturalWidth > 0 && img.getBoundingClientRect().width > 60,
+            ),
+          )
+        );
+      },
+      null,
+      { timeout: 25000 },
+    );
+    await shot('accessories');
+  });
+  await check('connection diagnostics are accessible from settings', async () => {
+    await tab('Settings');
+    await click('Connection diagnostics');
+    await page
+      .getByText('Local request metadata only. No tokens, IDs, names or message contents.', {
+        exact: true,
+      })
+      .waitFor();
+    await click('Hide connection diagnostics');
+  });
   await check('mobile layout has no horizontal overflow at 320 and 430 pixels', async () => {
     for (const width of [320, 430]) {
       await page.setViewportSize({ width, height: 844 });
@@ -176,8 +231,10 @@ try {
       await shot(`profile-${width}`);
     }
   });
+  assert.equal(errors.length, 0, JSON.stringify(errors));
 } catch (e) {
-  await shot('failure');
+  process.exitCode = 1;
+  if (!crashed) await shot('failure').catch(() => {});
   console.error('SMOKE_FAILURE', e.stack);
   process.exitCode = 1;
 } finally {
@@ -188,7 +245,8 @@ try {
         checks,
         errors,
         failures,
-        passed: !process.exitCode,
+        passed: !process.exitCode && !crashed && errors.length === 0,
+        crashed,
         validatedAt: new Date().toISOString(),
       },
       null,

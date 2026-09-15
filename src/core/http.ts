@@ -1,4 +1,6 @@
+import { mimeLabel, recordRequest, serviceLabel } from './diagnostics';
 import { AppError } from './validation';
+import { parseJsonBody, readBoundedText } from './responseBody';
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 export interface JsonResponse {
   data: unknown;
@@ -40,6 +42,11 @@ export class HttpClient {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port)
       throw new AppError('NETWORK_POLICY', 'Only trusted HTTPS endpoints are allowed.');
+    const started = this.now();
+    let status: number | undefined,
+      mime: string | undefined,
+      shape: string | undefined,
+      code = 'OK';
     await this.enter();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -68,6 +75,8 @@ export class HttpClient {
             : 'The service could not be reached. Check your connection.',
         );
       }
+      status = response.status;
+      mime = mimeLabel(response.headers.get('content-type') ?? '');
       if (response.redirected || (response.url && new URL(response.url).origin !== parsed.origin))
         throw new AppError('NETWORK_POLICY', 'An unexpected network redirect was blocked.');
       if (!response.ok) {
@@ -124,24 +133,36 @@ export class HttpClient {
           response.status,
         );
       }
-      const length = Number(response.headers.get('content-length'));
-      if (length > 32 * 1024 * 1024)
-        throw new AppError('RESPONSE_SIZE', 'The response was unexpectedly large.');
       const contentType = response.headers.get('content-type') ?? '';
-      if (format === 'json' && !contentType.toLowerCase().includes('json'))
-        throw new AppError('SCHEMA', 'The service returned an unexpected response format.');
-      let data: unknown;
+      let body: string;
       try {
-        data = format === 'json' ? await response.json() : await response.text();
-        if (typeof data === 'string' && data.length > 32000)
-          throw new Error('Oversized text response');
-      } catch {
-        throw new AppError('SCHEMA', 'The service returned unreadable data.');
+        body = await readBoundedText(response, format === 'json' ? 32 * 1024 * 1024 : 32000);
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        throw new AppError(
+          controller.signal.aborted ? 'TIMEOUT' : 'NETWORK',
+          'The response could not be read. Refresh to retry.',
+        );
       }
+      const data = format === 'json' ? parseJsonBody(body, contentType) : body;
+      shape = Array.isArray(data) ? 'array' : data === null ? 'null' : typeof data;
       const receivedAt = this.now();
       const date = Date.parse(response.headers.get('date') ?? '');
       return { data, receivedAt, serverTime: Number.isFinite(date) ? date : receivedAt };
+    } catch (error) {
+      code = error instanceof AppError ? error.code : 'UNKNOWN';
+      throw error;
     } finally {
+      recordRequest({
+        at: this.now(),
+        service: serviceLabel(url),
+        method: init.method ?? 'GET',
+        status,
+        mime,
+        shape,
+        code,
+        durationMs: Math.max(0, this.now() - started),
+      });
       clearTimeout(timeout);
       this.leave();
     }

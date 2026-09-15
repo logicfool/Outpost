@@ -10,7 +10,14 @@ export function prepareIdentityEdit(
   const current = object(raw),
     identity = object(current.Identity);
   requiredArray(current.Guns, 'weapon loadout');
-  requiredArray(current.Sprays, 'spray loadout');
+  if (!Array.isArray(current.ActiveExpressions) && !Array.isArray(current.Sprays))
+    throw new AppError(
+      'SCHEMA',
+      'The current expression loadout is incomplete. No changes were sent.',
+    );
+  if (current.ActiveExpressions !== undefined)
+    requiredArray(current.ActiveExpressions, 'expression loadout');
+  if (current.Sprays !== undefined) requiredArray(current.Sprays, 'spray loadout');
   if (
     !text(identity.PlayerCardID) ||
     !text(identity.PlayerTitleID) ||
@@ -47,7 +54,10 @@ export function prepareIdentityEdit(
   }
   return {
     Guns: current.Guns,
-    Sprays: current.Sprays,
+    ...(current.ActiveExpressions !== undefined
+      ? { ActiveExpressions: current.ActiveExpressions }
+      : {}),
+    ...(current.Sprays !== undefined ? { Sprays: current.Sprays } : {}),
     Identity: updated,
     Incognito: current.Incognito,
   };

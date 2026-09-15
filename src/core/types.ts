@@ -2,7 +2,7 @@ export type Shard = 'ap' | 'eu' | 'na' | 'kr' | 'pbe';
 export type Region = 'ap' | 'eu' | 'na' | 'br' | 'latam' | 'kr' | 'pbe';
 export type JsonObject = Record<string, unknown>;
 export type ItemKind =
-  'skin' | 'chroma' | 'buddy' | 'spray' | 'card' | 'title' | 'agent' | 'unknown';
+  'skin' | 'chroma' | 'buddy' | 'spray' | 'card' | 'title' | 'agent' | 'currency' | 'unknown';
 export interface Account {
   puuid: string;
   gameName: string;
@@ -53,6 +53,7 @@ export interface CatalogItem {
   name: string;
   kind: ItemKind;
   image?: string;
+  imageFallbacks?: string[];
   wallpaper?: string;
   wideArt?: string;
   rarity?: string;
@@ -66,10 +67,11 @@ export interface ContractDefinition {
   name: string;
   relationId?: string;
   relationType?: string;
-  levels: { xp: number; rewardId?: string }[];
+  levels: { xp: number; rewardId?: string; rewardAmount?: number; rewardType?: string }[];
 }
 export interface Catalog {
   schemaVersion?: number;
+  failedPaths?: string[];
   items: Record<string, CatalogItem>;
   bundles: Record<string, { name: string; image?: string }>;
   maps: Record<string, { name: string; image?: string; listImage?: string }>;
@@ -209,6 +211,7 @@ export interface Progression {
   weeklyRefillAt?: number;
 }
 export interface Loadout {
+  endpoint?: 'v2' | 'v3';
   version?: number;
   guns: { weapon: string; skin: CatalogItem; buddy?: CatalogItem }[];
   card?: CatalogItem;
