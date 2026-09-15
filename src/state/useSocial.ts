@@ -37,6 +37,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   const [local, setLocal] = useState<LocalState>(emptyLocal);
   const autoGate = useRef(new AutoHistoryGate());
   const [syncingSavedHistory, setSyncingSavedHistory] = useState(false);
+  const batchSync = useRef(false);
   const session = useRef<RiotChat | null>(null),
     active = useRef(account),
     meta = useRef(catalog),
@@ -95,16 +96,19 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     pending.current = false;
     session.current?.disconnect(clear);
     if (clear) session.current = null;
-    setValue((v) => ({
-      ...v,
+    const previous = latest.current;
+    const next = {
+      ...previous,
       state: clear
         ? EMPTY_CHAT
         : {
-            ...v.state,
-            status: 'disconnected',
-            friends: v.state.friends.map((f) => ({ ...f, presence: 'offline' })),
+            ...previous.state,
+            status: 'disconnected' as const,
+            friends: previous.state.friends.map((f) => ({ ...f, presence: 'offline' as const })),
           },
-    }));
+    };
+    latest.current = next;
+    setValue(next);
   }, []);
   const connectChat = useCallback(async () => {
     const a = active.current;
@@ -436,6 +440,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       generation = epoch.current;
     if (!a || latest.current.state.status !== 'ready')
       throw new AppError('CHAT_OFFLINE', 'Connect chat before syncing saved conversations.');
+    if (batchSync.current)
+      throw new AppError('CHAT_HISTORY_BUSY', 'A saved-history sync is already running.');
+    batchSync.current = true;
     setSyncingSavedHistory(true);
     try {
       const conversations = await (await storeFor(a)).conversations();
@@ -443,10 +450,17 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       for (const c of conversations
         .filter((c) => c.count > 0 && friends.has(c.subject))
         .slice(0, 10)) {
-        if (active.current?.puuid !== a.puuid || generation !== epoch.current) return;
+        if (
+          active.current?.puuid !== a.puuid ||
+          generation !== epoch.current ||
+          ['background', 'inactive'].includes(AppState.currentState)
+        )
+          return;
         await autoSyncChatHistory(c.subject);
+        if (!a.demo) await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } finally {
+      batchSync.current = false;
       if (active.current?.puuid === a.puuid) setSyncingSavedHistory(false);
     }
   }, [storeFor, autoSyncChatHistory]);

@@ -1,3 +1,4 @@
+import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatSettings } from './ChatSettings';
 import { Image } from './CachedImage';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
@@ -225,201 +226,308 @@ function MiniStat({
     </View>
   );
 }
+type StoreRow =
+  | { id: string; kind: 'offers'; offers: StoreOffer[]; wide?: boolean }
+  | { id: string; kind: 'bundle'; bundle: Store['bundles'][number] }
+  | { id: string; kind: 'archive'; entries: [string, { name: string; image?: string }][] }
+  | { id: string; kind: 'heading'; title: string; detail?: string }
+  | { id: string; kind: 'history'; entry: AppModel['history'][number] };
+const StoreGap = () => <View style={{ height: 12 }} />;
+const storeKey = (row: StoreRow) => row.id;
+const DailyOffer = memo(function DailyOffer({
+  offer,
+  wished,
+  onWish,
+  onItem,
+}: {
+  offer: StoreOffer;
+  wished: boolean;
+  onWish(id: string): void;
+  onItem(item: CatalogItem): void;
+}) {
+  const { C, S } = useTheme(),
+    tint = rarityColor(offer.item.rarity);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`View ${offer.item.name}`}
+      onPress={() => onItem(offer.item)}
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.78 : 1,
+        width: '100%',
+        borderRadius: 20,
+        backgroundColor: C.surface,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: `${tint}35`,
+      })}
+    >
+      <LinearGradient
+        colors={[`${tint}16`, `${tint}04`]}
+        style={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: 14 }}
+      >
+        <View style={{ position: 'absolute', top: 12, right: 14, zIndex: 1 }}>
+          <WishButton
+            wished={wished}
+            name={offer.item.name}
+            onPress={() => onWish(offer.item.canonicalId)}
+          />
+        </View>
+        <ItemArt item={offer.item} size={82} style={{ paddingHorizontal: 26 }} />
+        <View style={[S.between, { alignItems: 'center' }]}>
+          <View style={[S.row, { flex: 1, minWidth: 0, gap: 7 }]}>
+            <RarityIcon rarity={offer.item.rarity} size={18} />
+            <Text style={[S.h3, { flexShrink: 1 }]} numberOfLines={2}>
+              {offer.item.name}
+            </Text>
+          </View>
+          <MoneyText prices={offer.prices} />
+        </View>
+      </LinearGradient>
+    </Pressable>
+  );
+});
 export function StoreScreen({ model, onItem }: Props) {
-  const { C, S, isDark } = useTheme();
-  const styles = useThemedStyles(makeStyles);
-
+  const { C, S } = useTheme(),
+    styles = useThemedStyles(makeStyles);
   const [bundleLimit, setBundleLimit] = useState(12);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
   );
-  const grid = (offers: StoreOffer[]) => (
-    <OfferGrid
-      offers={offers.map((o) => ({ ...o, item: hydrateItem(model.catalog, o.item) }))}
-      wishlist={model.wishlist}
-      onWish={(id) => void model.toggleWish(id)}
-      onOpen={onItem}
-    />
+  const store = model.snapshot?.store.status === 'ready' ? model.snapshot.store.data : undefined;
+  const onWish = useCallback(
+    (id: string) => {
+      void model.toggleWish(id);
+    },
+    [model.toggleWish],
   );
-  const renderStore = (store: Store) => (
-    <>
-      {tab === 'daily' && (
-        <>
-          <Countdown
-            label="Offers reset in"
-            expiresAt={store.dailyExpiresAt}
-            offset={store.clockOffsetMs}
-            color={C.accent}
-            icon="refresh-cw"
+  const rows = useMemo(() => {
+    const result: StoreRow[] = [];
+    const addOffers = (prefix: string, offers: StoreOffer[], wide = false) => {
+      const batch = wide ? 1 : 2;
+      for (let i = 0; i < offers.length; i += batch)
+        result.push({
+          id: prefix + i,
+          kind: 'offers',
+          wide,
+          offers: offers
+            .slice(i, i + batch)
+            .map((o) => ({ ...o, item: hydrateItem(model.catalog, o.item) })),
+        });
+    };
+    if (tab === 'history')
+      return model.history.map((entry) => ({ id: entry.id, kind: 'history' as const, entry }));
+    if (!store) return result;
+    if (tab === 'daily') addOffers('daily', store.daily, true);
+    if (tab === 'accessories') addOffers('accessory', store.accessories);
+    if (tab === 'night') addOffers('night', store.nightMarket?.offers ?? []);
+    if (tab === 'bundles') {
+      for (const bundle of store.bundles) {
+        result.push({ id: 'bundle' + bundle.id, kind: 'bundle', bundle });
+        addOffers(bundle.id, bundle.offers);
+      }
+      const archive = Object.entries(model.catalog.bundles).sort((a, b) =>
+        a[1].name.localeCompare(b[1].name),
+      );
+      result.push({
+        id: 'archive-heading',
+        kind: 'heading',
+        title: 'All bundles',
+        detail: String(archive.length),
+      });
+      for (let i = 0; i < Math.min(bundleLimit, archive.length); i += 2)
+        result.push({ id: 'archive' + i, kind: 'archive', entries: archive.slice(i, i + 2) });
+    }
+    return result;
+  }, [tab, store, model.catalog, model.history, bundleLimit]);
+  const grid = useCallback(
+    (offers: StoreOffer[]) => (
+      <OfferGrid offers={offers} wishlist={model.wishlist} onWish={onWish} onOpen={onItem} />
+    ),
+    [model.wishlist, onWish, onItem],
+  );
+  const render = useCallback(
+    ({ item: row }: { item: StoreRow }) => {
+      if (row.kind === 'offers')
+        return row.wide ? (
+          <DailyOffer
+            offer={row.offers[0]!}
+            wished={model.wishlist.includes(row.offers[0]!.item.canonicalId)}
+            onWish={onWish}
+            onItem={onItem}
           />
-          {store.daily.length ? (
-            grid(store.daily)
-          ) : (
-            <Empty title="No offers" detail="Pull down to refresh." />
-          )}
-        </>
-      )}
-      {tab === 'night' &&
-        (store.nightMarket ? (
-          <>
-            <Countdown
-              label="Night Market ends in"
-              expiresAt={store.nightMarket.expiresAt}
-              offset={store.clockOffsetMs}
-              color={C.violet}
-              icon="moon"
-            />
-            {grid(store.nightMarket.offers)}
-          </>
         ) : (
-          <Empty
-            title="Night Market is closed"
-            detail="It will appear here when it opens."
-            icon="moon"
-          />
-        ))}
-      {tab === 'bundles' && (
-        <>
-          {store.bundles.length ? (
-            store.bundles.map((bundle) => (
-              <View key={bundle.id} style={{ gap: 12 }}>
-                <View style={styles.bundle}>
-                  {bundle.image ? (
-                    <Image
-                      source={{ uri: bundle.image }}
-                      resizeMode="cover"
-                      style={fill}
-                      accessibilityLabel={bundle.name}
-                    />
-                  ) : null}
-                  <LinearGradient
-                    colors={[`${C.background}00`, `${C.background}F0`]}
-                    style={fill}
-                  />
-                  <View style={styles.bundleInfo}>
-                    <Text style={[S.eyebrow, { color: C.ink }]}>FEATURED BUNDLE</Text>
-                    <Text style={S.h2} numberOfLines={2}>
-                      {bundle.name}
-                    </Text>
-                    <View style={S.between}>
-                      <MoneyText prices={bundle.prices} large />
-                      <Timer
-                        small
-                        expiresAt={bundle.expiresAt}
-                        offset={store.clockOffsetMs}
-                        color={C.muted}
-                      />
-                    </View>
-                  </View>
-                </View>
-                {bundle.offers.length > 0 && grid(bundle.offers)}
-              </View>
-            ))
-          ) : (
-            <Empty title="No featured bundles" detail="Pull down to refresh." icon="package" />
-          )}
-          <SectionHeader
-            title="All bundles"
-            detail={`${Object.keys(model.catalog.bundles).length}`}
-          />
-          <View style={styles.tileGrid}>
-            {Object.entries(model.catalog.bundles)
-              .sort((a, b) => a[1].name.localeCompare(b[1].name))
-              .slice(0, bundleLimit)
-              .map(([id, bundle]) => (
-                <View key={id} style={styles.archiveCard}>
-                  {bundle.image ? (
-                    <Image
-                      source={{ uri: bundle.image }}
-                      style={styles.archiveImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.archiveImage,
-                        { alignItems: 'center', justifyContent: 'center' },
-                      ]}
-                    >
-                      <Feather name="package" size={22} color={C.subtle} />
-                    </View>
-                  )}
-                  <Text style={[S.h3, { fontSize: 13, paddingHorizontal: 10 }]} numberOfLines={2}>
-                    {bundle.name}
-                  </Text>
-                </View>
-              ))}
+          grid(row.offers)
+        );
+      if (row.kind === 'heading') return <SectionHeader title={row.title} detail={row.detail} />;
+      if (row.kind === 'history')
+        return (
+          <View style={{ gap: 10 }}>
+            <SectionHeader title={date(row.entry.observedAt)} />
+            {grid(
+              row.entry.offers.map((o) => ({ ...o, item: hydrateItem(model.catalog, o.item) })),
+            )}
           </View>
-          {Object.keys(model.catalog.bundles).length > bundleLimit && (
+        );
+      if (row.kind === 'archive')
+        return (
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            {row.entries.map(([id, bundle]) => (
+              <View key={id} style={[styles.archiveCard, { flex: 1, width: undefined }]}>
+                {bundle.image ? (
+                  <Image
+                    source={{ uri: bundle.image }}
+                    style={styles.archiveImage}
+                    contentFit="cover"
+                    transition={0}
+                  />
+                ) : (
+                  <View style={styles.archiveImage} />
+                )}
+                <Text style={[S.h3, { fontSize: 13, paddingHorizontal: 10 }]} numberOfLines={2}>
+                  {bundle.name}
+                </Text>
+              </View>
+            ))}
+            {row.entries.length === 1 && <View style={{ flex: 1 }} />}
+          </View>
+        );
+      const bundle = row.bundle;
+      return (
+        <View style={styles.bundle}>
+          {bundle.image && (
+            <Image
+              source={{ uri: bundle.image }}
+              contentFit="cover"
+              style={fill}
+              accessibilityLabel={bundle.name}
+            />
+          )}
+          <LinearGradient colors={[`${C.background}00`, `${C.background}F0`]} style={fill} />
+          <View style={styles.bundleInfo}>
+            <Text style={[S.eyebrow, { color: C.ink }]}>FEATURED BUNDLE</Text>
+            <Text style={S.h2} numberOfLines={2}>
+              {bundle.name}
+            </Text>
+            <View style={S.between}>
+              <MoneyText prices={bundle.prices} large />
+              <Timer
+                small
+                expiresAt={bundle.expiresAt}
+                offset={store?.clockOffsetMs}
+                color={C.muted}
+              />
+            </View>
+          </View>
+        </View>
+      );
+    },
+    [model.wishlist, model.catalog, onWish, onItem, grid, styles, C, S, store?.clockOffsetMs],
+  );
+  const expiry =
+    tab === 'daily'
+      ? store?.dailyExpiresAt
+      : tab === 'accessories'
+        ? store?.accessoriesExpireAt
+        : tab === 'night'
+          ? store?.nightMarket?.expiresAt
+          : undefined;
+  return (
+    <FlatList
+      data={rows}
+      renderItem={render}
+      keyExtractor={storeKey}
+      ItemSeparatorComponent={StoreGap}
+      initialNumToRender={6}
+      maxToRenderPerBatch={4}
+      windowSize={5}
+      updateCellsBatchingPeriod={32}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[S.content, { gap: 0 }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={model.busy}
+          onRefresh={() => void model.refresh()}
+          tintColor={C.accent}
+        />
+      }
+      ListHeaderComponent={
+        <View style={{ gap: 16, paddingBottom: 16 }}>
+          <Heading eyebrow="YOUR DAILY DROP" title="Store" />
+          <Wallet model={model} />
+          <Tabs
+            value={tab}
+            onChange={setTab}
+            items={[
+              { id: 'daily', label: 'Today' },
+              { id: 'night', label: 'Night Market' },
+              { id: 'bundles', label: 'Bundles' },
+              { id: 'accessories', label: 'Accessories' },
+              { id: 'history', label: 'History' },
+            ]}
+          />
+          {expiry !== undefined && (
+            <View style={[S.between, { paddingHorizontal: 4, paddingVertical: 2 }]}>
+              <View style={{ gap: 3 }}>
+                <Text style={S.small}>
+                  {tab === 'daily'
+                    ? 'Next rotation'
+                    : tab === 'night'
+                      ? 'Night Market ends'
+                      : 'Accessories reset'}
+                </Text>
+                <Text style={[S.small, { fontSize: 11 }]}>Cached · pull down to refresh</Text>
+              </View>
+              <View style={S.row}>
+                <Feather name="clock" color={C.subtle} size={16} />
+                <Timer small expiresAt={expiry} offset={store?.clockOffsetMs} />
+              </View>
+            </View>
+          )}
+          {model.snapshot?.refreshIssue && (
+            <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
+              {model.snapshot.refreshIssue.message}
+            </Text>
+          )}
+          {!store && tab !== 'history' && (
+            <Resource section={model.snapshot?.store} title="Store">
+              {() => null}
+            </Resource>
+          )}
+        </View>
+      }
+      ListEmptyComponent={
+        store || tab === 'history' ? (
+          <Empty
+            title={
+              tab === 'night'
+                ? 'Night Market is closed'
+                : tab === 'history'
+                  ? 'No saved rotations yet'
+                  : 'No offers returned'
+            }
+            detail="Pull down to refresh. Automatic updates happen at the daily reset."
+            icon={tab === 'night' ? 'moon' : 'shopping-bag'}
+          />
+        ) : null
+      }
+      ListFooterComponent={
+        <View style={{ paddingVertical: 18, gap: 16 }}>
+          {tab === 'bundles' && Object.keys(model.catalog.bundles).length > bundleLimit && (
             <Button
               title="Show more bundles"
               secondary
               onPress={() => setBundleLimit((n) => n + 12)}
             />
           )}
-        </>
-      )}
-      {tab === 'accessories' && (
-        <>
-          {store.accessoriesExpireAt ? (
-            <Countdown
-              label="Accessories reset in"
-              expiresAt={store.accessoriesExpireAt}
-              offset={store.clockOffsetMs}
-              color={C.gold}
-              icon="gift"
-            />
-          ) : null}
-          {store.accessories.length ? (
-            grid(store.accessories)
-          ) : (
-            <Empty title="No accessories right now" icon="gift" />
+          {store && (
+            <Text style={[S.small, { textAlign: 'center' }]}>
+              Updated {date(store.fetchedAt)} · auto at daily reset
+            </Text>
           )}
-        </>
-      )}
-      <Text style={[S.small, { textAlign: 'center' }]}>Updated {date(store.fetchedAt)}</Text>
-    </>
-  );
-  return (
-    <Page model={model}>
-      <Heading eyebrow="YOUR DAILY DROP" title="Store" />
-      <Wallet model={model} />
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: 'daily', label: 'Today' },
-          { id: 'night', label: 'Night Market' },
-          { id: 'bundles', label: 'Bundles' },
-          { id: 'accessories', label: 'Accessories' },
-          { id: 'history', label: 'History' },
-        ]}
-      />
-      {tab === 'history' ? (
-        model.history.length ? (
-          model.history.map((entry) => (
-            <View key={entry.id} style={{ gap: 10 }}>
-              <SectionHeader title={date(entry.observedAt)} />
-              {grid(entry.offers)}
-            </View>
-          ))
-        ) : (
-          <Empty
-            title="No history yet"
-            detail={
-              model.active?.demo
-                ? 'History is not saved in demo mode.'
-                : 'Every daily rotation you load is kept here for 90 days.'
-            }
-            icon="clock"
-          />
-        )
-      ) : (
-        <Resource section={model.snapshot?.store} title="Store">
-          {renderStore}
-        </Resource>
-      )}
-    </Page>
+        </View>
+      }
+    />
   );
 }
 function ItemTile({
@@ -1547,34 +1655,10 @@ const HistoryGap = () => <View style={{ height: 12 }} />;
 export function MatchesScreen({ model, onNavigate }: Props) {
   const { C, S } = useTheme();
   const [filter, setFilter] = useState('all');
-  const [details, setDetails] = useState<Record<string, MatchDetail>>({});
-  const fetched = useRef(new Set<string>());
+  const previews = useMatchPreviews(model),
+    details = previews.details;
   const matches =
     model.snapshot?.matches.status === 'ready' ? model.snapshot.matches.data : undefined;
-  useEffect(() => {
-    let alive = true;
-    const timer = setTimeout(() => {
-      void (async () => {
-        for (const match of (matches ?? []).slice(0, 40)) {
-          if (!alive) return;
-          if (fetched.current.has(match.id)) continue;
-          try {
-            const detail = await model.matchDetail(match.id);
-            if (alive) {
-              fetched.current.add(match.id);
-              setDetails((old) => ({ ...old, [match.id]: detail }));
-            }
-          } catch {
-            return;
-          }
-        }
-      })();
-    }, 200);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [matches, model.matchDetail]);
   const queues = useMemo(() => ['all', ...new Set((matches ?? []).map((m) => m.queue))], [matches]);
   const shown = useMemo(
     () => (matches ?? []).filter((m) => filter === 'all' || m.queue === filter),
@@ -1594,6 +1678,8 @@ export function MatchesScreen({ model, onNavigate }: Props) {
       renderItem={render}
       keyExtractor={matchKey}
       ItemSeparatorComponent={HistoryGap}
+      onViewableItemsChanged={previews.onViewableItemsChanged}
+      viewabilityConfig={previews.viewabilityConfig}
       initialNumToRender={6}
       maxToRenderPerBatch={6}
       windowSize={5}
@@ -1780,6 +1866,19 @@ export function AccountScreen({ model, onLink }: Props) {
         <View style={S.card}>
           <ChatSettings model={model} />
         </View>
+        <SectionHeader title="Refresh schedule" />
+        <View style={S.card}>
+          <InfoRow label="Live matches" value="Every 60 seconds" />
+          <View style={S.divider} />
+          <InfoRow label="Automatic store refresh" value="When the daily timer resets" />
+          <View style={S.divider} />
+          <InfoRow label="Skins & catalog" value="Cached for 24 hours" />
+          <Text style={S.small}>
+            Pull down for a manual refresh. Repeated pulls and live checks share a one-minute limit.
+            Server cooldowns always take priority. Friends' presence arrives over the chat
+            connection, not by polling every friend.
+          </Text>
+        </View>
         <SectionHeader title="Notifications" />
         <View style={S.card}>
           <Setting
@@ -1792,7 +1891,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <Setting
             title="Background refresh"
-            detail="Check the store in the background when the system allows it."
+            detail="Refresh only an expired daily rotation when the system wakes the app. No background live-match polling."
             value={model.settings.backgroundSync}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) =>

@@ -15,6 +15,8 @@ const unavailable = async (): Promise<never> => {
   throw new AppError('NATIVE_REQUIRED', 'Real account access is available only in the native app.');
 };
 const repository: Repository = {
+  refreshGate: async () => null,
+  saveRefreshGate: async () => {},
   selectedAccount: async () => null,
   selectAccount: async () => {},
   accounts: async () => [],

@@ -470,7 +470,16 @@ export function Resource<T>({
         </View>
       </View>
     );
-  return <>{children(value.data)}</>;
+  return (
+    <>
+      {value.warning && (
+        <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
+          Showing saved {title.toLowerCase()}. {value.warning.message}
+        </Text>
+      )}
+      {children(value.data)}
+    </>
+  );
 }
 export function ProgressBar({
   value,

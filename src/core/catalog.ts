@@ -44,7 +44,7 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
-    schemaVersion: 4,
+    schemaVersion: 5,
     fetchedAt: now,
   };
   const add = (id: string, item: CatalogItem) => {
@@ -286,7 +286,7 @@ export class CatalogClient {
     this.cache.clear();
   }
   async version(): Promise<string> {
-    return this.cache.get('version', 5 * 60 * 1000, async () => {
+    return this.cache.get('version', 24 * 60 * 60 * 1000, async () => {
       const response = await this.http.json(`${PUBLIC_ORIGIN}/v1/version`);
       const version = text(object(object(response.data).data).riotClientVersion);
       if (!version || !/^[a-zA-Z0-9.+_-]{4,160}$/.test(version))

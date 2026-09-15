@@ -1,3 +1,5 @@
+import { LivePollingContext } from './src/state/useLivePolling';
+import { ScreenTransition } from './src/ui/ScreenTransition';
 import { FriendsScreen } from './src/ui/FriendsScreen';
 import { PlayerAvatar } from './src/ui/PlayerAvatar';
 import { ExplorerModal } from './src/ui/Explorer';
@@ -222,16 +224,18 @@ function AppContent({ model }: { model: AppModel }) {
                 <Feather name="chevron-right" color={C.subtle} size={16} />
               </Pressable>
             )}
-            <View style={S.flex}>
-              <ScreenSlot
-                key={`${model.active.puuid}:${tab}`}
-                tab={tab}
-                model={model}
-                onItem={onItem}
-                onLink={onLink}
-                onNavigate={onNavigate}
-              />
-            </View>
+            <LivePollingContext.Provider value={!explorer && !item && !login}>
+              <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
+                <ScreenSlot
+                  key={`${model.active.puuid}:${tab}`}
+                  tab={tab}
+                  model={model}
+                  onItem={onItem}
+                  onLink={onLink}
+                  onNavigate={onNavigate}
+                />
+              </ScreenTransition>
+            </LivePollingContext.Provider>
             <View style={styles.nav}>
               {NAV.map((nav) => {
                 const selected = tab === nav.id;
@@ -247,6 +251,9 @@ function AppContent({ model }: { model: AppModel }) {
                     {selected && <View style={styles.navIndicator} />}
                     <Feather name={nav.icon} size={20} color={selected ? C.accent : C.subtle} />
                     <Text
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
                       style={[styles.navLabel, selected && { color: C.ink, fontWeight: '700' }]}
                     >
                       {nav.id === 'progress' ? 'Pass' : nav.label}

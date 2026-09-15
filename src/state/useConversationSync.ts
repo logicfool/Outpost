@@ -8,6 +8,10 @@ export function useConversationSync(model: AppModel, subject: string) {
   const member = model.chat.friends.some((f) => f.subject === subject);
   const connectAttempted = useRef(false);
   useEffect(() => {
+    if (['ready', 'connecting', 'authenticating'].includes(model.chat.status)) {
+      connectAttempted.current = true;
+      return;
+    }
     if (enabled && !connectAttempted.current && model.chat.status === 'disconnected') {
       connectAttempted.current = true;
       void model.connectChat();

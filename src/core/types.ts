@@ -223,12 +223,19 @@ export interface Loadout {
   title?: CatalogItem;
 }
 export type Section<T> =
-  | { status: 'ready'; data: T; fetchedAt: number }
+  | {
+      status: 'ready';
+      data: T;
+      fetchedAt: number;
+      warning?: { code: string; message: string; retryAt?: number };
+    }
   | { status: 'error'; message: string; code: string; retryAt?: number };
 export interface Snapshot {
   accountId: string;
   fetchedAt: number;
   demo: boolean;
+  nextAutoRefreshAt?: number;
+  refreshIssue?: { code: string; message: string; retryAt?: number };
   store: Section<Store>;
   wallet: Section<Money[]>;
   rank: Section<Ranked>;
@@ -280,6 +287,7 @@ export interface LiveGame {
   queue?: string;
   gamePod?: string;
   observedAt?: number;
+  nextCheckAt?: number;
   detailError?: { code: string; message: string; retryAt?: number };
 }
 export interface MatchPlayer {

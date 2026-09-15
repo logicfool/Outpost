@@ -1,3 +1,16 @@
+import {
+  DAY_MS,
+  LIVE_POLL_MS,
+  MANUAL_COOLDOWN_MS,
+  emptySnapshot,
+  failureDelay,
+  nextAutomaticAt,
+  snapshotPlan,
+  storeResetAt,
+  type RefreshReason,
+  type RefreshGateState,
+} from '../core/refreshPolicy';
+import type { LiveGame, Section } from '../core/types';
 import { nativeFetcher } from './network';
 import { activateChatStorage, removeChatStorage } from './chatStorage';
 import { PlayerScope } from '../core/playerScope';
@@ -9,7 +22,7 @@ import { HttpClient } from '../core/http';
 import { RiotClient, connectAccount } from '../core/riot';
 import { EMPTY_CATALOG, MAX_ACCOUNTS } from '../core/types';
 import type { Account, Catalog, LoginTokens, Region, Snapshot } from '../core/types';
-import { AppError } from '../core/validation';
+import { AppError, safeError } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
 import { openRepository } from './storage';
 import type { Repository } from './storage.types';
@@ -26,29 +39,43 @@ export class Runtime {
   private identityFlights = new Map<string, Promise<Loadout>>();
   private clientFlights = new Map<string, Promise<RiotClient>>();
   private generations = new Map<string, number>();
-  private lastSync = new Map<string, number>();
-  constructor(readonly repository: Repository) {}
-  async loadCatalog(force = false): Promise<Catalog> {
-    if (
-      !force &&
-      this.catalog.schemaVersion === 4 &&
-      this.catalog.fetchedAt > Date.now() - (this.catalog.failedPaths?.length ? 30000 : 86400000)
-    )
-      return this.catalog;
-    const cached = await this.repository.catalog();
-
-    if (
-      !force &&
-      cached?.schemaVersion === 4 &&
-      cached.fetchedAt > Date.now() - (cached.failedPaths?.length ? 30000 : 86400000)
-    )
-      return (this.catalog = cached);
-    const fresh = await this.publicClient.load(cached ?? this.catalog);
-    if (!Object.keys(fresh.items).length) return (this.catalog = cached ?? { ...EMPTY_CATALOG });
-    this.catalog = fresh;
-    for (const client of this.clients.values()) client.updateCatalog(fresh);
-    await this.repository.saveCatalog(fresh);
-    return fresh;
+  private liveFlights = new Map<string, Promise<Section<LiveGame>>>();
+  private catalogFlight?: Promise<Catalog>;
+  constructor(
+    readonly repository: Repository,
+    private now: () => number = Date.now,
+  ) {}
+  async loadCatalog(force = false, allowNetwork = true): Promise<Catalog> {
+    if (this.catalogFlight) return this.catalogFlight;
+    const work = async () => {
+      const cached = Object.keys(this.catalog.items).length
+        ? this.catalog
+        : await this.repository.catalog();
+      const ttl = cached?.failedPaths?.length ? 30 * 60000 : DAY_MS;
+      if (!allowNetwork && !cached) return this.catalog;
+      if (
+        cached &&
+        (!allowNetwork ||
+          (!force && cached.schemaVersion === 5 && cached.fetchedAt + ttl > this.now()))
+      ) {
+        this.catalog = cached;
+        for (const client of this.clients.values()) client.updateCatalog(cached);
+        return cached;
+      }
+      if (force) this.publicClient.clear();
+      const fresh = await this.publicClient.load(cached ?? this.catalog);
+      this.catalog = fresh;
+      for (const client of this.clients.values()) client.updateCatalog(fresh);
+      await this.repository.saveCatalog(fresh);
+      return fresh;
+    };
+    const promise = work();
+    this.catalogFlight = promise;
+    try {
+      return await promise;
+    } finally {
+      if (this.catalogFlight === promise) this.catalogFlight = undefined;
+    }
   }
   private linkQueue: Promise<unknown> = Promise.resolve();
   private linkingAccounts = new Set<string>();
@@ -118,7 +145,6 @@ export class Runtime {
     this.scopes.delete(id);
     this.rejectedSessions.delete(id);
     this.clientFlights.delete(id);
-    this.lastSync.delete(id);
   }
   async client(id: string): Promise<RiotClient> {
     if (this.linkingAccounts.has(id))
@@ -173,7 +199,7 @@ export class Runtime {
         this.rejectedSessions.delete(id);
         session = refreshed;
       }
-      await this.loadCatalog();
+      await this.loadCatalog(false, false);
       if (generation !== (this.generations.get(id) ?? 0))
         throw new AppError(
           'SESSION_REMOVED',
@@ -194,39 +220,126 @@ export class Runtime {
       if (this.clientFlights.get(id) === work) this.clientFlights.delete(id);
     }
   }
-  async sync(id: string): Promise<Snapshot> {
+
+  async sync(id: string, reason: RefreshReason = 'auto'): Promise<Snapshot> {
     const inFlight = this.flights.get(id);
     if (inFlight) return inFlight;
-    const last = this.lastSync.get(id) ?? 0;
-    if (Date.now() - last < 30000)
-      throw new AppError(
-        'LOCAL_COOLDOWN',
-        'Wait a moment before refreshing this account again.',
-        last + 30000,
-      );
     const generation = this.generations.get(id) ?? 0;
-    const run = async () => {
-      await this.loadCatalog();
-      const client = await this.client(id);
-      const snapshot = await client.snapshot();
+    const run = async (): Promise<Snapshot> => {
+      const [previous, gate] = await Promise.all([
+        this.repository.snapshot(id),
+        this.repository.refreshGate(id, 'sync'),
+      ]);
+      if (previous && (previous.accountId !== id || previous.demo))
+        throw new AppError(
+          'ACCOUNT_MISMATCH',
+          'This cached snapshot belongs to a different account.',
+        );
+      if (!Object.keys(this.catalog.items).length) {
+        const cachedCatalog = await this.repository.catalog();
+        if (cachedCatalog) {
+          this.catalog = cachedCatalog;
+          for (const client of this.clients.values()) client.updateCatalog(cachedCatalog);
+        }
+      }
+      const now = this.now(),
+        nextAt = nextAutomaticAt(previous, gate, now);
+      if (reason === 'auto' && previous && nextAt > now)
+        return { ...previous, nextAutoRefreshAt: nextAt };
+      if ((gate?.notBefore ?? 0) > now || (reason === 'auto' && (gate?.autoNotBefore ?? 0) > now)) {
+        if (reason === 'manual')
+          throw new AppError(
+            'LOCAL_COOLDOWN',
+            'Please wait before refreshing again. Cached data is still available.',
+            gate!.notBefore,
+          );
+        return { ...(previous ?? emptySnapshot(id, now)), nextAutoRefreshAt: nextAt };
+      }
+
+      const reservation: RefreshGateState = {
+        attemptedAt: now,
+        notBefore: now + MANUAL_COOLDOWN_MS,
+        autoNotBefore: now + 5 * 60000,
+        failures: gate?.failures ?? 0,
+      };
+      await this.repository.saveRefreshGate(id, 'sync', reservation);
+      let next: Snapshot;
+      try {
+        await this.loadCatalog(reason === 'manual');
+        const client = await this.client(id);
+        next = await client.snapshot(previous, snapshotPlan(previous, reason, this.now()));
+      } catch (reason) {
+        const e = safeError(reason);
+        if (generation !== (this.generations.get(id) ?? 0)) throw e;
+        next = {
+          ...(previous ?? emptySnapshot(id, now)),
+          refreshIssue: { code: e.code, message: e.message, retryAt: e.retryAt },
+        };
+      }
       if (generation !== (this.generations.get(id) ?? 0))
         throw new AppError(
           'SESSION_REMOVED',
-          'This sync was discarded because the account changed.',
+          'This refresh was discarded after an account change.',
         );
       const account = (await this.repository.accounts()).find((a) => a.puuid === id);
       if (!account) throw new AppError('SESSION_REMOVED', 'This account was removed.');
-      await this.repository.saveSnapshot(snapshot);
-      this.lastSync.set(id, Date.now());
-      if ((await this.repository.settings()).reminders && snapshot.store.status === 'ready') {
+      const storeError = next.store.status === 'error' ? next.store : next.store.warning;
+      const retryAt = Math.max(
+        next.refreshIssue?.retryAt ?? 0,
+        ...['store', 'wallet', 'rank', 'xp', 'progression', 'collection', 'loadout', 'matches'].map(
+          (key) => {
+            const section = next[key as keyof Snapshot] as Section<unknown>;
+            return section.status === 'error'
+              ? (section.retryAt ?? 0)
+              : (section.warning?.retryAt ?? 0);
+          },
+        ),
+      );
+      const resetStillPending =
+        next.store.status === 'ready' && storeResetAt(next, this.now()) <= this.now() + 2000;
+      const failed = !!storeError || !!next.refreshIssue || resetStillPending;
+      const failures = failed ? (gate?.failures ?? 0) + 1 : 0;
+      const completedGate: RefreshGateState = {
+        attemptedAt: now,
+        failures,
+        notBefore: Math.max(now + MANUAL_COOLDOWN_MS, retryAt),
+        autoNotBefore: Math.max(
+          now + MANUAL_COOLDOWN_MS,
+          retryAt,
+          failed ? this.now() + failureDelay(failures, 5 * 60000) : 0,
+        ),
+      };
+      await this.repository.saveRefreshGate(id, 'sync', completedGate);
+      next.nextAutoRefreshAt = nextAutomaticAt(next, completedGate, this.now());
+      if (storeError && !next.refreshIssue)
+        next.refreshIssue = {
+          code: storeError.code,
+          message: storeError.message,
+          retryAt: completedGate.autoNotBefore,
+        };
+      if (resetStillPending && !next.refreshIssue)
+        next.refreshIssue = {
+          code: 'STORE_RESET_PENDING',
+          message: 'Riot has not returned the new rotation yet. The next attempt is delayed.',
+          retryAt: completedGate.autoNotBefore,
+        };
+
+      const latest = await this.repository.snapshot(id);
+      if (latest?.liveGame) next.liveGame = latest.liveGame;
+      await this.repository.saveSnapshot(next);
+      if (
+        !failed &&
+        (await this.repository.settings()).reminders &&
+        next.store.status === 'ready'
+      ) {
         await updateStoreNotifications(
           account,
-          snapshot.store.data,
+          next.store.data,
           await this.repository.wishlist(id),
           this.repository,
         ).catch(() => {});
       }
-      return snapshot;
+      return (await this.repository.snapshot(id)) ?? next;
     };
     const work = run();
     this.flights.set(id, work);
@@ -234,6 +347,73 @@ export class Runtime {
       return await work;
     } finally {
       if (this.flights.get(id) === work) this.flights.delete(id);
+    }
+  }
+
+  async live(id: string): Promise<Section<LiveGame>> {
+    const flight = this.liveFlights.get(id);
+    if (flight) return flight;
+    const generation = this.generations.get(id) ?? 0;
+    const run = async (): Promise<Section<LiveGame>> => {
+      const gate = await this.repository.refreshGate(id, 'live');
+      const now = this.now();
+      if ((gate?.notBefore ?? 0) > now)
+        return (
+          gate?.sample ?? {
+            status: 'error',
+            code: 'LOCAL_COOLDOWN',
+            message: 'The next live check is scheduled.',
+            retryAt: gate!.notBefore,
+          }
+        );
+      await this.repository.saveRefreshGate(id, 'live', {
+        attemptedAt: now,
+        notBefore: now + LIVE_POLL_MS,
+        failures: gate?.failures ?? 0,
+        sample: gate?.sample,
+      });
+      let sample: Section<LiveGame>;
+      try {
+        sample = {
+          status: 'ready',
+          data: await (await this.client(id)).liveGame(),
+          fetchedAt: this.now(),
+        };
+      } catch (reason) {
+        const e = safeError(reason);
+        sample = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+      }
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError(
+          'SESSION_REMOVED',
+          'This live check was discarded after an account change.',
+        );
+      const error = sample.status === 'error' ? sample : sample.data.detailError;
+      const failures = error ? (gate?.failures ?? 0) + 1 : 0;
+      const notBefore = Math.max(
+        this.now() + (error ? failureDelay(failures) : LIVE_POLL_MS),
+        error?.retryAt ?? 0,
+      );
+      sample =
+        sample.status === 'ready'
+          ? { ...sample, data: { ...sample.data, nextCheckAt: notBefore } }
+          : { ...sample, retryAt: notBefore };
+      await this.repository.saveRefreshGate(id, 'live', {
+        attemptedAt: now,
+        notBefore,
+        failures,
+        sample,
+      });
+      const previous = await this.repository.snapshot(id);
+      if (previous) await this.repository.saveSnapshot({ ...previous, liveGame: sample });
+      return sample;
+    };
+    const work = run();
+    this.liveFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.liveFlights.get(id) === work) this.liveFlights.delete(id);
     }
   }
   async saveIdentity(id: string, edit: IdentityEdit): Promise<Loadout> {
@@ -265,6 +445,7 @@ export class Runtime {
     const initializing = this.clientFlights.get(id);
     this.invalidate(id);
     await initializing?.catch(() => {});
+    await this.liveFlights.get(id)?.catch(() => {});
 
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
@@ -278,12 +459,14 @@ export class Runtime {
       ...this.flights.values(),
       ...this.clientFlights.values(),
       ...this.identityFlights.values(),
+      ...this.liveFlights.values(),
     ];
     for (const id of new Set([
       ...this.clients.keys(),
       ...this.clientFlights.keys(),
       ...this.flights.keys(),
       ...this.identityFlights.keys(),
+      ...this.liveFlights.keys(),
     ]))
       this.invalidate(id);
     await Promise.allSettled(pending);

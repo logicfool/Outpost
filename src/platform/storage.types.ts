@@ -1,5 +1,14 @@
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
 export interface Repository {
+  refreshGate(
+    id: string,
+    purpose: import('../core/refreshPolicy').RefreshPurpose,
+  ): Promise<import('../core/refreshPolicy').RefreshGateState | null>;
+  saveRefreshGate(
+    id: string,
+    purpose: import('../core/refreshPolicy').RefreshPurpose,
+    gate: import('../core/refreshPolicy').RefreshGateState,
+  ): Promise<void>;
   accounts(): Promise<Account[]>;
   selectedAccount(): Promise<string | null>;
   selectAccount(id: string | null): Promise<void>;

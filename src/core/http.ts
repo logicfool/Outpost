@@ -175,7 +175,7 @@ export class SingleFlightCache {
   constructor(private now: () => number = Date.now) {}
   async get<T>(key: string, ttlMs: number, loader: () => Promise<T>): Promise<T> {
     const saved = this.values.get(key);
-    if (saved && saved.until > this.now()) return saved.data as T;
+    if (ttlMs > 0 && saved && saved.until > this.now()) return saved.data as T;
     const existing = this.pending.get(key);
     if (existing) return existing as Promise<T>;
     const generation = this.generation;

@@ -1,3 +1,4 @@
+import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatPanel } from './ChatPanel';
 import { ChatSettings } from './ChatSettings';
 import { PlayerAvatar } from './PlayerAvatar';
@@ -117,13 +118,13 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
   const [queue, setQueue] = useState('all'),
     [loading, setLoading] = useState(false),
     [finished, setFinished] = useState(false);
-  const [details, setDetails] = useState<Record<string, MatchDetail>>({});
+  const previews = useMatchPreviews(model, player.subject),
+    details = previews.details;
   const generation = useRef(0);
   useEffect(() => {
     const stamp = ++generation.current;
     setData(null);
     setError(null);
-    setDetails({});
     setFinished(false);
     model
       .playerProfile(player)
@@ -138,24 +139,6 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     };
   }, [player.subject, version, model.playerProfile]);
   const matches = data?.matches.status === 'ready' ? data.matches.data : [];
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      for (const entry of matches.slice(0, 40)) {
-        if (!alive) return;
-        if (details[entry.id]) continue;
-        try {
-          const detail = await model.matchDetail(entry.id, player.subject);
-          if (alive) setDetails((old) => ({ ...old, [entry.id]: detail }));
-        } catch {
-          return;
-        }
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [data?.matches, player.subject, model.matchDetail]);
   const more = async () => {
     if (loading) return;
     const stamp = generation.current;
@@ -205,6 +188,8 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       <FlatList
         data={shown}
         keyExtractor={(m) => m.id}
+        onViewableItemsChanged={previews.onViewableItemsChanged}
+        viewabilityConfig={previews.viewabilityConfig}
         renderItem={render}
         initialNumToRender={6}
         maxToRenderPerBatch={6}

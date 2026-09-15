@@ -152,11 +152,13 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   const game =
     model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data : undefined;
   const ownStatus =
-    game?.state === 'in_game'
-      ? `In game${game.map ? ' · ' + game.map : ''}`
-      : game?.state === 'agent_select'
-        ? 'Agent select'
-        : 'Your account';
+    game?.observedAt && Date.now() - game.observedAt > 120000
+      ? 'Status last checked earlier'
+      : game?.state === 'in_game'
+        ? `In game${game.map ? ' · ' + game.map : ''}`
+        : game?.state === 'agent_select'
+          ? 'Agent select'
+          : 'Your account';
   return (
     <SectionList
       sections={sections}

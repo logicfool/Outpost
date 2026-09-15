@@ -1,46 +1,42 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState } from 'react-native';
+import { LIVE_POLL_MS } from '../core/refreshPolicy';
 import type { AppModel } from './useApp';
+export const LivePollingContext = createContext(true);
 
 export function useLivePolling(model: AppModel) {
+  const enabled = useContext(LivePollingContext);
   const [busy, setBusy] = useState(false),
     manual = useRef<() => void>(() => {});
   useEffect(() => {
+    if (!enabled) return;
     let stopped = false,
-      running = false,
-      failures = 0,
-      blockedUntil = 0;
+      running = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       clearTimeout(timer);
       if (stopped || running || AppState.currentState !== 'active') return;
-      if (Date.now() < blockedUntil) {
-        timer = setTimeout(() => void tick(), blockedUntil - Date.now());
-        return;
-      }
       running = true;
       setBusy(true);
+      let next = Date.now() + LIVE_POLL_MS;
       try {
         const result = await model.refreshLive();
-        const error = result.status === 'error' ? result : result.data.detailError;
-        failures = error ? failures + 1 : 0;
-        const delay = error
-          ? Math.min(300000, 15000 * 2 ** Math.min(failures, 5))
-          : result.status === 'ready' && result.data.state === 'agent_select'
-            ? 12000
-            : 20000;
-        blockedUntil = Math.max(Date.now() + delay, error?.retryAt ?? 0);
+        next =
+          result.status === 'ready'
+            ? (result.data.nextCheckAt ?? next)
+            : Math.max(next, result.retryAt ?? 0);
+      } catch {
+        next = Date.now() + 2 * LIVE_POLL_MS;
       } finally {
         running = false;
         if (!stopped) {
           setBusy(false);
           if (AppState.currentState === 'active')
-            timer = setTimeout(() => void tick(), Math.max(1000, blockedUntil - Date.now()));
+            timer = setTimeout(() => void tick(), Math.max(1000, next - Date.now()));
         }
       }
     };
     manual.current = () => {
-      if (!failures) blockedUntil = 0;
       void tick();
     };
     void tick();
@@ -54,6 +50,6 @@ export function useLivePolling(model: AppModel) {
       listener.remove();
       manual.current = () => {};
     };
-  }, [model.active?.puuid, model.refreshLive]);
+  }, [enabled, model.active?.puuid, model.refreshLive]);
   return { busy, refresh: useCallback(() => manual.current(), []) };
 }

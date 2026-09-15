@@ -347,6 +347,20 @@ try {
       await click('Back from conversation');
     },
   );
+  await check(
+    'refresh policy is explicit in Settings and store expiry is a local countdown',
+    async () => {
+      await tab('Settings');
+      await page.getByText('Every 60 seconds', { exact: true }).waitFor();
+      await page.getByText('When the daily timer resets', { exact: true }).waitFor();
+      await page.getByText('Cached for 24 hours', { exact: true }).waitFor();
+      await shot('refresh-policy');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await tab('Store');
+      await page.getByText('Cached · pull down to refresh', { exact: true }).waitFor();
+      await shot('store-light');
+    },
+  );
   assert.equal(errors.length, 0, JSON.stringify(errors));
 } catch (e) {
   process.exitCode = 1;

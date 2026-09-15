@@ -1,3 +1,4 @@
+import { DAY_MS, FULL_SNAPSHOT, keepCached, type SnapshotPlan } from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
 import { PlayerScope } from './playerScope';
@@ -127,6 +128,7 @@ export class RiotClient {
   private cache = new SingleFlightCache();
   private aliases = new Map<string, { name: string; tag: string; until: number }>();
   private loadoutEndpoint: 'v3' | 'v2' = 'v3';
+  private storeEndpoint: 'v2' | 'v3' = 'v2';
   private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
   private sessionRejected = false;
@@ -260,12 +262,15 @@ export class RiotClient {
     });
   }
   async liveGame(): Promise<LiveGame> {
+    return this.cache.get('live-result', 60000, () => this.fetchLiveGame());
+  }
+  private async fetchLiveGame(): Promise<LiveGame> {
     const id = this.session.account.puuid;
     for (const mode of ['core-game', 'pregame'] as const) {
       let matchId: string;
       try {
         const current = object(
-          (await this.read(`/${mode}/v1/players/${id}`, 10000, 'GET', undefined, id, 'glz')).data,
+          (await this.read(`/${mode}/v1/players/${id}`, 60000, 'GET', undefined, id, 'glz')).data,
         );
         matchId = uuid(current.MatchID);
       } catch (error) {
@@ -277,7 +282,7 @@ export class RiotClient {
       try {
         const detail = await this.read(
           `/${mode}/v1/matches/${matchId}`,
-          10000,
+          60000,
           'GET',
           undefined,
           id,
@@ -300,24 +305,29 @@ export class RiotClient {
     }
     return { state: 'idle', observedAt: Date.now() };
   }
-  async store(): Promise<Store> {
+  async store(fresh = false): Promise<Store> {
     const id = this.session.account.puuid;
 
     let result,
-      endpoint: 'v2' | 'v3' = 'v2';
+      endpoint = this.storeEndpoint;
     try {
-      result = await this.read(`/store/v2/storefront/${id}`);
+      result = await this.read(
+        `/store/${endpoint}/storefront/${id}`,
+        fresh ? 0 : 60000,
+        endpoint === 'v3' ? 'POST' : 'GET',
+      );
     } catch (error) {
       const e = safeError(error);
-      if (e.status !== 404 && e.status !== 405 && e.status !== 410) throw e;
+      if (endpoint !== 'v2' || (e.status !== 404 && e.status !== 405 && e.status !== 410)) throw e;
       endpoint = 'v3';
-      result = await this.read(`/store/v3/storefront/${id}`, 60000, 'POST');
+      result = await this.read(`/store/v3/storefront/${id}`, fresh ? 0 : 60000, 'POST');
+      this.storeEndpoint = 'v3';
     }
     let fallbackPrices: unknown;
     const panel = object(object(result.data).SkinsPanelLayout);
     if (array(panel.SingleItemOffers).length && array(panel.SingleItemStoreOffers).length === 0) {
       try {
-        fallbackPrices = (await this.read('/store/v1/offers/', 15 * 60000)).data;
+        fallbackPrices = (await this.read('/store/v1/offers/', DAY_MS)).data;
       } catch {}
     }
     return normalizeStore(
@@ -473,14 +483,33 @@ export class RiotClient {
       if (this.identityWrite === work) this.identityWrite = undefined;
     }
   }
-  async snapshot(): Promise<Snapshot> {
+  async snapshot(
+    previous?: Snapshot | null,
+    plan: SnapshotPlan = FULL_SNAPSHOT,
+  ): Promise<Snapshot> {
     const id = this.session.account.puuid;
+    if (previous && previous.accountId !== id)
+      throw new AppError('ACCOUNT_MISMATCH', 'Cached snapshot belongs to another account.');
+    const pick = async <T>(
+      enabled: boolean,
+      old: Section<T> | undefined,
+      loader: () => Promise<T>,
+    ): Promise<Section<T>> =>
+      enabled
+        ? keepCached(old, await section(loader))
+        : (old ?? {
+            status: 'error',
+            code: 'NOT_LOADED',
+            message: 'Open this feature or pull down to refresh.',
+          });
     const [store, wallet, rank, xp, progression, collection, loadout, liveGame, matches] =
       await Promise.all([
-        section(() => this.store()),
-        section(async () => normalizeWallet((await this.read(`/store/v1/wallet/${id}`)).data)),
-        section(() => this.rank()),
-        section(async () => {
+        pick(plan.store, previous?.store, () => this.store(true)),
+        pick(plan.store, previous?.wallet, async () =>
+          normalizeWallet((await this.read(`/store/v1/wallet/${id}`)).data),
+        ),
+        pick(plan.account, previous?.rank, () => this.rank()),
+        pick(plan.account, previous?.xp, async () => {
           const progress = object(
             object((await this.read(`/account-xp/v1/players/${id}`, 2 * 60000)).data).Progress,
           );
@@ -489,13 +518,13 @@ export class RiotClient {
             xp: requiredNumber(progress.XP, 'account XP'),
           };
         }),
-        section(async () =>
+        pick(plan.account, previous?.progression, async () =>
           normalizeProgression(
             (await this.read(`/contracts/v1/contracts/${id}`, 2 * 60000)).data,
             this.catalog,
           ),
         ),
-        section(async () => {
+        pick(plan.collection, previous?.collection, async () => {
           const groups = await Promise.all(
             Object.values(ITEM_TYPES).map(async (type) => {
               const value = object(
@@ -512,9 +541,9 @@ export class RiotClient {
           );
           return normalizeCollection({ EntitlementsByTypes: groups.flat() }, this.catalog);
         }),
-        section(() => this.loadout()),
-        section(() => this.liveGame()),
-        section(() => this.matchHistory()),
+        pick(plan.account, previous?.loadout, () => this.loadout()),
+        pick(plan.live, previous?.liveGame, () => this.liveGame()),
+        pick(plan.account, previous?.matches, () => this.matchHistory()),
       ]);
     return {
       accountId: id,

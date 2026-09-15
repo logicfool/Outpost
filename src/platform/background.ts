@@ -35,5 +35,5 @@ export async function configureBackground(enabled: boolean): Promise<void> {
       'BACKGROUND_RESTRICTED',
       'Your device currently restricts background execution.',
     );
-  await BackgroundTask.registerTaskAsync(TASK, { minimumInterval: 15 });
+  await BackgroundTask.registerTaskAsync(TASK, { minimumInterval: 60 });
 }

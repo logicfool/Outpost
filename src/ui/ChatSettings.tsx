@@ -28,8 +28,8 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
         <View style={{ flex: 1, gap: 5 }}>
           <Text style={S.h3}>Automatic chat history</Text>
           <Text style={S.small}>
-            Sync when you open a conversation, reconnect, and while it stays open. Saved messages
-            remain available offline.
+            Sync on opening and reconnecting, then at most once a minute while this conversation
+            stays open. Saved messages remain available offline.
           </Text>
         </View>
         <Switch
@@ -49,7 +49,7 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
               ? 'Sync this conversation now'
               : 'Sync saved chat history'
         }
-        disabled={working || model.chat.status !== 'ready'}
+        disabled={working || model.syncingSavedHistory || model.chat.status !== 'ready'}
         onPress={() => void sync()}
         icon="refresh-cw"
       />

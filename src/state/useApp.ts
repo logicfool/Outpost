@@ -1,3 +1,5 @@
+import { storeResetAt, type RefreshReason } from '../core/refreshPolicy';
+import { mergeSnapshot } from '../core/snapshot';
 import { clearDiagnostics } from '../core/diagnostics';
 import { useSocial } from './useSocial';
 import { priorityArtwork } from '../core/artwork';
@@ -96,12 +98,14 @@ export function useApp() {
       mounted = false;
     };
   }, []);
-  const refresh = useCallback(async () => {
+  const syncAccount = useCallback(async (reason: RefreshReason) => {
     const account = activeRef.current;
     if (!account) return;
     const stamp = epoch.current;
-    setBusy(true);
-    setMessage(null);
+    if (reason === 'manual') {
+      setBusy(true);
+      setMessage(null);
+    }
     try {
       if (account.demo) {
         const d = makeDemo().snapshot;
@@ -111,26 +115,13 @@ export function useApp() {
         return;
       }
       const runtime = await getRuntime(),
-        next = await runtime.sync(account.puuid);
+        next = await runtime.sync(account.puuid, reason);
       const [entries, updatedAccounts] = await Promise.all([
         runtime.repository.history(account.puuid),
         runtime.repository.accounts(),
       ]);
       if (epoch.current === stamp && activeRef.current?.puuid === account.puuid) {
-        setSnapshot((previous) => {
-          if (!previous || previous.accountId !== next.accountId) return next;
-          const newer = <T>(oldValue: Section<T>, newValue: Section<T>) =>
-            oldValue.status === 'ready' &&
-            newValue.status === 'ready' &&
-            oldValue.fetchedAt > newValue.fetchedAt
-              ? oldValue
-              : newValue;
-          return {
-            ...next,
-            loadout: newer(previous.loadout, next.loadout),
-            liveGame: newer(previous.liveGame, next.liveGame),
-          };
-        });
+        setSnapshot((previous) => mergeSnapshot(previous, next));
         setHistory(entries);
         setCatalog(runtime.catalog);
         setAccounts(updatedAccounts);
@@ -146,6 +137,8 @@ export function useApp() {
       if (epoch.current === stamp) setBusy(false);
     }
   }, []);
+  const refresh = useCallback(() => syncAccount('manual'), [syncAccount]);
+  const refreshAutomatic = useCallback(() => syncAccount('auto'), [syncAccount]);
   useEffect(() => {
     const stamp = ++epoch.current;
     setSnapshot(null);
@@ -182,27 +175,35 @@ export function useApp() {
         setWishlist(wishes);
         setHistory(entries);
         if (savedCatalog) setCatalog(savedCatalog);
-        await refresh();
+        await refreshAutomatic();
       } catch (error) {
         if (epoch.current === stamp) setMessage(safeError(error).message);
       }
     })();
-  }, [active?.puuid, linkRevision, refresh]);
+  }, [active?.puuid, linkRevision, refreshAutomatic]);
   useEffect(() => {
+    if (!active || active.demo) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!snapshot || AppState.currentState !== 'active') return;
+      const at = snapshot.nextAutoRefreshAt ?? storeResetAt(snapshot);
+      timer = setTimeout(
+        () => void refreshAutomatic(),
+        Math.min(2147480000, Math.max(1000, at - Date.now())),
+      );
+    };
+    schedule();
     const listener = AppState.addEventListener('change', (state) => {
-      const account = activeRef.current;
-      if (
-        state === 'active' &&
-        account &&
-        !account.demo &&
-        Date.now() - lastForegroundRefresh.current > 5 * 60000
-      ) {
-        lastForegroundRefresh.current = Date.now();
-        void refresh();
-      }
+      clearTimeout(timer);
+
+      if (state === 'active') void refreshAutomatic();
     });
-    return () => listener.remove();
-  }, [refresh]);
+    return () => {
+      clearTimeout(timer);
+      listener.remove();
+    };
+  }, [active?.puuid, snapshot?.nextAutoRefreshAt, snapshot?.store, refreshAutomatic]);
   const switchAccount = useCallback(
     (account: Account | null) => {
       if (!account?.demo)
@@ -394,11 +395,7 @@ export function useApp() {
       try {
         const game = account.demo
           ? makeDemo().snapshot.liveGame
-          : {
-              status: 'ready' as const,
-              data: await (await (await getRuntime()).client(account.puuid)).liveGame(),
-              fetchedAt: Date.now(),
-            };
+          : await (await getRuntime()).live(account.puuid);
         next = game;
       } catch (reason) {
         const e = safeError(reason);

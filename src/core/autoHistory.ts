@@ -21,7 +21,16 @@ export class AutoHistoryGate {
       });
     this.running.set(key, task);
     return task.catch((error) => {
-      if (generation === this.generation) this.times.set(key, now + 60000);
+      if (generation === this.generation)
+        this.times.set(
+          key,
+          Math.max(
+            now + 60000,
+            typeof error?.retryAt === 'number' && Number.isFinite(error.retryAt)
+              ? error.retryAt
+              : 0,
+          ),
+        );
       throw error;
     });
   }

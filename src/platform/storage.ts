@@ -20,7 +20,8 @@ async function create(): Promise<Repository> {
     CREATE INDEX IF NOT EXISTS history_by_account ON history(account_id, observed_at DESC);
     CREATE TABLE IF NOT EXISTS wishlist (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, item_id TEXT NOT NULL, PRIMARY KEY(account_id,item_id));
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL);
-    PRAGMA user_version = 1;`);
+    CREATE TABLE IF NOT EXISTS refresh_gates (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, purpose TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,purpose));
+    PRAGMA user_version = 2;`);
   let writing: Promise<unknown> = Promise.resolve();
   const write = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = writing.catch(() => {}).then(fn);
@@ -47,6 +48,23 @@ async function create(): Promise<Repository> {
       )
     ).map((r) => r.item_id);
   return {
+    refreshGate(id, purpose) {
+      return readJson(
+        'SELECT data FROM refresh_gates WHERE account_id = ? AND purpose = ?',
+        uuid(id),
+        purpose,
+      );
+    },
+    async saveRefreshGate(id, purpose, gate) {
+      await write(async () => {
+        await db.runAsync(
+          'INSERT INTO refresh_gates(account_id,purpose,data) VALUES(?,?,?) ON CONFLICT(account_id,purpose) DO UPDATE SET data=excluded.data',
+          uuid(id),
+          purpose,
+          JSON.stringify(gate),
+        );
+      });
+    },
     selectedAccount() {
       return readJson<string>('SELECT data FROM settings WHERE key = ?', 'selectedAccount');
     },
