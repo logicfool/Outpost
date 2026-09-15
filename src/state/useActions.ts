@@ -1,0 +1,133 @@
+import { useCallback, useRef } from 'react';
+import type { Account, Catalog, Snapshot, Loadout } from '../core/types';
+import type { LoadoutPreset, LoadoutEditor } from '../core/presets';
+import type { PurchaseQuote, PurchaseRecord } from '../core/purchases';
+import { validatePreset } from '../core/presets';
+import { quotePurchase } from '../core/purchases';
+import { AppError } from '../core/validation';
+import { randomId } from '../platform/secure';
+import { getRuntime } from '../platform/runtime';
+const demoPresets = new Map<string, LoadoutPreset>();
+export function useActions(
+  account: Account | null,
+  catalog: Catalog,
+  snapshot: Snapshot | null,
+  updated: (loadout: Loadout) => void,
+  catalogLoaded: (catalog: Catalog) => void,
+  snapshotLoaded: (snapshot: Snapshot) => void,
+) {
+  const current = useRef({ account, catalog, snapshot, updated, catalogLoaded, snapshotLoaded });
+  current.current = { account, catalog, snapshot, updated, catalogLoaded, snapshotLoaded };
+  const selected = () => {
+    const a = current.current.account;
+    if (!a) throw new AppError('NO_ACCOUNT', 'Select an account.');
+    return a;
+  };
+  const assertCurrent = (id: string) => {
+    if (current.current.account?.puuid !== id)
+      throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+  };
+  const listPresets = useCallback(async () => {
+    const a = selected();
+    const result = a.demo
+      ? [...demoPresets.values()]
+      : (await getRuntime()).repository.presets(a.puuid);
+    return await result;
+  }, []);
+  const editLoadout = useCallback(async (): Promise<LoadoutEditor> => {
+    const a = selected();
+    if (a.demo) {
+      const items = Object.values(current.current.catalog.items).filter((i) => i.kind === 'skin');
+      const seen = new Set<string>();
+      return {
+        current: items
+          .filter((i) => !seen.has(i.weapon ?? '') && !!seen.add(i.weapon ?? ''))
+          .map((i, n) => ({
+            weaponId: i.weaponId ?? `00000000-0000-4000-8070-${String(n + 1).padStart(12, '0')}`,
+            skinId: i.canonicalId,
+            levelId: i.levels?.[0]?.id ?? i.id,
+            chromaId: i.chromas?.[0]?.id ?? i.id,
+          })),
+        ownedLevels: items.flatMap((i) => (i.levels ?? []).map((l) => l.id)),
+        ownedChromas: items.flatMap((i) => (i.chromas ?? []).map((c) => c.id)),
+      };
+    }
+    const runtime = await getRuntime(),
+      data = await runtime.loadoutEditor(a.puuid);
+    assertCurrent(a.puuid);
+    current.current.catalogLoaded(runtime.catalog);
+    return data;
+  }, []);
+  const savePreset = useCallback(
+    async (name: string, weapons: LoadoutPreset['weapons'], id?: string) => {
+      const a = selected(),
+        p = validatePreset(
+          { id: id ?? randomId(), accountId: a.puuid, name, weapons, updatedAt: Date.now() },
+          a.puuid,
+        );
+      if (a.demo) demoPresets.set(p.id, p);
+      else await (await getRuntime()).repository.savePreset(p);
+      assertCurrent(a.puuid);
+      return p;
+    },
+    [],
+  );
+  const deletePreset = useCallback(async (id: string) => {
+    const a = selected();
+    if (a.demo) demoPresets.delete(id);
+    else await (await getRuntime()).repository.deletePreset(a.puuid, id);
+  }, []);
+  const applyPreset = useCallback(async (preset: LoadoutPreset) => {
+    const a = selected();
+    validatePreset(preset, a.puuid);
+    if (a.demo) return;
+    const data = await (await getRuntime()).applyPreset(a.puuid, preset);
+    assertCurrent(a.puuid);
+    current.current.updated(data);
+  }, []);
+  const purchaseQuote = useCallback(async (itemId: string): Promise<PurchaseQuote> => {
+    const a = selected();
+    if (a.demo) {
+      const s = current.current.snapshot;
+      if (s?.store.status !== 'ready' || s.wallet.status !== 'ready')
+        throw new AppError('DEMO', 'No demo store.');
+      return quotePurchase(s.store.data, s.wallet.data, itemId, a.puuid, randomId());
+    }
+    const prefs = await (await getRuntime()).repository.settings();
+    if (!prefs.allowPurchases)
+      throw new AppError('PURCHASE_DISABLED', 'Enable phone purchases in Settings first.');
+    const q = await (await getRuntime()).purchaseQuote(a.puuid, itemId);
+    assertCurrent(a.puuid);
+    return q;
+  }, []);
+  const confirmPurchase = useCallback(async (id: string): Promise<PurchaseRecord> => {
+    const a = selected();
+    if (a.demo) throw new AppError('DEMO_ONLY', 'Demo purchases never contact Riot or spend VP.');
+    const runtime = await getRuntime(),
+      record = await runtime.confirmPurchase(a.puuid, id);
+    assertCurrent(a.puuid);
+    const saved = await runtime.repository.snapshot(a.puuid);
+    assertCurrent(a.puuid);
+    if (saved) current.current.snapshotLoaded(saved);
+    return record;
+  }, []);
+  const purchaseRecords = useCallback(async () => {
+    const a = selected();
+    return a.demo ? [] : (await getRuntime()).repository.purchaseRecords(a.puuid);
+  }, []);
+  const checkPurchase = useCallback(async (id: string) => {
+    const a = selected();
+    return (await getRuntime()).checkPurchase(a.puuid, id);
+  }, []);
+  return {
+    listPresets,
+    editLoadout,
+    savePreset,
+    deletePreset,
+    applyPreset,
+    purchaseQuote,
+    confirmPurchase,
+    purchaseRecords,
+    checkPurchase,
+  };
+}

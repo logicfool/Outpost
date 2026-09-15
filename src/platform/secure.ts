@@ -17,3 +17,7 @@ export function randomHex(): string {
     '',
   );
 }
+
+export function randomId(): string {
+  return Crypto.randomUUID();
+}

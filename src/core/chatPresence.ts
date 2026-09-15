@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { valorantActivity } from './presenceState';
 import type { Catalog } from './types';
 import type { Friend } from './chatTypes';
 import { catalogItem } from './catalog';
@@ -14,11 +15,18 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
   let data: Record<string, unknown> = {};
   if (payload && payload.length < 64000) {
     try {
-      data = object(JSON.parse(Buffer.from(payload, 'base64').toString('utf8')));
+      data = object(
+        JSON.parse(
+          payload.trim().startsWith('{')
+            ? payload
+            : Buffer.from(payload, 'base64').toString('utf8'),
+        ),
+      );
     } catch {}
   }
   const valOnline =
     !!valorant && data.isValid !== false && child(valorant, 'st')?.text !== 'offline';
+  const activityData = valorantActivity(data);
   const loop = valOnline ? text(data.sessionLoopState) : '';
   const gameNames: Record<string, string> = {
     league_of_legends: 'League of Legends',
@@ -31,13 +39,7 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
     (g) => !!gameNames[g.name] && child(g, 'st')?.text !== 'offline',
   );
   const game = valOnline ? 'VALORANT' : other ? gameNames[other.name] : undefined;
-  const activity = valOnline
-    ? loop === 'MENUS'
-      ? 'In menus'
-      : undefined
-    : other
-      ? 'Online'
-      : undefined;
+  const activity = valOnline ? activityData.activity : other ? 'Online' : undefined;
   const rawSize = nullableNumber(data.partySize),
     rawMax = nullableNumber(data.maxPartySize);
   const partySize =
@@ -49,26 +51,24 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
       ? rawMax
       : undefined;
   const state: Friend['presence'] =
-    loop === 'INGAME'
-      ? 'in_game'
-      : loop === 'PREGAME'
-        ? 'agent_select'
-        : valOnline && data.partyState === 'MATCHMAKING'
-          ? 'queue'
-          : show === 'away' || show === 'xa'
-            ? 'away'
-            : 'online';
+    valOnline && activityData.presence !== 'online'
+      ? activityData.presence
+      : show === 'away' || show === 'xa'
+        ? 'away'
+        : 'online';
   const cardId = text(data.playerCardId),
     titleId = text(data.playerTitleId),
-    mapId = text(data.matchMap);
+    mapId = valOnline ? activityData.mapId : '';
   const hideLevel = data.hideAccountLevel === true;
   const stamp = Number(valorant && child(valorant, 's.t')?.text);
-  const updatedAt = Number.isFinite(stamp) && stamp > 0 && stamp <= now + 60000 ? stamp : now;
+
+  const updatedAt = now;
   return {
     presence: state,
     updatedAt,
     game,
     activity,
+    queue: valOnline ? activityData.queue : undefined,
     partySize,
     partyMax,
     presenceSource: valOnline ? 'valorant' : 'riot',

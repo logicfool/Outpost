@@ -2,6 +2,7 @@ import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatPanel } from './ChatPanel';
 import { ChatSettings } from './ChatSettings';
 import { PlayerAvatar } from './PlayerAvatar';
+import { PresetsPanel } from './PresetsPanel';
 import { Image } from './CachedImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +12,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -186,6 +188,13 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     <ModalPage>
       <ModalHeader title="Player profile" closeLabel="Back from player profile" onClose={onBack} />
       <FlatList
+        refreshControl={
+          <RefreshControl
+            refreshing={!data && !error}
+            onRefresh={() => setVersion((v) => v + 1)}
+            tintColor={C.accent}
+          />
+        }
         data={shown}
         keyExtractor={(m) => m.id}
         onViewableItemsChanged={previews.onViewableItemsChanged}
@@ -211,12 +220,7 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
             {error && (
               <Empty title="Some profile data is unavailable" detail={error} icon="alert-circle" />
             )}
-            <Button
-              title="Refresh profile"
-              icon="refresh-cw"
-              secondary
-              onPress={() => setVersion((v) => v + 1)}
-            />
+
             <Resource title="Rank" section={data?.rank}>
               {(rank) => (
                 <RankSummary rank={rank} onCareer={() => onNavigate({ type: 'career', rank })} />
@@ -813,6 +817,7 @@ export function ExplorerModal({
         <CareerModal rank={route.rank} visible onClose={onBack} embedded />
       )}
       {route?.type === 'live' && <LivePanel {...props} />}
+      {route?.type === 'presets' && <PresetsPanel model={model} onBack={onBack} />}
       {route?.type === 'identity' && <IdentityPanel {...props} />}
       {route?.type === 'friends' && <FriendsPanel {...props} />}
       {route?.type === 'chat-settings' && (

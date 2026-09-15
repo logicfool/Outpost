@@ -68,3 +68,23 @@ test('removing an account cascades its gates without erasing other account budge
   assert.equal(await repo.refreshGate(ID, 'live'), null);
   assert.deepEqual(await repo.refreshGate(OTHER, 'live'), gate);
 });
+
+test('saved presets and purchase records survive game-cache clearing but cascade on account removal', async (t) => {
+  const { repo } = await fixture(t),
+    p = {
+      id: OTHER,
+      accountId: ID,
+      name: 'Saved set',
+      updatedAt: 1,
+      weapons: [{ weaponId: ID, skinId: ID, levelId: ID, chromaId: ID }],
+    };
+  await repo.savePreset(p);
+  await repo.savePurchaseRecord({ id: OTHER, accountId: ID, state: 'unknown', at: 1 });
+  await repo.clearCache();
+  assert.equal((await repo.presets(ID)).length, 1);
+  assert.equal((await repo.purchaseRecords(ID)).length, 1);
+  assert.equal((await repo.presets(OTHER)).length, 0);
+  await repo.removeAccount(ID);
+  assert.equal((await repo.presets(ID)).length, 0);
+  assert.equal((await repo.purchaseRecords(ID)).length, 0);
+});

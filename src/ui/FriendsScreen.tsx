@@ -1,3 +1,4 @@
+import { useNavInset } from './NavInsets';
 import React, {
   memo,
   useCallback,
@@ -109,16 +110,16 @@ const friendKey = (friend: Friend) => friend.subject;
 export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNavigate: Navigate }) {
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles);
+  const navInset = useNavInset();
   const [query, setQuery] = useState(''),
     search = useDeferredValue(query);
   const connected = model.chat.status === 'ready',
     busy = ['connecting', 'authenticating'].includes(model.chat.status);
   const started = useRef(false);
   useEffect(() => {
-    if (!started.current && model.chat.status === 'disconnected') {
-      started.current = true;
-      void model.connectChat();
-    }
+    if (started.current) return;
+    started.current = true;
+    if (model.chat.status === 'disconnected') void model.connectChat();
   }, [model.chat.status, model.connectChat]);
   const sections = useMemo(
     () => friendSections(model.chat.friends, model.savedConversations, connected, search),
@@ -172,7 +173,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: 24 + navInset }]}
       renderSectionHeader={({ section }) => (
         <Text style={styles.section}>
           {section.title} - {section.data.length}

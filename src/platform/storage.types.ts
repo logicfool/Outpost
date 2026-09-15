@@ -1,5 +1,10 @@
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
 export interface Repository {
+  presets(id: string): Promise<import('../core/presets').LoadoutPreset[]>;
+  savePreset(preset: import('../core/presets').LoadoutPreset): Promise<void>;
+  deletePreset(id: string, presetId: string): Promise<void>;
+  purchaseRecords(id: string): Promise<import('../core/purchases').PurchaseRecord[]>;
+  savePurchaseRecord(record: import('../core/purchases').PurchaseRecord): Promise<void>;
   refreshGate(
     id: string,
     purpose: import('../core/refreshPolicy').RefreshPurpose,

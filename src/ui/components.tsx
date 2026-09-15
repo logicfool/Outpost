@@ -26,12 +26,14 @@ import {
 type IconName = React.ComponentProps<typeof Feather>['name'];
 export function Button({
   title,
+  label,
   onPress,
   secondary = false,
   disabled = false,
   icon,
 }: {
   title: string;
+  label?: string;
   onPress(): void;
   secondary?: boolean;
   disabled?: boolean;
@@ -44,7 +46,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={label ?? title}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}

@@ -324,14 +324,17 @@ export class RiotChat {
     } else {
       if (resources.size >= 12 && !resources.has(jid.resource))
         resources.delete(resources.keys().next().value!);
+      resources.delete(jid.resource);
       resources.set(jid.resource, friendPresence(node, this.catalog, this.now()));
     }
     this.resources.set(jid.subject, resources);
-    const active = [...resources.values()].sort(
-      (a, b) =>
-        Number(b.presenceSource === 'valorant') - Number(a.presenceSource === 'valorant') ||
-        (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
-    )[0];
+    const active = [...resources.values()]
+      .reverse()
+      .sort(
+        (a, b) =>
+          Number(b.presenceSource === 'valorant') - Number(a.presenceSource === 'valorant') ||
+          (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
+      )[0];
     this.roster.set(jid.subject, {
       ...friend,
       ...(active ?? {
@@ -459,6 +462,8 @@ export class RiotChat {
           : this.state.unread,
     });
     await this.persistMessage(message);
+    if (notify && !exists && message.direction === 'incoming' && message.source !== 'riot-archive')
+      void this.hooks.incoming?.(message).catch(() => {});
   }
   hydrateMessages(subject: string, messages: ChatMessage[]) {
     this.update({

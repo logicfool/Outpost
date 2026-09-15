@@ -13,6 +13,7 @@ export interface Friend extends PlayerRef {
   jid: string;
   presence: 'offline' | 'online' | 'away' | 'in_game' | 'agent_select' | 'queue';
   presenceSource?: 'valorant' | 'riot';
+  queue?: string;
   game?: string;
   activity?: string;
   partySize?: number;
@@ -70,6 +71,7 @@ export type ChatTransport = (
 ) => ChatConnection;
 
 export interface ChatHooks {
+  incoming?(message: ChatMessage): Promise<void>;
   saveMessage?(message: ChatMessage): Promise<void>;
   newId?(): string;
   presenceDelayMs?: number;

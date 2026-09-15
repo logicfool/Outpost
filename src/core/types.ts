@@ -60,6 +60,7 @@ export interface CatalogItem {
   wideArt?: string;
   rarity?: string;
   weapon?: string;
+  weaponId?: string;
   video?: string;
   levels?: CatalogMedia[];
   chromas?: CatalogMedia[];
@@ -256,6 +257,10 @@ export interface HistoryEntry {
 export interface Settings {
   reminders: boolean;
   backgroundSync: boolean;
+  wishlistAlerts?: boolean;
+  chatAlerts?: boolean;
+  notificationPreviews?: boolean;
+  allowPurchases?: boolean;
   theme?: import('./theme').ThemePreference;
   autoChatHistory?: boolean;
 }
@@ -264,6 +269,10 @@ export const XP_PER_LEVEL = 5000;
 export const DEFAULT_SETTINGS: Settings = {
   reminders: false,
   backgroundSync: false,
+  wishlistAlerts: false,
+  chatAlerts: false,
+  notificationPreviews: false,
+  allowPurchases: false,
   theme: 'navy',
   autoChatHistory: true,
 };

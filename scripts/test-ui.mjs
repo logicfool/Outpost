@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.5.0');
+const out = path.join(root, 'docs', 'validation-0.6.0');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -144,8 +144,10 @@ try {
     await click('Back from identity editor');
   });
   await check('friends support presence filters, conversations and profile links', async () => {
+    await tab('Friends');
     await click('Open chats');
-    await click('Connect Riot chat');
+    if (await page.getByRole('button', { name: 'Connect Riot chat', exact: true }).isVisible())
+      await click('Connect Riot chat');
     await page.getByRole('tab', { name: 'Online · 2', exact: true }).waitFor();
     await shot('friends-online');
     await tab('All friends · 5');
@@ -286,7 +288,10 @@ try {
     await tab('Light');
   });
   await check('saved messages survive app restart without connecting to Riot', async () => {
+    await tab('Friends');
     await click('Open chats');
+    if (await page.getByRole('button', { name: 'Disconnect chat', exact: true }).isVisible())
+      await click('Disconnect chat');
     await tab('Saved · 1');
     await page
       .getByRole('button', { name: /^Message/ })
@@ -316,6 +321,8 @@ try {
     'dedicated Friends tab uses compact square portraits and separates chat navigation',
     async () => {
       await tab('Friends');
+      if (await page.getByRole('button', { name: 'Connect friends', exact: true }).isVisible())
+        await click('Connect friends');
       await page.getByText('VALORANT - 2', { exact: true }).waitFor();
       const row = page.getByRole('button', { name: 'View Lumen profile', exact: true });
       await row.waitFor();
@@ -359,6 +366,68 @@ try {
       await tab('Store');
       await page.getByText('Cached · pull down to refresh', { exact: true }).waitFor();
       await shot('store-light');
+    },
+  );
+  await check(
+    'account picker is local, scrollable and shows the selected square portrait',
+    async () => {
+      await tab('Store');
+      assert.equal(await page.getByRole('button', { name: 'Open chats', exact: true }).count(), 0);
+      await click('Switch account');
+      await page.getByText('1 saved', { exact: true }).waitFor();
+      const choice = page.getByRole('button', { name: 'Switch to Nightshift #DEMO', exact: true });
+      await choice.waitFor();
+      await choice.getByRole('img', { name: 'Player card portrait' }).waitFor();
+      await shot('account-switcher');
+      await choice.click();
+      await page.getByRole('tab', { name: 'Store', exact: true }).waitFor();
+    },
+  );
+  await check('named loadout presets can be saved edited applied and deleted in demo', async () => {
+    await tab('Collection');
+    await click('Saved loadouts');
+    await click('Create from equipped loadout');
+    await page.getByRole('textbox', { name: 'Loadout name', exact: true }).fill('Night set');
+    await click('Save loadout');
+    await click('Edit Night set');
+    await page.getByRole('textbox', { name: 'Loadout name', exact: true }).fill('Day set');
+    await click('Save loadout');
+    await click('Apply Day set');
+    await click('Apply demo preset');
+    await page
+      .getByText('Demo preset selected. No Riot account changed.', { exact: true })
+      .waitFor();
+    await shot('loadout-presets');
+    await click('Delete Day set');
+    await click('Confirm delete preset');
+    await page.getByText('Build your first loadout', { exact: true }).waitFor();
+    await click('Back from loadouts');
+  });
+  await check('notification controls and optional VP purchases default off', async () => {
+    await tab('Settings');
+    for (const name of [
+      'Wishlist alerts',
+      'Chat alerts',
+      'Notification previews',
+      'Allow VP purchases',
+    ]) {
+      const toggle = page.getByRole('switch', { name, exact: true });
+      await toggle.scrollIntoViewIfNeeded();
+      assert.equal(await toggle.isChecked(), false);
+      assert.equal(await toggle.isDisabled(), true);
+    }
+    await shot('notification-purchase-settings');
+  });
+  await check(
+    'floating navigation overlays scrolling content without a rectangular host',
+    async () => {
+      await tab('Store');
+      const nav = page.getByTestId('floating-bottom-nav');
+      const box = await nav.boundingBox();
+      assert.ok(box && box.y + box.height >= 839 && box.y + box.height <= 844);
+      assert.equal(await nav.evaluate((n) => getComputedStyle(n).position), 'absolute');
+      assert.equal(await nav.evaluate((n) => getComputedStyle(n).borderTopWidth), '0px');
+      await shot('floating-store');
     },
   );
   assert.equal(errors.length, 0, JSON.stringify(errors));

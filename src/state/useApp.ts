@@ -1,3 +1,4 @@
+import { useActions } from './useActions';
 import { storeResetAt, type RefreshReason } from '../core/refreshPolicy';
 import { mergeSnapshot } from '../core/snapshot';
 import { clearDiagnostics } from '../core/diagnostics';
@@ -25,6 +26,7 @@ import { AppError, safeError } from '../core/validation';
 import { getRuntime } from '../platform/runtime';
 import { configureBackground } from '../platform/background';
 import {
+  cancelResetNotifications,
   cancelAllNotifications,
   enableNotifications,
   updateStoreNotifications,
@@ -54,6 +56,24 @@ export function useApp() {
     demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
   const social = useSocial(active, catalog);
+  useEffect(() => {
+    if (settings.chatAlerts && active && !active.demo && Platform.OS !== 'web') {
+      void social.connectChat();
+    }
+  }, [active?.puuid, settings.chatAlerts]);
+  const actions = useActions(
+    active,
+    catalog,
+    snapshot,
+    (data) =>
+      setSnapshot((previous) =>
+        previous && previous.accountId === activeRef.current?.puuid
+          ? { ...previous, loadout: { status: 'ready', data, fetchedAt: Date.now() } }
+          : previous,
+      ),
+    setCatalog,
+    setSnapshot,
+  );
   useEffect(() => {
     if (snapshot?.loadout.status === 'ready' && snapshot.loadout.data.card) {
       const current = snapshot.loadout;
@@ -260,6 +280,9 @@ export function useApp() {
       const runtime = await getRuntime(),
         wishes = await runtime.repository.toggleWish(account.puuid, id);
       if (activeRef.current?.puuid === account.puuid) setWishlist(wishes);
+      const cached = await runtime.repository.snapshot(account.puuid);
+      if (cached?.store.status === 'ready' && !cached.store.warning)
+        await updateStoreNotifications(account, cached.store.data, wishes, runtime.repository);
     } catch (error) {
       setMessage(safeError(error).message);
     }
@@ -272,13 +295,20 @@ export function useApp() {
             'NATIVE_REQUIRED',
             'Link a real account in a native build before enabling device services.',
           );
-        if (next.reminders && !settings.reminders) await enableNotifications();
+        if (
+          (next.reminders && !settings.reminders) ||
+          (next.wishlistAlerts && !settings.wishlistAlerts) ||
+          (next.chatAlerts && !settings.chatAlerts)
+        )
+          await enableNotifications();
         if (next.backgroundSync !== settings.backgroundSync)
           await configureBackground(next.backgroundSync);
         const runtime = await getRuntime();
         await runtime.repository.saveSettings(next);
         setSettings(next);
-        if (!next.reminders) await cancelAllNotifications();
+        if (!next.reminders && settings.reminders) await cancelResetNotifications();
+        if (!next.reminders && !next.wishlistAlerts && !next.chatAlerts)
+          await cancelAllNotifications();
         else if (
           activeRef.current &&
           snapshot?.store.status === 'ready' &&
@@ -495,6 +525,7 @@ export function useApp() {
   }, []);
   return {
     ...social,
+    ...actions,
     observedIdentity: observedIdentity?.accountId === active?.puuid ? observedIdentity : null,
     booting,
     accounts,

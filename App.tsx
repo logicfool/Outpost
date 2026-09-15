@@ -1,3 +1,6 @@
+import { AccountPicker } from './src/ui/AccountPicker';
+import { NavInsetContext } from './src/ui/NavInsets';
+import { listenNotificationTaps } from './src/platform/notifications';
 import { LivePollingContext } from './src/state/useLivePolling';
 import { ScreenTransition } from './src/ui/ScreenTransition';
 import { FriendsScreen } from './src/ui/FriendsScreen';
@@ -17,7 +20,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -76,7 +79,10 @@ function Main() {
 }
 function AppContent({ model }: { model: AppModel }) {
   const { C, S, isDark } = useTheme();
-  const styles = useThemedStyles(makeStyles);
+  const styles = useThemedStyles(makeStyles),
+    insets = useSafeAreaInsets();
+  const [picker, setPicker] = useState(false),
+    [notice, setNotice] = useState<{ kind: string; accountId: string; peer?: string } | null>(null);
 
   useEffect(() => {
     if (Platform.OS !== 'web')
@@ -130,6 +136,22 @@ function AppContent({ model }: { model: AppModel }) {
     },
     [model.active?.puuid],
   );
+  useEffect(() => listenNotificationTaps(setNotice), []);
+  useEffect(() => {
+    if (!notice || model.booting) return;
+    const a = model.accounts.find((a) => a.puuid === notice.accountId);
+    if (!a) {
+      setNotice(null);
+      return;
+    }
+    if (model.active?.puuid !== a.puuid) {
+      model.switchAccount(a);
+      return;
+    }
+    if (notice.kind === 'chat' && notice.peer) onNavigate({ type: 'chat', subject: notice.peer });
+    else setTab('store');
+    setNotice(null);
+  }, [notice, model.booting, model.accounts, model.active?.puuid, onNavigate]);
   const ownCard =
     model.snapshot?.loadout.status === 'ready'
       ? model.snapshot.loadout.data.card
@@ -137,13 +159,15 @@ function AppContent({ model }: { model: AppModel }) {
   const expired =
     model.active && !model.active.demo && model.active.expiresAt <= now && !model.active.canReauth;
   return (
-    <SafeAreaView style={S.page} edges={['top', 'bottom']}>
+    <SafeAreaView style={S.page} edges={['top', 'left', 'right']}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <View
         style={styles.shell}
-        aria-hidden={!!explorer || !!item || !!login}
-        accessibilityElementsHidden={!!explorer || !!item || !!login}
-        importantForAccessibility={explorer || item || login ? 'no-hide-descendants' : 'auto'}
+        aria-hidden={!!explorer || !!item || !!login || picker}
+        accessibilityElementsHidden={!!explorer || !!item || !!login || picker}
+        importantForAccessibility={
+          explorer || item || login || picker ? 'no-hide-descendants' : 'auto'
+        }
       >
         {model.booting ? (
           <View style={styles.center}>
@@ -190,15 +214,10 @@ function AppContent({ model }: { model: AppModel }) {
                 <Image source={LOGO} style={styles.headerLogo} />
                 {!narrow && <Text style={styles.wordmark}>OUTPOST</Text>}
               </View>
-              <IconButton
-                icon="message-square"
-                label="Open chats"
-                onPress={() => onNavigate({ type: 'friends' })}
-              />
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Open account settings"
-                onPress={() => setTab('account')}
+                accessibilityLabel="Switch account"
+                onPress={() => setPicker(true)}
                 style={styles.profile}
               >
                 <PlayerAvatar card={ownCard} catalog={model.catalog} size={26} />
@@ -224,19 +243,24 @@ function AppContent({ model }: { model: AppModel }) {
                 <Feather name="chevron-right" color={C.subtle} size={16} />
               </Pressable>
             )}
-            <LivePollingContext.Provider value={!explorer && !item && !login}>
-              <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
-                <ScreenSlot
-                  key={`${model.active.puuid}:${tab}`}
-                  tab={tab}
-                  model={model}
-                  onItem={onItem}
-                  onLink={onLink}
-                  onNavigate={onNavigate}
-                />
-              </ScreenTransition>
-            </LivePollingContext.Provider>
-            <View style={styles.nav}>
+            <NavInsetContext.Provider value={76 + insets.bottom}>
+              <LivePollingContext.Provider value={!explorer && !item && !login && !picker}>
+                <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
+                  <ScreenSlot
+                    key={`${model.active.puuid}:${tab}`}
+                    tab={tab}
+                    model={model}
+                    onItem={onItem}
+                    onLink={onLink}
+                    onNavigate={onNavigate}
+                  />
+                </ScreenTransition>
+              </LivePollingContext.Provider>
+            </NavInsetContext.Provider>
+            <View
+              testID="floating-bottom-nav"
+              style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
+            >
               {NAV.map((nav) => {
                 const selected = tab === nav.id;
                 return (
@@ -272,6 +296,12 @@ function AppContent({ model }: { model: AppModel }) {
           </View>
         )}
       </View>
+      <AccountPicker
+        visible={picker}
+        model={model}
+        onClose={() => setPicker(false)}
+        onAdd={() => onLink()}
+      />
       {login && (
         <Login expectedId={login.expectedId} onClose={() => setLogin(null)} onLink={model.link} />
       )}
@@ -405,15 +435,21 @@ const makeStyles = (C: Palette) =>
       borderColor: '#FF465540',
     },
     nav: {
+      position: 'absolute',
+      left: 10,
+      right: 10,
       flexDirection: 'row',
-      backgroundColor: C.surface,
-      borderWidth: 1,
-      borderColor: C.border,
+      backgroundColor: `${C.surface}F2`,
+      borderWidth: 0,
+      borderColor: 'transparent',
       borderRadius: 28,
-      marginHorizontal: 12,
-      marginBottom: 6,
       paddingHorizontal: 4,
-      paddingVertical: 8,
+      paddingVertical: 7,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowOffset: { width: 0, height: 3 },
+      shadowRadius: 12,
+      elevation: 5,
     },
     navItem: { flex: 1, alignItems: 'center', gap: 4, minHeight: 48, justifyContent: 'center' },
     navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500', flexShrink: 1 },

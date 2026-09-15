@@ -6,6 +6,7 @@ export type ExplorerRoute =
   | { type: 'career'; rank: Ranked }
   | { type: 'live' }
   | { type: 'identity' }
+  | { type: 'presets' }
   | { type: 'friends' }
   | { type: 'chat-settings'; subject?: string }
   | { type: 'chat'; subject: string };

@@ -1,25 +1,39 @@
 import type { Catalog, CatalogItem } from './types';
 import type { Friend, Conversation } from './chatTypes';
 import { safeImage } from './validation';
+import { queueName } from './normalize';
 import { presencePriority } from './chatPresence';
 
+export function squareCardCandidates(card: CatalogItem | undefined, catalog?: Catalog): string[] {
+  if (!card) return [];
+  const resolved = catalog?.items[card.id.toLowerCase()] ?? card;
+  const id = (resolved.canonicalId || resolved.id).toLowerCase();
+  const square = (url?: string) =>
+    url && /\/(smallart|displayicon)\./i.test(url) ? safeImage(url) : undefined;
+  const generated =
+    resolved.kind === 'card' && /^[a-f0-9-]{36}$/.test(id)
+      ? [
+          `https://media.valorant-api.com/playercards/${id}/displayicon.png`,
+          `https://media.valorant-api.com/playercards/${id}/smallart.png`,
+        ]
+      : [];
+  return [
+    ...new Set(
+      [
+        square(resolved.image),
+        square(resolved.smallArt),
+        square(card.image),
+        square(card.smallArt),
+        ...generated,
+      ].filter((v): v is string => !!v),
+    ),
+  ];
+}
 export function squareCardArt(
   card: CatalogItem | undefined,
   catalog?: Catalog,
 ): string | undefined {
-  if (!card) return;
-  const resolved = catalog?.items[card.id.toLowerCase()] ?? card;
-  const direct =
-    safeImage(resolved.smallArt) ??
-    (resolved.image?.includes('/smallart.') ? safeImage(resolved.image) : undefined);
-  if (direct) return direct;
-  const id = resolved.canonicalId || resolved.id;
-  if (
-    resolved.kind === 'card' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-  )
-    return `https://media.valorant-api.com/playercards/${id.toLowerCase()}/smallart.png`;
-  return safeImage(resolved.image);
+  return squareCardCandidates(card, catalog)[0];
 }
 export function friendStatus(friend: Friend, connected = true): string {
   if (!connected) return 'Last seen · connect for live status';
@@ -41,6 +55,9 @@ export function friendStatus(friend: Friend, connected = true): string {
   return [
     game && game !== 'VALORANT' ? game : undefined,
     action,
+    friend.queue && ['in_game', 'agent_select', 'queue'].includes(friend.presence)
+      ? queueName(friend.queue)
+      : undefined,
     ['in_game', 'agent_select'].includes(friend.presence) ? friend.map : undefined,
     party,
   ]

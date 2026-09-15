@@ -1,8 +1,8 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { Catalog, CatalogItem } from '../core/types';
-import { squareCardArt } from '../core/friends';
+import { squareCardCandidates } from '../core/friends';
 import { Image } from './CachedImage';
 import { useTheme } from './theme';
 export const PlayerAvatar = memo(function PlayerAvatar({
@@ -17,8 +17,11 @@ export const PlayerAvatar = memo(function PlayerAvatar({
   status?: 'online' | 'away' | 'offline' | 'unknown';
 }) {
   const { C } = useTheme(),
-    uri = squareCardArt(card, catalog);
-  const [failed, setFailed] = useState<string>();
+    candidates = squareCardCandidates(card, catalog),
+    key = candidates.join('|');
+  const [index, setIndex] = useState(0);
+  useEffect(() => setIndex(0), [key]);
+  const uri = candidates[index];
   const dot = status === 'online' ? C.mint : status === 'away' ? C.gold : C.subtle;
   return (
     <View style={{ width: size, height: size, flexShrink: 0 }}>
@@ -33,14 +36,14 @@ export const PlayerAvatar = memo(function PlayerAvatar({
           backgroundColor: C.raised,
         }}
       >
-        {uri && failed !== uri ? (
+        {uri ? (
           <Image
             source={{ uri }}
             contentFit="cover"
             transition={0}
             style={{ width: size, height: size }}
             accessibilityLabel="Player card portrait"
-            onError={() => setFailed(uri)}
+            onError={() => setIndex((n) => n + 1)}
           />
         ) : (
           <Feather name="user" size={size * 0.47} color={C.subtle} />

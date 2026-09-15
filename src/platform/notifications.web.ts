@@ -15,3 +15,12 @@ export async function updateStoreNotifications(
   _wishlist: string[],
   _repository: Repository,
 ): Promise<void> {}
+
+export async function notifyChat(..._args: unknown[]): Promise<void> {}
+export function listenNotificationTaps(
+  _action: (target: NonNullable<ReturnType<typeof import('../core/alerts').alertTarget>>) => void,
+): () => void {
+  return () => {};
+}
+
+export async function cancelResetNotifications(): Promise<void> {}

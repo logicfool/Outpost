@@ -44,7 +44,7 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
-    schemaVersion: 5,
+    schemaVersion: 6,
     fetchedAt: now,
   };
   const add = (id: string, item: CatalogItem) => {
@@ -77,6 +77,7 @@ export function buildCatalog(
         name: text(skin.displayName),
         kind: 'skin',
         weapon: text(weapon.displayName),
+        weaponId: text(weapon.uuid),
         image:
           safeImage(skin.displayIcon) ??
           safeImage(levels[0]?.displayIcon) ??

@@ -12,3 +12,7 @@ export function randomHex(): string {
     x.toString(16).padStart(2, '0'),
   ).join('');
 }
+
+export function randomId(): string {
+  return crypto.randomUUID();
+}

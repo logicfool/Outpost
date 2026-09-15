@@ -1,4 +1,12 @@
 import {
+  quotePurchase,
+  validatePurchaseQuote,
+  type PurchaseQuote,
+  type PurchaseRecord,
+} from '../core/purchases';
+import { validatePreset, type LoadoutPreset } from '../core/presets';
+import { ITEM_TYPES } from '../core/normalize';
+import {
   DAY_MS,
   LIVE_POLL_MS,
   MANUAL_COOLDOWN_MS,
@@ -26,7 +34,7 @@ import { AppError, safeError } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
 import { openRepository } from './storage';
 import type { Repository } from './storage.types';
-import { vault, randomHex } from './secure';
+import { vault, randomHex, randomId } from './secure';
 import { cancelAccountNotifications, updateStoreNotifications } from './notifications';
 export class Runtime {
   readonly http = new HttpClient(nativeFetcher);
@@ -39,6 +47,9 @@ export class Runtime {
   private identityFlights = new Map<string, Promise<Loadout>>();
   private clientFlights = new Map<string, Promise<RiotClient>>();
   private generations = new Map<string, number>();
+  private purchaseFlights = new Map<string, Promise<PurchaseRecord>>();
+  private quotes = new Map<string, PurchaseQuote>();
+  private quoteTimes = new Map<string, number>();
   private liveFlights = new Map<string, Promise<Section<LiveGame>>>();
   private catalogFlight?: Promise<Catalog>;
   constructor(
@@ -56,7 +67,7 @@ export class Runtime {
       if (
         cached &&
         (!allowNetwork ||
-          (!force && cached.schemaVersion === 5 && cached.fetchedAt + ttl > this.now()))
+          (!force && cached.schemaVersion === 6 && cached.fetchedAt + ttl > this.now()))
       ) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
@@ -329,8 +340,9 @@ export class Runtime {
       await this.repository.saveSnapshot(next);
       if (
         !failed &&
-        (await this.repository.settings()).reminders &&
-        next.store.status === 'ready'
+        next.store.status === 'ready' &&
+        ((await this.repository.settings()).reminders ||
+          (await this.repository.settings()).wishlistAlerts)
       ) {
         await updateStoreNotifications(
           account,
@@ -440,8 +452,179 @@ export class Runtime {
       if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
     }
   }
+  async loadoutEditor(id: string) {
+    await this.loadCatalog();
+    return (await this.client(id)).loadoutEditor();
+  }
+  async applyPreset(id: string, preset: LoadoutPreset): Promise<Loadout> {
+    validatePreset(preset, id);
+    if (this.identityFlights.has(id))
+      throw new AppError('LOADOUT_BUSY', 'An equipment update is already running.');
+    const generation = this.generations.get(id) ?? 0;
+    const run = async () => {
+      await this.loadCatalog();
+      const data = await (await this.client(id)).applyPreset(preset);
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      const snapshot = await this.repository.snapshot(id);
+      if (snapshot)
+        await this.repository.saveSnapshot({
+          ...snapshot,
+          loadout: { status: 'ready', data, fetchedAt: this.now() },
+        });
+      return data;
+    };
+    const work = run();
+    this.identityFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
+    }
+  }
+  async purchaseQuote(id: string, itemId: string): Promise<PurchaseQuote> {
+    if ((this.quoteTimes.get(id) ?? 0) > this.now())
+      throw new AppError(
+        'LOCAL_COOLDOWN',
+        'Wait a moment before requesting another purchase quote.',
+      );
+    this.quoteTimes.set(id, this.now() + 15000);
+    const unresolved = (await this.repository.purchaseRecords(id)).some((r) =>
+      ['submitting', 'accepted', 'unknown'].includes(r.state),
+    );
+    if (unresolved)
+      throw new AppError(
+        'ORDER_PENDING',
+        'A previous purchase is unconfirmed. Check its status before another purchase.',
+      );
+    const client = await this.client(id);
+    const [store, wallet, owned] = await Promise.all([
+      client.store(true),
+      client.wallet(true),
+      client.ownedIds(ITEM_TYPES.skin),
+    ]);
+    const quote = quotePurchase(store, wallet, itemId, id, randomId(), this.now());
+    if (
+      owned.has(quote.offer.item.id) ||
+      owned.has(quote.offer.id) ||
+      quote.offer.item.levels?.some((l) => owned.has(l.id))
+    )
+      throw new AppError('ALREADY_OWNED', 'This skin is already in your collection.');
+    this.quotes.set(id, quote);
+    return JSON.parse(JSON.stringify(quote)) as PurchaseQuote;
+  }
+  async confirmPurchase(id: string, quoteId: string): Promise<PurchaseRecord> {
+    if (this.purchaseFlights.has(id))
+      throw new AppError('PURCHASE_BUSY', 'This account already has a purchase in progress.');
+    if (!(await this.repository.settings()).allowPurchases)
+      throw new AppError('PURCHASE_DISABLED', 'Phone purchases are disabled.');
+    const quote = this.quotes.get(id);
+    this.quotes.delete(id);
+    if (!quote || quote.id !== quoteId)
+      throw new AppError('PURCHASE_CONFIRMATION', 'Review a fresh quote before confirming.');
+    if (this.now() >= quote.expiresAt)
+      throw new AppError(
+        'PURCHASE_EXPIRED',
+        'This confirmation has expired. Review the current offer again.',
+      );
+    const generation = this.generations.get(id) ?? 0;
+    const run = async () => {
+      if (
+        (await this.repository.purchaseRecords(id)).some((r) =>
+          ['submitting', 'accepted', 'unknown'].includes(r.state),
+        )
+      )
+        throw new AppError('ORDER_PENDING', 'Check the previous purchase before continuing.');
+      const client = await this.client(id);
+      const [store, wallet, owned] = await Promise.all([
+        client.store(true),
+        client.wallet(true),
+        client.ownedIds(ITEM_TYPES.skin),
+      ]);
+      const fresh = quotePurchase(store, wallet, quote.offer.item.id, id, quote.id, this.now());
+      validatePurchaseQuote(quote, fresh, this.now());
+      if (quote.offer.item.levels?.some((l) => owned.has(l.id)) || owned.has(quote.offer.item.id))
+        throw new AppError('ALREADY_OWNED', 'This skin is already owned.');
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed before confirmation.');
+      let record: PurchaseRecord = {
+        id: quote.id,
+        accountId: id,
+        offerId: quote.offer.id,
+        itemId: quote.offer.item.id,
+        name: quote.offer.item.name,
+        price: quote.price,
+        at: this.now(),
+        state: 'submitting',
+      };
+      await this.repository.savePurchaseRecord(record);
+      try {
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError('ACCOUNT_CHANGED', 'The account changed before submission.');
+        if (!(await this.repository.settings()).allowPurchases)
+          throw new AppError(
+            'PURCHASE_DISABLED',
+            'Phone purchases were disabled before submission.',
+          );
+        const result = await client.createOrder(record.id, record.offerId);
+        record = { ...record, ...result };
+      } catch (reason) {
+        const e = safeError(reason),
+          rejected =
+            [400, 401, 403, 404, 405, 409, 410, 422, 429].includes(e.status ?? 0) ||
+            ['ACCOUNT_CHANGED', 'PURCHASE_DISABLED'].includes(e.code);
+        record = {
+          ...record,
+          state: rejected ? 'failed' : 'unknown',
+          message: rejected
+            ? `Riot rejected the request (${e.code}). No automatic retry was made.`
+            : 'The purchase outcome is unconfirmed. Do not retry; check Riot or order status.',
+        };
+      }
+      await this.repository.savePurchaseRecord(record);
+      const cached = await this.repository.snapshot(id);
+      if (cached)
+        try {
+          await this.repository.saveSnapshot({
+            ...cached,
+            wallet: { status: 'ready', data: await client.wallet(true), fetchedAt: this.now() },
+          });
+        } catch {}
+      return record;
+    };
+    const work = run();
+    this.purchaseFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.purchaseFlights.get(id) === work) this.purchaseFlights.delete(id);
+    }
+  }
+  async checkPurchase(id: string, recordId: string): Promise<PurchaseRecord> {
+    const record = (await this.repository.purchaseRecords(id)).find((r) => r.id === recordId);
+    if (!record) throw new AppError('ORDER_SCOPE', 'This order does not belong to this account.');
+    const key = 'notice.' + id + '.ordercheck.' + recordId,
+      last = Number(await this.repository.notificationStamp(key));
+    if (last + 60000 > this.now())
+      throw new AppError('LOCAL_COOLDOWN', 'Order status can be checked once per minute.');
+    await this.repository.setNotificationStamp(key, String(this.now()));
+    const client = await this.client(id);
+    let next = record;
+    if (record.orderId)
+      next = { ...record, ...(await client.getOrder(record.orderId)), message: undefined };
+    else if ((await client.ownedIds(ITEM_TYPES.skin)).has(record.itemId))
+      next = {
+        ...record,
+        state: 'complete',
+        message: 'Ownership is now confirmed. Check Riot for the original transaction details.',
+      };
+    await this.repository.savePurchaseRecord(next);
+    return next;
+  }
   async remove(id: string): Promise<void> {
     await this.linkQueue.catch(() => {});
+    await this.purchaseFlights.get(id)?.catch(() => {});
+    this.quotes.delete(id);
     const initializing = this.clientFlights.get(id);
     this.invalidate(id);
     await initializing?.catch(() => {});

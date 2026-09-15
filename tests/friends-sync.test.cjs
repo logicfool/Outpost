@@ -26,9 +26,9 @@ test('friends portraits use small square card art instead of wide banner crops',
     wideArt: 'https://media.valorant-api.com/playercards/' + ID + '/wideart.png',
     smallArt: 'https://media.valorant-api.com/playercards/' + ID + '/smallart.png',
   };
-  assert.equal(squareCardArt(card), card.smallArt);
+  assert.equal(squareCardArt(card), card.image);
   delete card.smallArt;
-  assert.match(squareCardArt(card), /smallart.png$/);
+  assert.match(squareCardArt(card), /displayicon.png$/);
 });
 test('public card metadata retains its distinct portrait dimension', () => {
   const c = buildCatalog({

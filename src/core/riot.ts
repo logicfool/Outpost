@@ -1,3 +1,11 @@
+import {
+  weaponChoices,
+  preparePreset,
+  verifyPreset,
+  type LoadoutPreset,
+  type LoadoutEditor,
+} from './presets';
+import { orderResult } from './purchases';
 import { DAY_MS, FULL_SNAPSHOT, keepCached, type SnapshotPlan } from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
@@ -482,6 +490,89 @@ export class RiotClient {
     } finally {
       if (this.identityWrite === work) this.identityWrite = undefined;
     }
+  }
+  async ownedIds(type: string, fresh = true): Promise<Set<string>> {
+    if (!Object.values(ITEM_TYPES).includes(type))
+      throw new AppError('ITEM_TYPE', 'Unsupported collection category.');
+    const id = this.session.account.puuid,
+      raw = object(
+        (await this.read(`/store/v1/entitlements/${id}/${type}`, fresh ? 0 : 60000)).data,
+      );
+    const groups = Array.isArray(raw.EntitlementsByTypes)
+      ? raw.EntitlementsByTypes.map(object).filter((g) => g.ItemTypeID === type)
+      : [{ Entitlements: raw.Entitlements }];
+    if (!groups.length || groups.some((g) => !Array.isArray(g.Entitlements)))
+      throw new AppError('SCHEMA', 'Ownership could not be verified. No changes were sent.');
+    return new Set(groups.flatMap((g) => array(g.Entitlements)).map((v) => uuid(object(v).ItemID)));
+  }
+  async wallet(fresh = false) {
+    return normalizeWallet(
+      (await this.read(`/store/v1/wallet/${this.session.account.puuid}`, fresh ? 0 : 60000)).data,
+    );
+  }
+  async loadoutEditor(): Promise<LoadoutEditor> {
+    const [{ raw }, levels, chromas] = await Promise.all([
+      this.rawLoadout(),
+      this.ownedIds(ITEM_TYPES.skin),
+      this.ownedIds(ITEM_TYPES.chroma),
+    ]);
+    return {
+      current: weaponChoices(raw),
+      ownedLevels: [...levels],
+      ownedChromas: [...chromas],
+      version:
+        typeof object(raw).Version === 'number' ? (object(raw).Version as number) : undefined,
+    };
+  }
+  async applyPreset(preset: LoadoutPreset): Promise<Loadout> {
+    if (this.identityWrite)
+      throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current equipment change to finish.');
+    const run = async () => {
+      const initial = await this.rawLoadout();
+      const [levels, chromas] = await Promise.all([
+        this.ownedIds(ITEM_TYPES.skin),
+        this.ownedIds(ITEM_TYPES.chroma),
+      ]);
+      const latest = await this.rawLoadout();
+      if (
+        JSON.stringify(weaponChoices(initial.raw)) !== JSON.stringify(weaponChoices(latest.raw)) ||
+        object(initial.raw).Version !== object(latest.raw).Version
+      )
+        throw new AppError(
+          'LOADOUT_CONFLICT',
+          'Equipment changed in another client. Review it before applying again.',
+        );
+      const body = preparePreset(
+        latest.raw,
+        preset,
+        this.session.account.puuid,
+        levels,
+        chromas,
+        this.catalog,
+      );
+      await this.read(latest.path, 0, 'PUT', body);
+      const verified = (await this.read(latest.path, 0)).data;
+      verifyPreset(verified, preset.weapons);
+      this.cache.clear();
+      return normalizeLoadout(verified, this.catalog);
+    };
+    const work = run();
+    this.identityWrite = work;
+    try {
+      return await work;
+    } finally {
+      if (this.identityWrite === work) this.identityWrite = undefined;
+    }
+  }
+
+  async createOrder(xid: string, offerId: string) {
+    return orderResult(
+      (await this.read('/store/v1/order/', 0, 'POST', { XID: uuid(xid), OfferID: uuid(offerId) }))
+        .data,
+    );
+  }
+  async getOrder(orderId: string) {
+    return orderResult((await this.read(`/store/v1/order/${uuid(orderId)}`, 0)).data, orderId);
   }
   async snapshot(
     previous?: Snapshot | null,

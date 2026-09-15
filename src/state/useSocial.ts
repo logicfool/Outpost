@@ -1,4 +1,5 @@
 import { AutoHistoryGate } from '../core/autoHistory';
+import { notifyChat } from '../platform/notifications';
 import { recordRequest } from '../core/diagnostics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
@@ -224,6 +225,16 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         Date.now,
         {
           newId: randomHex,
+          incoming: async (message) => {
+            if (stamp === epoch.current && active.current?.puuid === a.puuid)
+              await notifyChat(
+                a.puuid,
+                message,
+                openSubject.current,
+                AppState.currentState === 'active',
+                (await getRuntime()).repository,
+              );
+          },
           presenceDelayMs: 100,
           saveMessage: async (message) => {
             await store.save(message);

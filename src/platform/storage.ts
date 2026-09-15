@@ -1,3 +1,4 @@
+import { validatePreset } from '../core/presets';
 import { mergeSnapshot } from '../core/snapshot';
 import * as SQLite from 'expo-sqlite';
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
@@ -21,7 +22,9 @@ async function create(): Promise<Repository> {
     CREATE TABLE IF NOT EXISTS wishlist (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, item_id TEXT NOT NULL, PRIMARY KEY(account_id,item_id));
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS refresh_gates (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, purpose TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,purpose));
-    PRAGMA user_version = 2;`);
+    CREATE TABLE IF NOT EXISTS presets (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
+    CREATE TABLE IF NOT EXISTS purchases (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
+    PRAGMA user_version = 3;`);
   let writing: Promise<unknown> = Promise.resolve();
   const write = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = writing.catch(() => {}).then(fn);
@@ -48,6 +51,59 @@ async function create(): Promise<Repository> {
       )
     ).map((r) => r.item_id);
   return {
+    async presets(id) {
+      return (
+        await db.getAllAsync<{ data: string }>(
+          'SELECT data FROM presets WHERE account_id=?',
+          uuid(id),
+        )
+      ).map((r) => validatePreset(JSON.parse(r.data), id));
+    },
+    async savePreset(preset) {
+      validatePreset(preset, preset.accountId);
+      await write(async () => {
+        const count = await db.getFirstAsync<{ n: number }>(
+          'SELECT COUNT(*) AS n FROM presets WHERE account_id=?',
+          preset.accountId,
+        );
+        const old = await db.getFirstAsync(
+          'SELECT id FROM presets WHERE account_id=? AND id=?',
+          preset.accountId,
+          preset.id,
+        );
+        if (!old && (count?.n ?? 0) >= 30)
+          throw new AppError('PRESET_LIMIT', 'Keep up to 30 presets per account.');
+        await db.runAsync(
+          'INSERT INTO presets(account_id,id,data) VALUES(?,?,?) ON CONFLICT(account_id,id) DO UPDATE SET data=excluded.data',
+          preset.accountId,
+          preset.id,
+          JSON.stringify(preset),
+        );
+      });
+    },
+    async deletePreset(id, presetId) {
+      await write(() =>
+        db.runAsync('DELETE FROM presets WHERE account_id=? AND id=?', uuid(id), uuid(presetId)),
+      );
+    },
+    async purchaseRecords(id) {
+      return (
+        await db.getAllAsync<{ data: string }>(
+          'SELECT data FROM purchases WHERE account_id=? ORDER BY rowid DESC',
+          uuid(id),
+        )
+      ).map((r) => JSON.parse(r.data));
+    },
+    async savePurchaseRecord(record) {
+      await write(() =>
+        db.runAsync(
+          'INSERT INTO purchases(account_id,id,data) VALUES(?,?,?) ON CONFLICT(account_id,id) DO UPDATE SET data=excluded.data',
+          uuid(record.accountId),
+          uuid(record.id),
+          JSON.stringify(record),
+        ),
+      );
+    },
     refreshGate(id, purpose) {
       return readJson(
         'SELECT data FROM refresh_gates WHERE account_id = ? AND purpose = ?',

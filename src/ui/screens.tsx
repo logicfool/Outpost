@@ -1,3 +1,5 @@
+import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
+import { useNavInset } from './NavInsets';
 import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatSettings } from './ChatSettings';
 import { Image } from './CachedImage';
@@ -102,10 +104,11 @@ const resultLabel = (result?: MatchDetail['result']) =>
 const fill = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } as const;
 function Page({ model, children }: { model: AppModel; children: React.ReactNode }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
 
   return (
     <ScrollView
-      contentContainerStyle={S.content}
+      contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
           refreshing={model.busy}
@@ -121,6 +124,7 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
 }
 function Heading({ eyebrow, title }: { eyebrow: string; title: React.ReactNode }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
 
   return (
     <View style={{ gap: 4 }}>
@@ -145,6 +149,7 @@ function Countdown({
   icon: React.ComponentProps<typeof Feather>['name'];
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -166,6 +171,7 @@ function Countdown({
 }
 function Wallet({ model }: { model: AppModel }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -190,6 +196,7 @@ function Wallet({ model }: { model: AppModel }) {
 }
 function AgentFrame({ image, size = 48 }: { image?: string; size?: number }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -216,6 +223,7 @@ function MiniStat({
   color?: string;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
   color ??= C.ink;
 
@@ -289,7 +297,8 @@ const DailyOffer = memo(function DailyOffer({
 });
 export function StoreScreen({ model, onItem }: Props) {
   const { C, S } = useTheme(),
-    styles = useThemedStyles(makeStyles);
+    styles = useThemedStyles(makeStyles),
+    navInset = useNavInset();
   const [bundleLimit, setBundleLimit] = useState(12);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
@@ -443,7 +452,7 @@ export function StoreScreen({ model, onItem }: Props) {
       windowSize={5}
       updateCellsBatchingPeriod={32}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={[S.content, { gap: 0 }]}
+      contentContainerStyle={[S.content, { gap: 0, paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
           refreshing={model.busy}
@@ -544,6 +553,7 @@ function ItemTile({
   label?: string;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -573,6 +583,7 @@ function ItemTile({
 }
 export function CollectionScreen({ model, onItem, onNavigate }: Props) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const [tab, setTab] = useState<'owned' | 'wishlist' | 'catalog' | 'equipped'>('owned'),
@@ -618,6 +629,12 @@ export function CollectionScreen({ model, onItem, onNavigate }: Props) {
   const header = (
     <View style={{ gap: 14, paddingBottom: 16 }}>
       <Heading eyebrow="BUILT OVER TIME" title="Collection" />
+      <Button
+        title="Saved loadouts"
+        secondary
+        icon="layers"
+        onPress={() => onNavigate({ type: 'presets' })}
+      />
       <Button
         title="Change player card & title"
         secondary
@@ -713,7 +730,7 @@ export function CollectionScreen({ model, onItem, onNavigate }: Props) {
       data={waiting ? [] : items}
       numColumns={2}
       keyExtractor={(item) => `${item.kind}:${item.id}`}
-      contentContainerStyle={S.content}
+      contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
       columnWrapperStyle={{ gap: 12 }}
       ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
       ListHeaderComponent={header}
@@ -765,6 +782,7 @@ function BattlePassRewards({
   onItem(item: CatalogItem): void;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   if (model.snapshot?.progression.status !== 'ready') return null;
@@ -811,6 +829,7 @@ function BattlePassRewards({
 }
 function Stat({ label, value }: { label: string; value: string | number | null }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   return (
     <View style={{ flex: 1, gap: 4 }}>
       <Text style={S.small}>{label}</Text>
@@ -820,6 +839,7 @@ function Stat({ label, value }: { label: string; value: string | number | null }
 }
 function BattlePassSummary({ model }: { model: AppModel }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
 
   return (
     <Resource title="Battle Pass" section={model.snapshot?.progression}>
@@ -862,6 +882,7 @@ function BattlePassSummary({ model }: { model: AppModel }) {
 }
 function LevelCard({ model }: { model: AppModel }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
 
   return (
     <Resource title="Account level" section={model.snapshot?.xp}>
@@ -876,6 +897,7 @@ function LevelCard({ model }: { model: AppModel }) {
 }
 export function ProgressScreen({ model, onItem }: Props) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -989,6 +1011,7 @@ function ProfileBanner({ model, onNavigate }: { model: AppModel; onNavigate: Nav
 }
 function RankOverview({ model, onOpen }: { model: AppModel; onOpen(): void }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   return (
@@ -1067,6 +1090,7 @@ export function CareerModal({
   embedded?: boolean;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const career = rank?.career ?? [];
@@ -1078,7 +1102,7 @@ export function CareerModal({
   const content = (
     <ModalPage>
       <ModalHeader title="Career summary" closeLabel="Close career summary" onClose={onClose} />
-      <ScrollView contentContainerStyle={S.content}>
+      <ScrollView contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}>
         {!current || !latest ? (
           <Empty
             title="No career stats yet"
@@ -1234,6 +1258,7 @@ export function MatchCard({
   onPress(): void;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const tone = detail ? resultTone(detail.result, C) : C.border,
@@ -1321,6 +1346,7 @@ function PlayerRow({
   ownId?: string;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const you = player.subject === ownId,
@@ -1393,6 +1419,7 @@ export function MatchReport({
   embedded?: boolean;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const [detail, setDetail] = useState<MatchDetail | null>(null),
@@ -1428,7 +1455,7 @@ export function MatchReport({
         closeLabel="Close match report"
         onClose={onClose}
       />
-      <ScrollView contentContainerStyle={S.content}>
+      <ScrollView contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}>
         {error ? (
           <Empty title="Report unavailable" detail={error} icon="alert-circle" />
         ) : !detail ? (
@@ -1653,7 +1680,8 @@ export const HistoryRow = memo(function HistoryRow({
 const matchKey = (match: MatchSummary) => match.id;
 const HistoryGap = () => <View style={{ height: 12 }} />;
 export function MatchesScreen({ model, onNavigate }: Props) {
-  const { C, S } = useTheme();
+  const { C, S } = useTheme(),
+    navInset = useNavInset();
   const [filter, setFilter] = useState('all');
   const previews = useMatchPreviews(model),
     details = previews.details;
@@ -1685,7 +1713,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
       windowSize={5}
       updateCellsBatchingPeriod={32}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={[S.content, { gap: 0 }]}
+      contentContainerStyle={[S.content, { gap: 0, paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
           refreshing={model.busy}
@@ -1698,12 +1726,6 @@ export function MatchesScreen({ model, onNavigate }: Props) {
           <Heading eyebrow="YOUR CAREER" title="Profile" />
           <ProfileBanner model={model} onNavigate={onNavigate} />
           <RankOverview model={model} onOpen={() => rank && onNavigate({ type: 'career', rank })} />
-          <Button
-            title="Chats"
-            secondary
-            icon="message-square"
-            onPress={() => onNavigate({ type: 'friends' })}
-          />
           <LiveCard model={model} onOpen={() => onNavigate({ type: 'live' })} />
           <SectionHeader title="Match history" />
           {queues.length > 2 && (
@@ -1740,6 +1762,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
 }
 export function AccountScreen({ model, onLink }: Props) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const [confirm, setConfirm] = useState<'remove' | 'cache' | null>(null),
@@ -1883,10 +1906,38 @@ export function AccountScreen({ model, onLink }: Props) {
         <View style={S.card}>
           <Setting
             title="Store reminders"
-            detail="Reset reminders and wishlist alerts."
+            detail="A reminder when the current daily rotation ends."
             value={model.settings.reminders}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) => void model.saveSettings({ ...model.settings, reminders: value })}
+          />
+          <View style={S.divider} />
+          <Setting
+            title="Wishlist alerts"
+            detail="Notify when a saved skin appears in daily offers, Night Market or an active bundle. Uses scheduled refreshes, not extra polling."
+            value={!!model.settings.wishlistAlerts}
+            disabled={active.demo || Platform.OS === 'web'}
+            onChange={(value) =>
+              void model.saveSettings({ ...model.settings, wishlistAlerts: value })
+            }
+          />
+          <View style={S.divider} />
+          <Setting
+            title="Chat alerts"
+            detail="Alert on new incoming messages while the chat connection is active. No alerts for history imports or the open conversation. Fully closed-app push needs a separate relay and is not enabled."
+            value={!!model.settings.chatAlerts}
+            disabled={active.demo || Platform.OS === 'web'}
+            onChange={(value) => void model.saveSettings({ ...model.settings, chatAlerts: value })}
+          />
+          <View style={S.divider} />
+          <Setting
+            title="Notification previews"
+            detail="Show skin names or message text in device notifications. Off keeps lock-screen alerts private."
+            value={!!model.settings.notificationPreviews}
+            disabled={active.demo || Platform.OS === 'web'}
+            onChange={(value) =>
+              void model.saveSettings({ ...model.settings, notificationPreviews: value })
+            }
           />
           <View style={S.divider} />
           <Setting
@@ -1898,6 +1949,19 @@ export function AccountScreen({ model, onLink }: Props) {
               void model.saveSettings({ ...model.settings, backgroundSync: value })
             }
           />
+        </View>
+        <SectionHeader title="Phone purchases" />
+        <View style={S.card}>
+          <Setting
+            title="Allow VP purchases"
+            detail="Experimental daily skin orders with a separate price and account confirmation. No automatic purchases, VP top-ups, gifts or bulk orders."
+            value={!!model.settings.allowPurchases}
+            disabled={active.demo || Platform.OS === 'web'}
+            onChange={(value) =>
+              void model.saveSettings({ ...model.settings, allowPurchases: value })
+            }
+          />
+          <PurchaseHistory model={model} />
         </View>
         <SectionHeader title="Data" />
         <DiagnosticsPanel />
@@ -1931,7 +1995,7 @@ export function AccountScreen({ model, onLink }: Props) {
             retains. Removing an account deletes its local data but does not sign it out on Riot's
             side. Demo mode uses made-up data.
           </Text>
-          <Text style={S.small}>Outpost 0.5.0</Text>
+          <Text style={S.small}>Outpost 0.6.0</Text>
         </View>
       </Page>
       <Modal
@@ -1978,6 +2042,7 @@ function Setting({
   disabled?: boolean;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   return (
     <View style={S.row}>
       <View style={{ flex: 1, gap: 3 }}>
@@ -1997,6 +2062,7 @@ function Setting({
 }
 function SkinVideo({ uri }: { uri: string }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const player = useVideoPlayer(uri, (p) => {
@@ -2018,6 +2084,7 @@ export function ItemModal({
   onClose(): void;
 }) {
   const { C, S, isDark } = useTheme();
+  const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
   const item = original ? hydrateItem(model.catalog, original) : null;
@@ -2038,7 +2105,7 @@ export function ItemModal({
           onClose={onClose}
         />
         {item && (
-          <ScrollView contentContainerStyle={S.content}>
+          <ScrollView contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}>
             <LinearGradient
               colors={[`${tint}40`, `${tint}0D`, C.background]}
               style={styles.detailHero}
@@ -2074,6 +2141,7 @@ export function ItemModal({
                 onPress={() => void model.toggleWish(item.canonicalId)}
               />
             </View>
+            <PurchaseControls key={`${model.active?.puuid}:${item.id}`} item={item} model={model} />
             {video ? (
               <SkinVideo key={video} uri={video} />
             ) : weaponItem ? (
