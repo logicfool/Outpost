@@ -13,7 +13,6 @@
   "expo-screen-capture",
   "expo-status-bar",
   "expo-linear-gradient",
-  "expo-dev-client",
   "react-native-safe-area-context",
   "react-native-webview",
   "@expo/vector-icons",

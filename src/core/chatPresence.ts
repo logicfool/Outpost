@@ -20,6 +20,34 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
   const valOnline =
     !!valorant && data.isValid !== false && child(valorant, 'st')?.text !== 'offline';
   const loop = valOnline ? text(data.sessionLoopState) : '';
+  const gameNames: Record<string, string> = {
+    league_of_legends: 'League of Legends',
+    league: 'League of Legends',
+    bacon: 'Legends of Runeterra',
+    wildrift: 'Wild Rift',
+    wildrift_mobile: 'Wild Rift',
+  };
+  const other = games?.children.find(
+    (g) => !!gameNames[g.name] && child(g, 'st')?.text !== 'offline',
+  );
+  const game = valOnline ? 'VALORANT' : other ? gameNames[other.name] : undefined;
+  const activity = valOnline
+    ? loop === 'MENUS'
+      ? 'In menus'
+      : undefined
+    : other
+      ? 'Online'
+      : undefined;
+  const rawSize = nullableNumber(data.partySize),
+    rawMax = nullableNumber(data.maxPartySize);
+  const partySize =
+    valOnline && rawSize !== null && Number.isInteger(rawSize) && rawSize >= 1 && rawSize <= 100
+      ? rawSize
+      : undefined;
+  const partyMax =
+    partySize && rawMax !== null && Number.isInteger(rawMax) && rawMax >= partySize && rawMax <= 100
+      ? rawMax
+      : undefined;
   const state: Friend['presence'] =
     loop === 'INGAME'
       ? 'in_game'
@@ -39,6 +67,10 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
   return {
     presence: state,
     updatedAt,
+    game,
+    activity,
+    partySize,
+    partyMax,
     presenceSource: valOnline ? 'valorant' : 'riot',
     mapId: mapId || undefined,
     map: catalog.maps[mapId]?.name,

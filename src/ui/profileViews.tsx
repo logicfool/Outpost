@@ -1,3 +1,4 @@
+import { PlayerAvatar } from './PlayerAvatar';
 import { Image } from './CachedImage';
 import React, { useState } from 'react';
 import { playerLabel } from '../core/playerNames';
@@ -84,12 +85,17 @@ export function PlayerCover({
         )}
       </View>
       <View style={{ padding: 16, gap: 8 }}>
-        <Text style={[S.h2, { fontSize: 23 }]} numberOfLines={2}>
-          {ownId ? playerLabel(player, ownId) : player.hidden ? 'Hidden player' : player.name}
-          {!player.hidden && !you && player.tag ? (
-            <Text style={{ color: C.muted, fontSize: 17 }}> #{player.tag}</Text>
-          ) : null}
-        </Text>
+        <View style={S.row}>
+          <PlayerAvatar card={card} catalog={catalog} size={42} />
+          <View style={{ flex: 1 }}>
+            <Text style={[S.h2, { fontSize: 23 }]} numberOfLines={2}>
+              {ownId ? playerLabel(player, ownId) : player.hidden ? 'Hidden player' : player.name}
+              {!player.hidden && !you && player.tag ? (
+                <Text style={{ color: C.muted, fontSize: 17 }}> #{player.tag}</Text>
+              ) : null}
+            </Text>
+          </View>
+        </View>
         {title && !title.name.startsWith('Unresolved') && (
           <Text style={[S.body, { color: C.gold }]}>{title.name}</Text>
         )}

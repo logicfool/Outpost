@@ -99,6 +99,7 @@ export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
           title: f.title,
           level: f.level,
           hideLevel: f.hideLevel,
+          tier: f.tier,
           presence: 'offline',
         }),
       }));

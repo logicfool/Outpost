@@ -307,6 +307,18 @@ export function useApp() {
     },
     [settings],
   );
+  const setAutoChatHistory = useCallback(
+    async (enabled: boolean) => {
+      const next = { ...settings, autoChatHistory: enabled };
+      setSettings(next);
+      try {
+        await (await getRuntime()).repository.saveSettings(next);
+      } catch {
+        setMessage('The chat-sync preference could not be saved.');
+      }
+    },
+    [settings],
+  );
   const clearCache = useCallback(async () => {
     try {
       social.disconnectChat();
@@ -499,6 +511,7 @@ export function useApp() {
     message,
     dismissMessage: () => setMessage(null),
     setTheme,
+    setAutoChatHistory,
     refresh,
     switchAccount,
     enterDemo: () => switchAccount(DEMO_ACCOUNT),

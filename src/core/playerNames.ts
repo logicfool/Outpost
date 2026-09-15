@@ -4,6 +4,7 @@ import { array, object, text } from './validation';
 export function hasPlayerName(value: string | undefined): boolean {
   return (
     !!value?.trim() &&
+    !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value.trim()) &&
     !['player', 'you', 'friend', 'hidden player', 'name unavailable'].includes(
       value.trim().toLowerCase(),
     )

@@ -1,5 +1,6 @@
+import { AutoHistoryGate } from '../core/autoHistory';
 import { recordRequest } from '../core/diagnostics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import type { Account, Catalog } from '../core/types';
 import type {
@@ -34,6 +35,8 @@ const emptyLocal: LocalState = { conversations: [], messages: {}, cursors: {}, l
 export function useSocial(account: Account | null, catalog: Catalog) {
   const [value, setValue] = useState<{ id?: string; state: ChatState }>({ state: EMPTY_CHAT });
   const [local, setLocal] = useState<LocalState>(emptyLocal);
+  const autoGate = useRef(new AutoHistoryGate());
+  const [syncingSavedHistory, setSyncingSavedHistory] = useState(false);
   const session = useRef<RiotChat | null>(null),
     active = useRef(account),
     meta = useRef(catalog),
@@ -105,7 +108,13 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   }, []);
   const connectChat = useCallback(async () => {
     const a = active.current;
-    if (!a || pending.current) return;
+    if (
+      !a ||
+      pending.current ||
+      (latest.current.id === a.puuid &&
+        ['ready', 'connecting', 'authenticating'].includes(latest.current.state.status))
+    )
+      return;
     wanted.current = true;
     clearTimeout(reconnectTimer.current);
     const stamp = ++epoch.current;
@@ -159,6 +168,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
             tier: p.tier ?? undefined,
             jid: `${p.subject}@demo.pvp.net`,
             presence: index === 0 ? 'in_game' : index === 1 ? 'online' : 'offline',
+            presenceSource: index < 2 ? 'valorant' : 'riot',
+            game: index < 2 ? 'VALORANT' : undefined,
+            activity: index === 1 ? 'In menus' : undefined,
             map: index === 0 ? 'Lotus' : undefined,
           }));
         await store.saveFriends(friends);
@@ -197,13 +209,18 @@ export function useSocial(account: Account | null, catalog: Catalog) {
             void store
               .saveFriends(changed)
               .then(() => scheduleLocal(a, store))
-              .catch(() =>
-                setLocal((old) => ({ ...old, error: 'Friend names could not be saved locally.' })),
-              );
+              .catch(() => {
+                if (stamp === epoch.current && active.current?.puuid === a.puuid)
+                  setLocal((old) => ({
+                    ...old,
+                    error: 'Friend names could not be saved locally.',
+                  }));
+              });
         },
         Date.now,
         {
           newId: randomHex,
+          presenceDelayMs: 100,
           saveMessage: async (message) => {
             await store.save(message);
             if (stamp === epoch.current && active.current?.puuid === a.puuid) {
@@ -232,6 +249,8 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   }, [storeFor, refreshLocal, scheduleLocal]);
   connectRef.current = connectChat;
   useEffect(() => {
+    autoGate.current.clear();
+    setSyncingSavedHistory(false);
     wanted.current = false;
     attempts.current = 0;
     openSubject.current = undefined;
@@ -288,15 +307,19 @@ export function useSocial(account: Account | null, catalog: Catalog) {
             id: a.puuid,
             messages: {
               ...base.messages,
-              [subject]: before
-                ? mergeMessages(
-                    base.messages[subject] ?? [],
-                    page.messages,
-                    Number.MAX_SAFE_INTEGER,
-                  )
-                : page.messages,
+              [subject]: mergeMessages(
+                base.messages[subject] ?? [],
+                page.messages,
+                Number.MAX_SAFE_INTEGER,
+              ),
             },
-            cursors: { ...base.cursors, [subject]: page.older },
+            cursors: {
+              ...base.cursors,
+              [subject]:
+                !before && (base.messages[subject]?.length ?? 0) > page.messages.length
+                  ? base.cursors[subject]
+                  : page.older,
+            },
             error: undefined,
           };
         });
@@ -390,6 +413,43 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     },
     [loadChatMessages],
   );
+  const autoSyncChatHistory = useCallback(
+    async (subject: string) => {
+      const a = active.current,
+        connection = session.current,
+        generation = epoch.current;
+      if (!a || latest.current.id !== a.puuid || latest.current.state.status !== 'ready') return;
+      return autoGate.current.run(`${a.puuid}:${subject}`, async () => {
+        if (
+          active.current?.puuid !== a.puuid ||
+          epoch.current !== generation ||
+          connection !== session.current
+        )
+          return;
+        await syncChatHistory(subject);
+      });
+    },
+    [syncChatHistory],
+  );
+  const syncSavedChatHistory = useCallback(async () => {
+    const a = active.current,
+      generation = epoch.current;
+    if (!a || latest.current.state.status !== 'ready')
+      throw new AppError('CHAT_OFFLINE', 'Connect chat before syncing saved conversations.');
+    setSyncingSavedHistory(true);
+    try {
+      const conversations = await (await storeFor(a)).conversations();
+      const friends = new Set(latest.current.state.friends.map((f) => f.subject));
+      for (const c of conversations
+        .filter((c) => c.count > 0 && friends.has(c.subject))
+        .slice(0, 10)) {
+        if (active.current?.puuid !== a.puuid || generation !== epoch.current) return;
+        await autoSyncChatHistory(c.subject);
+      }
+    } finally {
+      if (active.current?.puuid === a.puuid) setSyncingSavedHistory(false);
+    }
+  }, [storeFor, autoSyncChatHistory]);
   const clearChatHistory = useCallback(
     async (subject?: string) => {
       const a = active.current;
@@ -415,17 +475,18 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const live = value.id === account?.puuid ? value.state : EMPTY_CHAT;
   const saved = local.id === account?.puuid ? local : emptyLocal;
-  const combined: ChatState = {
-    ...live,
-    messages: { ...saved.messages },
-    storageError: saved.error ?? live.storageError,
-  };
-  for (const [id, messages] of Object.entries(live.messages))
-    combined.messages[id] = mergeMessages(
-      combined.messages[id] ?? [],
-      messages,
-      Number.MAX_SAFE_INTEGER,
-    );
+  const combinedMessages = useMemo(() => {
+    const result = { ...saved.messages };
+    for (const [id, messages] of Object.entries(live.messages))
+      result[id] = result[id]
+        ? mergeMessages(result[id]!, messages, Number.MAX_SAFE_INTEGER)
+        : messages;
+    return result;
+  }, [saved.messages, live.messages]);
+  const combined: ChatState = useMemo(
+    () => ({ ...live, messages: combinedMessages, storageError: saved.error ?? live.storageError }),
+    [live, combinedMessages, saved.error],
+  );
   return {
     chat: combined,
     savedConversations: saved.conversations,
@@ -438,6 +499,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     markChatRead,
     loadChatMessages,
     syncChatHistory,
+    autoSyncChatHistory,
+    syncSavedChatHistory,
+    syncingSavedHistory,
     clearChatHistory,
   };
 }

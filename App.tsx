@@ -1,6 +1,8 @@
+import { FriendsScreen } from './src/ui/FriendsScreen';
+import { PlayerAvatar } from './src/ui/PlayerAvatar';
 import { ExplorerModal } from './src/ui/Explorer';
 import type { ExplorerRoute } from './src/ui/explorerTypes';
-import React, { useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Appearance,
@@ -38,6 +40,7 @@ const NAV: { id: ScreenName; label: string; icon: React.ComponentProps<typeof Fe
     { id: 'store', label: 'Store', icon: 'shopping-bag' },
     { id: 'progress', label: 'Battle Pass', icon: 'award' },
     { id: 'collection', label: 'Collection', icon: 'grid' },
+    { id: 'friends', label: 'Friends', icon: 'users' },
     { id: 'matches', label: 'Profile', icon: 'user' },
     { id: 'account', label: 'Settings', icon: 'settings' },
   ];
@@ -89,18 +92,24 @@ function AppContent({ model }: { model: AppModel }) {
   const [explorer, setExplorer] = useState<{ accountId: string; routes: ExplorerRoute[] } | null>(
     null,
   );
-  const onNavigate = (route: ExplorerRoute) => {
-    const id = model.active?.puuid;
-    if (id)
-      setExplorer((old) => ({
-        accountId: id,
-        routes: [...(old?.accountId === id ? old.routes : []).slice(-11), route],
-      }));
-  };
-  const onBack = () =>
-    setExplorer((old) =>
-      old && old.routes.length > 1 ? { ...old, routes: old.routes.slice(0, -1) } : null,
-    );
+  const onNavigate = useCallback(
+    (route: ExplorerRoute) => {
+      const id = model.active?.puuid;
+      if (id)
+        setExplorer((old) => ({
+          accountId: id,
+          routes: [...(old?.accountId === id ? old.routes : []).slice(-11), route],
+        }));
+    },
+    [model.active?.puuid],
+  );
+  const onBack = useCallback(
+    () =>
+      setExplorer((old) =>
+        old && old.routes.length > 1 ? { ...old, routes: old.routes.slice(0, -1) } : null,
+      ),
+    [],
+  );
   const [login, setLogin] = useState<{ expectedId?: string } | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -112,15 +121,17 @@ function AppContent({ model }: { model: AppModel }) {
     setExplorer(null);
     setTab('store');
   }, [model.active?.puuid]);
-  const onLink = (expectedId?: string) => setLogin({ expectedId });
-  const screens = {
-    store: StoreScreen,
-    collection: CollectionScreen,
-    progress: ProgressScreen,
-    matches: MatchesScreen,
-    account: AccountScreen,
-  };
-  const Screen = screens[tab];
+  const onLink = useCallback((expectedId?: string) => setLogin({ expectedId }), []);
+  const onItem = useCallback(
+    (value: CatalogItem) => {
+      if (model.active) setItem({ accountId: model.active.puuid, value });
+    },
+    [model.active?.puuid],
+  );
+  const ownCard =
+    model.snapshot?.loadout.status === 'ready'
+      ? model.snapshot.loadout.data.card
+      : model.observedIdentity?.player.card;
   const expired =
     model.active && !model.active.demo && model.active.expiresAt <= now && !model.active.canReauth;
   return (
@@ -178,8 +189,8 @@ function AppContent({ model }: { model: AppModel }) {
                 {!narrow && <Text style={styles.wordmark}>OUTPOST</Text>}
               </View>
               <IconButton
-                icon="users"
-                label="Open friends and chat"
+                icon="message-square"
+                label="Open chats"
                 onPress={() => onNavigate({ type: 'friends' })}
               />
               <Pressable
@@ -188,12 +199,7 @@ function AppContent({ model }: { model: AppModel }) {
                 onPress={() => setTab('account')}
                 style={styles.profile}
               >
-                <View
-                  style={[
-                    styles.statusDot,
-                    { backgroundColor: model.active.demo ? C.gold : expired ? C.accent : C.mint },
-                  ]}
-                />
+                <PlayerAvatar card={ownCard} catalog={model.catalog} size={26} />
                 <Text
                   style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 92 }]}
                   numberOfLines={1}
@@ -217,10 +223,11 @@ function AppContent({ model }: { model: AppModel }) {
               </Pressable>
             )}
             <View style={S.flex}>
-              <Screen
+              <ScreenSlot
                 key={`${model.active.puuid}:${tab}`}
+                tab={tab}
                 model={model}
-                onItem={(value) => setItem({ accountId: model.active!.puuid, value })}
+                onItem={onItem}
                 onLink={onLink}
                 onNavigate={onNavigate}
               />
@@ -242,7 +249,7 @@ function AppContent({ model }: { model: AppModel }) {
                     <Text
                       style={[styles.navLabel, selected && { color: C.ink, fontWeight: '700' }]}
                     >
-                      {nav.label}
+                      {nav.id === 'progress' ? 'Pass' : nav.label}
                     </Text>
                   </Pressable>
                 );
@@ -278,6 +285,61 @@ function AppContent({ model }: { model: AppModel }) {
     </SafeAreaView>
   );
 }
+
+const ScreenSlot = memo(
+  function ScreenSlot({
+    tab,
+    model,
+    onItem,
+    onLink,
+    onNavigate,
+  }: {
+    tab: ScreenName;
+    model: AppModel;
+    onItem(item: CatalogItem): void;
+    onLink(expectedId?: string): void;
+    onNavigate: (route: ExplorerRoute) => void;
+  }) {
+    const screens = {
+      store: StoreScreen,
+      collection: CollectionScreen,
+      progress: ProgressScreen,
+      matches: MatchesScreen,
+      account: AccountScreen,
+      friends: FriendsScreen,
+    };
+    const Screen = screens[tab];
+    return <Screen model={model} onItem={onItem} onLink={onLink} onNavigate={onNavigate} />;
+  },
+  (a, b) => {
+    if (
+      a.tab !== b.tab ||
+      a.onItem !== b.onItem ||
+      a.onLink !== b.onLink ||
+      a.onNavigate !== b.onNavigate
+    )
+      return false;
+    const keys = [
+      'active',
+      'snapshot',
+      'catalog',
+      'observedIdentity',
+      'accounts',
+      'wishlist',
+      'history',
+      'settings',
+      'busy',
+    ] as const;
+    if (keys.some((k) => a.model[k] !== b.model[k])) return false;
+    return (
+      !['friends', 'account'].includes(a.tab) ||
+      (a.model.chat === b.model.chat &&
+        a.model.savedConversations === b.model.savedConversations &&
+        a.model.syncingSavedHistory === b.model.syncingSavedHistory)
+    );
+  },
+);
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -347,7 +409,7 @@ const makeStyles = (C: Palette) =>
       paddingVertical: 8,
     },
     navItem: { flex: 1, alignItems: 'center', gap: 4, minHeight: 48, justifyContent: 'center' },
-    navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500' },
+    navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500', flexShrink: 1 },
     navIndicator: {
       position: 'absolute',
       top: 0,

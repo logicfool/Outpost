@@ -1,3 +1,6 @@
+import { ChatPanel } from './ChatPanel';
+import { ChatSettings } from './ChatSettings';
+import { PlayerAvatar } from './PlayerAvatar';
 import { Image } from './CachedImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -34,7 +37,7 @@ import {
   SectionHeader,
   Tabs,
 } from './components';
-import { CareerModal, MatchCard, MatchReport } from './screens';
+import { CareerModal, HistoryRow, MatchCard, MatchReport } from './screens';
 import { playerLabel } from '../core/playerNames';
 import { PlayerCover } from './profileViews';
 import { useTheme, type Palette } from './theme';
@@ -179,77 +182,93 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       if (generation.current === stamp) setLoading(false);
     }
   };
-  const queues = ['all', ...new Set(matches.map((m) => m.queue))];
+  const queues = useMemo(() => ['all', ...new Set(matches.map((m) => m.queue))], [data?.matches]);
+  const shown = useMemo(
+    () => matches.filter((m) => queue === 'all' || m.queue === queue),
+    [data?.matches, queue],
+  );
+  const open = useCallback(
+    (id: string) => onNavigate({ type: 'match', id, subject: player.subject }),
+    [onNavigate, player.subject],
+  );
+  const render = useCallback(
+    ({ item }: { item: MatchSummary }) => (
+      <View style={{ marginBottom: 12 }}>
+        <HistoryRow match={item} detail={details[item.id]} onOpen={open} />
+      </View>
+    ),
+    [details, open],
+  );
   return (
     <ModalPage>
       <ModalHeader title="Player profile" closeLabel="Back from player profile" onClose={onBack} />
-      <ScrollView contentContainerStyle={S.content}>
-        <PlayerCover
-          player={data?.player ?? player}
-          ownId={model.active?.puuid}
-          catalog={model.catalog}
-        />
-        <Text style={S.small}>
-          {data?.identitySource === 'friend'
-            ? 'Identity from your friend’s reported presence.'
-            : 'Card and level last seen in a match.'}
-        </Text>
-        {error && (
-          <Empty title="Some profile data is unavailable" detail={error} icon="alert-circle" />
-        )}
-        <Button
-          title="Refresh profile"
-          icon="refresh-cw"
-          secondary
-          onPress={() => setVersion((v) => v + 1)}
-        />
-        <Resource title="Rank" section={data?.rank}>
-          {(rank) => (
-            <RankSummary rank={rank} onCareer={() => onNavigate({ type: 'career', rank })} />
-          )}
-        </Resource>
-        <SectionHeader title="Match history" />
-        <Resource title="Match history" section={data?.matches}>
-          {() => (
-            <>
+      <FlatList
+        data={shown}
+        keyExtractor={(m) => m.id}
+        renderItem={render}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        updateCellsBatchingPeriod={32}
+        contentContainerStyle={[S.content, { gap: 0 }]}
+        ListHeaderComponent={
+          <View style={{ gap: 16, paddingBottom: 16 }}>
+            <PlayerCover
+              player={data?.player ?? player}
+              ownId={model.active?.puuid}
+              catalog={model.catalog}
+            />
+            <Text style={S.small}>
+              {data?.identitySource === 'friend'
+                ? 'Identity from your friend’s reported presence.'
+                : 'Card and level last seen in a match.'}
+            </Text>
+            {error && (
+              <Empty title="Some profile data is unavailable" detail={error} icon="alert-circle" />
+            )}
+            <Button
+              title="Refresh profile"
+              icon="refresh-cw"
+              secondary
+              onPress={() => setVersion((v) => v + 1)}
+            />
+            <Resource title="Rank" section={data?.rank}>
+              {(rank) => (
+                <RankSummary rank={rank} onCareer={() => onNavigate({ type: 'career', rank })} />
+              )}
+            </Resource>
+            <SectionHeader title="Match history" />
+            {data?.matches.status === 'ready' ? (
               <Tabs
                 value={queue}
                 onChange={setQueue}
                 items={queues.map((id) => ({ id, label: id === 'all' ? 'All' : queueName(id) }))}
               />
-              {matches
-                .filter((m) => queue === 'all' || m.queue === queue)
-                .map((match) => (
-                  <MatchCard
-                    key={match.id}
-                    match={match}
-                    detail={details[match.id]}
-                    onPress={() =>
-                      onNavigate({ type: 'match', id: match.id, subject: player.subject })
-                    }
-                  />
-                ))}
-              {!matches.length && (
-                <Empty
-                  title="No matches returned"
-                  detail="History may be unavailable for this account or region."
-                />
-              )}
-              {!!matches.length && !finished && matches.length < 1000 && !model.active?.demo && (
-                <Button
-                  title={loading ? 'Loading…' : 'Load older matches'}
-                  secondary
-                  disabled={loading}
-                  onPress={() => void more()}
-                />
-              )}
-            </>
-          )}
-        </Resource>
-      </ScrollView>
+            ) : (
+              <Resource title="Match history" section={data?.matches}>
+                {() => null}
+              </Resource>
+            )}
+          </View>
+        }
+        ListEmptyComponent={
+          data?.matches.status === 'ready' ? <Empty title="No matches in this view" /> : null
+        }
+        ListFooterComponent={
+          !!matches.length && !finished && matches.length < 1000 && !model.active?.demo ? (
+            <Button
+              title={loading ? 'Loading…' : 'Load older matches'}
+              secondary
+              disabled={loading}
+              onPress={() => void more()}
+            />
+          ) : null
+        }
+      />
     </ModalPage>
   );
 }
+
 function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   const { C, S, isDark } = useTheme();
 
@@ -651,7 +670,7 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
   );
   return (
     <ModalPage>
-      <ModalHeader title="Friends & chat" closeLabel="Back from friends" onClose={onBack} />
+      <ModalHeader title="Chats" closeLabel="Back from friends" onClose={onBack} />
       <FlatList
         data={friends}
         keyExtractor={(row) => row.subject}
@@ -713,13 +732,6 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
         }
         renderItem={({ item: row }) => (
           <View style={[S.card, { marginBottom: 12 }]}>
-            {row.friend?.card?.wideArt && (
-              <Image
-                source={{ uri: row.friend.card.wideArt }}
-                style={{ width: '100%', height: 75, borderRadius: 12, opacity: 0.85 }}
-                resizeMode="cover"
-              />
-            )}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`View ${row.friend?.name ?? 'saved friend'} profile`}
@@ -727,6 +739,7 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
               onPress={() => row.friend && onNavigate({ type: 'player', player: row.friend })}
               style={S.between}
             >
+              <PlayerAvatar card={row.friend?.card} catalog={model.catalog} size={44} />
               <View style={{ flex: 1, gap: 4 }}>
                 <Text style={S.h3}>
                   {row.friend?.name ?? 'Saved conversation'}
@@ -782,239 +795,6 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
     </ModalPage>
   );
 }
-function ChatPanel({ subject, model, onBack, onNavigate }: PanelProps & { subject: string }) {
-  const { C, S } = useTheme();
-  const liveFriend = model.chat.friends.find((f) => f.subject === subject);
-  const friend = liveFriend ?? model.savedConversations.find((c) => c.subject === subject)?.friend;
-  const messages = model.chat.messages[subject] ?? [],
-    archive = model.chat.archive?.[subject];
-  const [body, setBody] = useState(''),
-    [error, setError] = useState<string | null>(null),
-    [sending, setSending] = useState(false),
-    [more, setMore] = useState(false),
-    [confirm, setConfirm] = useState(false);
-  const scroll = useRef<ScrollView>(null),
-    mounted = useRef(true),
-    follow = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    model.markChatRead(subject);
-    void model.loadChatMessages(subject);
-    return () => {
-      mounted.current = false;
-      model.markChatRead();
-    };
-  }, [subject, model.markChatRead, model.loadChatMessages]);
-  useEffect(() => {
-    model.markChatRead(subject);
-  }, [messages.length, subject, model.markChatRead]);
-  const send = async () => {
-    if (sending || !body.trim()) return;
-    setSending(true);
-    setError(null);
-    const sent = body;
-    follow.current = true;
-    try {
-      await model.sendChat(subject, sent);
-      if (mounted.current) setBody((previous) => (previous === sent ? '' : previous));
-    } catch (e) {
-      if (mounted.current) setError(safeError(e).message);
-    } finally {
-      if (mounted.current) setSending(false);
-    }
-  };
-  const sync = async () => {
-    setError(null);
-    try {
-      await model.syncChatHistory(subject);
-    } catch (e) {
-      if (mounted.current) setError(safeError(e).message);
-    }
-  };
-  const older = async () => {
-    setMore(true);
-    follow.current = false;
-    await model.loadChatMessages(subject, model.historyCursors[subject]);
-    if (mounted.current) setMore(false);
-  };
-  const erase = async () => {
-    setConfirm(false);
-    try {
-      await model.clearChatHistory(subject);
-    } catch (e) {
-      if (mounted.current) setError(safeError(e).message);
-    }
-  };
-  return (
-    <ModalPage>
-      <ModalHeader
-        title={
-          friend ? `${friend.name}${friend.tag ? ' #' + friend.tag : ''}` : 'Saved conversation'
-        }
-        detail={
-          model.chat.status === 'ready' && liveFriend
-            ? statusName[liveFriend.presence]
-            : 'Saved on this device'
-        }
-        closeLabel="Back from conversation"
-        onClose={onBack}
-      />
-      <KeyboardAvoidingView style={S.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ paddingHorizontal: 16, paddingVertical: 10, gap: 8 }}>
-          <Text style={S.small}>
-            Saved on this device until deleted. Sync retrieves the history Riot currently returns.
-            Sent is not a delivery or read receipt.
-          </Text>
-          <View style={[S.row, { flexWrap: 'wrap' }]}>
-            {liveFriend && (
-              <Button
-                title="View player profile"
-                secondary
-                onPress={() => onNavigate({ type: 'player', player: liveFriend })}
-              />
-            )}
-            <Button
-              title={archive?.status === 'loading' ? 'Syncing Riot history…' : 'Sync Riot history'}
-              secondary
-              disabled={
-                model.chat.status !== 'ready' || !liveFriend || archive?.status === 'loading'
-              }
-              onPress={() => void sync()}
-            />
-          </View>
-          {archive?.message && (
-            <Text
-              accessibilityRole={archive.status === 'error' ? 'alert' : undefined}
-              style={[S.small, archive.status === 'error' && { color: C.gold }]}
-            >
-              {archive.message}
-            </Text>
-          )}
-          {model.chat.status !== 'ready' && (
-            <Button
-              title="Reconnect chat"
-              secondary
-              disabled={
-                model.chat.status === 'connecting' || model.chat.status === 'authenticating'
-              }
-              onPress={() => void model.connectChat()}
-            />
-          )}
-        </View>
-        <ScrollView
-          ref={scroll}
-          contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
-          onContentSizeChange={() => {
-            if (follow.current) scroll.current?.scrollToEnd({ animated: true });
-          }}
-        >
-          {model.historyCursors[subject] && (
-            <Button
-              title={more ? 'Loading saved messages…' : 'Load older saved messages'}
-              secondary
-              disabled={more}
-              onPress={() => void older()}
-            />
-          )}
-          {!messages.length && (
-            <Empty
-              title="No messages saved yet"
-              detail="Send a message or connect and sync available Riot history."
-              icon="message-circle"
-            />
-          )}
-          {messages.map((message, index) => (
-            <React.Fragment key={`${message.direction}:${message.id}`}>
-              {(!index ||
-                new Date(messages[index - 1]!.at).toDateString() !==
-                  new Date(message.at).toDateString()) && (
-                <Text style={[S.small, { textAlign: 'center', marginVertical: 4 }]}>
-                  {new Date(message.at).toLocaleDateString()}
-                </Text>
-              )}
-              <View
-                style={{
-                  alignSelf: message.direction === 'outgoing' ? 'flex-end' : 'flex-start',
-                  maxWidth: '88%',
-                  backgroundColor: message.direction === 'outgoing' ? `${C.accent}18` : C.surface,
-                  borderRadius: 18,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                  padding: 14,
-                  gap: 6,
-                }}
-              >
-                <Text selectable style={[S.body, { color: C.ink }]}>
-                  {message.body}
-                </Text>
-                <Text style={S.small}>
-                  {time(message.at)}
-                  {message.serverStored
-                    ? ' · Riot history'
-                    : message.source === 'riot-client'
-                      ? ' · Riot client'
-                      : message.direction === 'outgoing'
-                        ? ` · ${message.state === 'sent' ? 'Sent' : message.state === 'failed' ? 'Unconfirmed - not retried' : 'Sending…'}`
-                        : ''}
-                </Text>
-              </View>
-            </React.Fragment>
-          ))}
-        </ScrollView>
-        {(error || model.chat.storageError) && (
-          <Text
-            accessibilityRole="alert"
-            style={[S.body, { paddingHorizontal: 16, color: C.gold }]}
-          >
-            {error ?? model.chat.storageError}
-          </Text>
-        )}
-        {confirm ? (
-          <View style={[S.card, { marginHorizontal: 16 }]}>
-            <Text style={S.body}>
-              Delete this conversation from this device? This does not delete Riot’s copy. Chat
-              disconnects before deletion.
-            </Text>
-            <Button title="Delete local messages" onPress={() => void erase()} />
-            <Button title="Keep messages" secondary onPress={() => setConfirm(false)} />
-          </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Delete saved conversation"
-            onPress={() => setConfirm(true)}
-            style={{ paddingHorizontal: 16, paddingVertical: 8 }}
-          >
-            <Text style={S.small}>Delete saved conversation</Text>
-          </Pressable>
-        )}
-        <View
-          style={[
-            S.row,
-            { padding: 14, alignItems: 'flex-end', borderTopWidth: 1, borderTopColor: C.border },
-          ]}
-        >
-          <TextInput
-            value={body}
-            onChangeText={setBody}
-            maxLength={2000}
-            multiline
-            accessibilityLabel="Message text"
-            placeholder="Write a message…"
-            placeholderTextColor={C.subtle}
-            style={[S.input, { flex: 1, maxHeight: 130 }]}
-          />
-          <Button
-            title={sending ? '…' : 'Send'}
-            disabled={sending || !body.trim() || !liveFriend || model.chat.status !== 'ready'}
-            onPress={() => void send()}
-            icon="send"
-          />
-        </View>
-      </KeyboardAvoidingView>
-    </ModalPage>
-  );
-}
 export function ExplorerModal({
   model,
   routes,
@@ -1050,6 +830,18 @@ export function ExplorerModal({
       {route?.type === 'live' && <LivePanel {...props} />}
       {route?.type === 'identity' && <IdentityPanel {...props} />}
       {route?.type === 'friends' && <FriendsPanel {...props} />}
+      {route?.type === 'chat-settings' && (
+        <ModalPage>
+          <ModalHeader
+            title="Chat settings"
+            closeLabel="Back from chat settings"
+            onClose={onBack}
+          />
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <ChatSettings model={model} subject={route.subject} />
+          </ScrollView>
+        </ModalPage>
+      )}
       {route?.type === 'chat' && (
         <ChatPanel key={`chat:${route.subject}`} {...props} subject={route.subject} />
       )}

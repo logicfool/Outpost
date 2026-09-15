@@ -124,6 +124,7 @@ export function buildCatalog(
             ? text(entry.titleText, text(entry.displayName))
             : text(entry.displayName),
         kind,
+        smallArt: kind === 'card' ? safeImage(entry.smallArt) : undefined,
         image:
           safeImage(entry.displayIcon) ??
           safeImage(entry.smallArt) ??

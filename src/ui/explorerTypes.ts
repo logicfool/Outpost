@@ -7,5 +7,6 @@ export type ExplorerRoute =
   | { type: 'live' }
   | { type: 'identity' }
   | { type: 'friends' }
+  | { type: 'chat-settings'; subject?: string }
   | { type: 'chat'; subject: string };
 export type Navigate = (route: ExplorerRoute) => void;

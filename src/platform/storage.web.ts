@@ -6,8 +6,10 @@ import { AppError } from '../core/validation';
 let settings: Settings = { ...DEFAULT_SETTINGS },
   catalog: Catalog | null = null;
 try {
-  if (typeof localStorage !== 'undefined')
+  if (typeof localStorage !== 'undefined') {
     settings.theme = themePreference(localStorage.getItem('outpost.theme'));
+    settings.autoChatHistory = localStorage.getItem('outpost.autoChatHistory') !== 'false';
+  }
 } catch {}
 const unavailable = async (): Promise<never> => {
   throw new AppError('NATIVE_REQUIRED', 'Real account access is available only in the native app.');
@@ -27,8 +29,10 @@ const repository: Repository = {
   saveSettings: async (s) => {
     settings = { ...s, theme: themePreference(s.theme) };
     try {
-      if (typeof localStorage !== 'undefined')
+      if (typeof localStorage !== 'undefined') {
         localStorage.setItem('outpost.theme', settings.theme!);
+        localStorage.setItem('outpost.autoChatHistory', String(settings.autoChatHistory !== false));
+      }
     } catch {}
   },
   catalog: async () => catalog,

@@ -1,9 +1,10 @@
+import { ChatSettings } from './ChatSettings';
 import { Image } from './CachedImage';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import type { Navigate } from './explorerTypes';
 import { playerLabel } from '../core/playerNames';
 import { PlayerCover, LiveCard } from './profileViews';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -58,7 +59,7 @@ import {
 } from './components';
 import { rarityColor, useTheme, useThemedStyles, type Palette } from './theme';
 
-export type ScreenName = 'store' | 'collection' | 'progress' | 'matches' | 'account';
+export type ScreenName = 'store' | 'collection' | 'progress' | 'matches' | 'account' | 'friends';
 type Props = {
   model: AppModel;
   onItem(item: CatalogItem): void;
@@ -1530,90 +1531,125 @@ export function MatchReport({
     </Modal>
   );
 }
+export const HistoryRow = memo(function HistoryRow({
+  match,
+  detail,
+  onOpen,
+}: {
+  match: MatchSummary;
+  detail?: MatchDetail;
+  onOpen(id: string): void;
+}) {
+  return <MatchCard match={match} detail={detail} onPress={() => onOpen(match.id)} />;
+});
+const matchKey = (match: MatchSummary) => match.id;
+const HistoryGap = () => <View style={{ height: 12 }} />;
 export function MatchesScreen({ model, onNavigate }: Props) {
+  const { C, S } = useTheme();
   const [filter, setFilter] = useState('all');
-  const [details, setDetails] = useState<Record<string, MatchDetail>>({}),
-    requested = useRef(new Set<string>());
+  const [details, setDetails] = useState<Record<string, MatchDetail>>({});
+  const fetched = useRef(new Set<string>());
   const matches =
     model.snapshot?.matches.status === 'ready' ? model.snapshot.matches.data : undefined;
-
   useEffect(() => {
     let alive = true;
-    (async () => {
-      for (const match of matches ?? []) {
-        if (!alive) return;
-        if (requested.current.has(match.id)) continue;
-        requested.current.add(match.id);
-        try {
-          const detail = await model.matchDetail(match.id);
-          if (alive) setDetails((previous) => ({ ...previous, [match.id]: detail }));
-        } catch {
-          requested.current.delete(match.id);
-          return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        for (const match of (matches ?? []).slice(0, 40)) {
+          if (!alive) return;
+          if (fetched.current.has(match.id)) continue;
+          try {
+            const detail = await model.matchDetail(match.id);
+            if (alive) {
+              fetched.current.add(match.id);
+              setDetails((old) => ({ ...old, [match.id]: detail }));
+            }
+          } catch {
+            return;
+          }
         }
-      }
-    })();
+      })();
+    }, 200);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [matches, model.matchDetail]);
-  const queues = useMemo(
-    () => ['all', ...Array.from(new Set((matches ?? []).map((m) => m.queue)))],
-    [matches],
+  const queues = useMemo(() => ['all', ...new Set((matches ?? []).map((m) => m.queue))], [matches]);
+  const shown = useMemo(
+    () => (matches ?? []).filter((m) => filter === 'all' || m.queue === filter),
+    [matches, filter],
+  );
+  const open = useCallback((id: string) => onNavigate({ type: 'match', id }), [onNavigate]);
+  const render = useCallback(
+    ({ item }: { item: MatchSummary }) => (
+      <HistoryRow match={item} detail={details[item.id]} onOpen={open} />
+    ),
+    [details, open],
   );
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
   return (
-    <>
-      <Page model={model}>
-        <Heading eyebrow="YOUR CAREER" title="Profile" />
-        <ProfileBanner model={model} onNavigate={onNavigate} />
-        <RankOverview model={model} onOpen={() => rank && onNavigate({ type: 'career', rank })} />
-        <Button
-          title="Friends & chat"
-          secondary
-          icon="users"
-          onPress={() => onNavigate({ type: 'friends' })}
+    <FlatList
+      data={shown}
+      renderItem={render}
+      keyExtractor={matchKey}
+      ItemSeparatorComponent={HistoryGap}
+      initialNumToRender={6}
+      maxToRenderPerBatch={6}
+      windowSize={5}
+      updateCellsBatchingPeriod={32}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[S.content, { gap: 0 }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={model.busy}
+          onRefresh={() => void model.refresh()}
+          tintColor={C.accent}
         />
-        <LiveCard model={model} onOpen={() => onNavigate({ type: 'live' })} />
-        <SectionHeader title="Match history" />
-        <Resource title="Match history" section={model.snapshot?.matches}>
-          {(list) => {
-            const shown = list.filter((m) => filter === 'all' || m.queue === filter);
-            return (
-              <>
-                {queues.length > 2 && (
-                  <Tabs
-                    value={queues.includes(filter) ? filter : 'all'}
-                    onChange={setFilter}
-                    items={queues.map((id) => ({
-                      id,
-                      label: id === 'all' ? 'All' : queueName(id),
-                    }))}
-                  />
-                )}
-                {shown.map((match) => (
-                  <MatchCard
-                    key={match.id}
-                    match={match}
-                    detail={details[match.id]}
-                    onPress={() => onNavigate({ type: 'match', id: match.id })}
-                  />
-                ))}
-                {!shown.length && <Empty title="No matches yet" icon="crosshair" />}
-                {!model.active?.demo && list.length > 0 && list.length < 1000 && (
-                  <Button
-                    title="Load older matches"
-                    secondary
-                    disabled={model.busy}
-                    onPress={() => void model.moreMatches()}
-                  />
-                )}
-              </>
-            );
-          }}
-        </Resource>
-      </Page>
-    </>
+      }
+      ListHeaderComponent={
+        <View style={{ gap: 16, paddingBottom: 16 }}>
+          <Heading eyebrow="YOUR CAREER" title="Profile" />
+          <ProfileBanner model={model} onNavigate={onNavigate} />
+          <RankOverview model={model} onOpen={() => rank && onNavigate({ type: 'career', rank })} />
+          <Button
+            title="Chats"
+            secondary
+            icon="message-square"
+            onPress={() => onNavigate({ type: 'friends' })}
+          />
+          <LiveCard model={model} onOpen={() => onNavigate({ type: 'live' })} />
+          <SectionHeader title="Match history" />
+          {queues.length > 2 && (
+            <Tabs
+              value={queues.includes(filter) ? filter : 'all'}
+              onChange={setFilter}
+              items={queues.map((id) => ({ id, label: id === 'all' ? 'All' : queueName(id) }))}
+            />
+          )}
+          {model.snapshot?.matches.status !== 'ready' && (
+            <Resource title="Match history" section={model.snapshot?.matches}>
+              {() => null}
+            </Resource>
+          )}
+        </View>
+      }
+      ListEmptyComponent={
+        matches ? <Empty title="No matches in this view" icon="crosshair" /> : null
+      }
+      ListFooterComponent={
+        !model.active?.demo && !!matches?.length && matches.length < 1000 ? (
+          <View style={{ paddingTop: 16 }}>
+            <Button
+              title="Load older matches"
+              secondary
+              disabled={model.busy}
+              onPress={() => void model.moreMatches()}
+            />
+          </View>
+        ) : null
+      }
+    />
   );
 }
 export function AccountScreen({ model, onLink }: Props) {
@@ -1740,6 +1776,10 @@ export function AccountScreen({ model, onLink }: Props) {
             Theme applies to all screens, dialogs and chat. System follows your device appearance.
           </Text>
         </View>
+        <SectionHeader title="Chat history" />
+        <View style={S.card}>
+          <ChatSettings model={model} />
+        </View>
         <SectionHeader title="Notifications" />
         <View style={S.card}>
           <Setting
@@ -1792,7 +1832,7 @@ export function AccountScreen({ model, onLink }: Props) {
             retains. Removing an account deletes its local data but does not sign it out on Riot's
             side. Demo mode uses made-up data.
           </Text>
-          <Text style={S.small}>Outpost 0.4.0</Text>
+          <Text style={S.small}>Outpost 0.5.0</Text>
         </View>
       </Page>
       <Modal

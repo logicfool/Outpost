@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.4.0');
+const out = path.join(root, 'docs', 'validation-0.5.0');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -144,7 +144,7 @@ try {
     await click('Back from identity editor');
   });
   await check('friends support presence filters, conversations and profile links', async () => {
-    await click('Open friends and chat');
+    await click('Open chats');
     await click('Connect Riot chat');
     await page.getByRole('tab', { name: 'Online · 2', exact: true }).waitFor();
     await shot('friends-online');
@@ -157,7 +157,7 @@ try {
     await click('Send');
     await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
     await shot('chat');
-    await click('View player profile');
+    await click('View chat participant profile');
     await click('Back from player profile');
     await click('Back from conversation');
     await click('Back from friends');
@@ -268,6 +268,7 @@ try {
     }
     await tab('Settings');
     await tab('Light');
+    await page.getByRole('switch', { name: 'Automatic chat history', exact: true }).uncheck();
     await page.reload({ waitUntil: 'networkidle' });
     await click('Try the demo');
     await tab('Settings');
@@ -285,7 +286,7 @@ try {
     await tab('Light');
   });
   await check('saved messages survive app restart without connecting to Riot', async () => {
-    await click('Open friends and chat');
+    await click('Open chats');
     await tab('Saved · 1');
     await page
       .getByRole('button', { name: /^Message/ })
@@ -295,9 +296,13 @@ try {
     await shot('saved-chat-offline-light');
     assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
     await click('Reconnect chat');
-    await page.getByRole('button', { name: 'View player profile', exact: true }).waitFor();
-    await click('Sync Riot history');
-    await page.getByText('Demo: no Riot server was contacted.', { exact: true }).waitFor();
+    await page
+      .getByRole('button', { name: 'View chat participant profile', exact: true })
+      .waitFor();
+    await click('Conversation settings');
+    await click('Sync this conversation now');
+    await page.getByText('History sync completed.', { exact: false }).waitFor();
+    await click('Back from chat settings');
     await click('Delete saved conversation');
     await click('Keep messages');
     await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
@@ -307,6 +312,41 @@ try {
     await click('Back from conversation');
     await click('Back from friends');
   });
+  await check(
+    'dedicated Friends tab uses compact square portraits and separates chat navigation',
+    async () => {
+      await tab('Friends');
+      await page.getByText('VALORANT - 2', { exact: true }).waitFor();
+      const row = page.getByRole('button', { name: 'View Lumen profile', exact: true });
+      await row.waitFor();
+      const portrait = row.getByRole('img', { name: 'Player card portrait' });
+      await portrait.waitFor();
+      const bounds = await portrait.boundingBox();
+      assert.ok(bounds && Math.abs(bounds.width - bounds.height) < 1 && bounds.width <= 56);
+      await page.getByText('In game · Lotus', { exact: true }).waitFor();
+      await shot('friends-tab');
+      await page
+        .getByRole('textbox', { name: 'Search friends directory', exact: true })
+        .fill('Lumen');
+      assert.equal(await page.getByRole('button', { name: /^Chat with / }).count(), 1);
+      await click('Chat with Lumen');
+      assert.equal(
+        await page.getByRole('button', { name: 'Sync Riot history', exact: true }).count(),
+        0,
+      );
+      assert.equal(
+        await page.getByRole('button', { name: 'View player profile', exact: true }).count(),
+        0,
+      );
+      await click('View chat participant profile');
+      await click('Back from player profile');
+      await click('Conversation settings');
+      await page.getByRole('switch', { name: 'Automatic chat history', exact: true }).check();
+      await click('Back from chat settings');
+      await shot('chat-clean-header');
+      await click('Back from conversation');
+    },
+  );
   assert.equal(errors.length, 0, JSON.stringify(errors));
 } catch (e) {
   process.exitCode = 1;

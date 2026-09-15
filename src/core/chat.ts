@@ -43,6 +43,7 @@ export class RiotChat {
   private lastSend = -Infinity;
   private openConversation?: string;
   private counter = 0;
+  private presenceTimer?: ReturnType<typeof setTimeout>;
   private owner?: string;
   private historyRequests = new Map<
     string,
@@ -341,9 +342,17 @@ export class RiotChat {
       }),
       updatedAt: this.now(),
     });
-    this.publishFriends();
+    this.publishFriends(true);
   }
-  private publishFriends() {
+  private publishFriends(defer = false) {
+    if (defer && this.hooks.presenceDelayMs) {
+      if (!this.presenceTimer)
+        this.presenceTimer = setTimeout(() => {
+          this.presenceTimer = undefined;
+          if (this.credentials) this.publishFriends();
+        }, this.hooks.presenceDelayMs);
+      return;
+    }
     const friends = [...this.roster.values()].sort(
       (a, b) =>
         presencePriority(b.presence) - presencePriority(a.presence) || a.name.localeCompare(b.name),
@@ -669,6 +678,8 @@ export class RiotChat {
     this.credentials = undefined;
     socket?.close();
     this.resources.clear();
+    clearTimeout(this.presenceTimer);
+    this.presenceTimer = undefined;
     if (clear) this.roster.clear();
     const friends = [...this.roster.values()].map((friend) => ({
       ...friend,

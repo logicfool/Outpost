@@ -45,6 +45,7 @@ export interface CatalogMedia {
   id: string;
   name: string;
   image?: string;
+  smallArt?: string;
   video?: string;
 }
 export interface CatalogItem {
@@ -53,6 +54,7 @@ export interface CatalogItem {
   name: string;
   kind: ItemKind;
   image?: string;
+  smallArt?: string;
   imageFallbacks?: string[];
   wallpaper?: string;
   wideArt?: string;
@@ -74,8 +76,8 @@ export interface Catalog {
   failedPaths?: string[];
   items: Record<string, CatalogItem>;
   bundles: Record<string, { name: string; image?: string }>;
-  maps: Record<string, { name: string; image?: string; listImage?: string }>;
-  tiers: Record<string, { name: string; image?: string; color?: string }>;
+  maps: Record<string, { name: string; image?: string; smallArt?: string; listImage?: string }>;
+  tiers: Record<string, { name: string; image?: string; smallArt?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
   seasons?: Record<string, { name: string; startsAt?: number; endsAt?: number }>;
   currentSeasonId?: string;
@@ -93,6 +95,7 @@ export interface Bundle {
   id: string;
   name: string;
   image?: string;
+  smallArt?: string;
   prices: Money[];
   expiresAt: number;
   offers: StoreOffer[];
@@ -116,6 +119,7 @@ export interface ActStat {
   tier: number | null;
   tierName: string;
   image?: string;
+  smallArt?: string;
   rr: number | null;
   wins: number;
   games: number;
@@ -131,12 +135,13 @@ export interface Ranked {
   tier: number | null;
   rr: number | null;
   image?: string;
+  smallArt?: string;
   wins: number | null;
   games: number | null;
   seasonId?: string;
   seasonName?: string;
   currentSeason: boolean;
-  peak?: { tier: number; name: string; image?: string; seasonName?: string };
+  peak?: { tier: number; name: string; image?: string; smallArt?: string; seasonName?: string };
   career?: QueueCareer[];
 }
 export interface LiveGame {
@@ -245,6 +250,7 @@ export interface Settings {
   reminders: boolean;
   backgroundSync: boolean;
   theme?: import('./theme').ThemePreference;
+  autoChatHistory?: boolean;
 }
 export const MAX_ACCOUNTS = 10;
 export const XP_PER_LEVEL = 5000;
@@ -252,6 +258,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reminders: false,
   backgroundSync: false,
   theme: 'navy',
+  autoChatHistory: true,
 };
 export const EMPTY_CATALOG: Catalog = {
   items: {},
