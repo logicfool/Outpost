@@ -256,6 +256,10 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             onContentProcessDidTerminate={() =>
               flow.browserError('The sign-in window was closed by the system. Please retry.')
             }
+            onRenderProcessGone={() =>
+              flow.browserError('Android closed the sign-in window. Please retry.')
+            }
+            allowsLinkPreview={false}
           />
         )}
         {working && (

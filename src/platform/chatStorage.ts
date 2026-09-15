@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { File } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { randomHex } from './secure';
+import { openRepository } from './storage';
 import { createChatStore, type ChatStore } from '../core/chatStore';
 import { AppError, uuid } from '../core/validation';
 import { DEMO_ID } from '../core/demo';
@@ -12,13 +13,18 @@ interface OpenStore {
 }
 const opened = new Map<string, Promise<OpenStore>>();
 const removing = new Set<string>();
+const removed = new Set<string>();
+
+export function activateChatStorage(id: string): void {
+  removed.delete(uuid(id));
+}
 const options = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
 const databaseName = (id: string) => `outpost-chat-${uuid(id)}.db`;
 const keyName = (id: string) => `outpost.chat.key.${uuid(id)}`;
 
 export async function openChatStorage(accountId: string): Promise<ChatStore> {
   const id = uuid(accountId);
-  if (id === DEMO_ID || removing.has(id))
+  if (id === DEMO_ID || removing.has(id) || removed.has(id))
     throw new AppError('CHAT_ACCOUNT', 'This account cannot open persistent chat storage.');
   let promise = opened.get(id);
   if (!promise) {
@@ -31,6 +37,13 @@ export async function openChatStorage(accountId: string): Promise<ChatStore> {
   return (await promise).store;
 }
 async function initialize(id: string): Promise<OpenStore> {
+  if (
+    removed.has(id) ||
+    removing.has(id) ||
+    !(await (await openRepository()).accounts()).some((a) => a.puuid === id) ||
+    removing.has(id)
+  )
+    throw new AppError('CHAT_ACCOUNT', 'Select a linked account to open its saved messages.');
   const db = await SQLite.openDatabaseAsync(databaseName(id), { useNewConnection: true });
   let createdKey = false;
   try {
@@ -65,6 +78,7 @@ async function initialize(id: string): Promise<OpenStore> {
 export async function removeChatStorage(accountId: string): Promise<void> {
   const id = uuid(accountId);
   removing.add(id);
+  removed.add(id);
   try {
     const value = await opened.get(id)?.catch(() => undefined);
     if (value) {

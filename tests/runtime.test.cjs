@@ -58,7 +58,8 @@ function harness() {
   };
   const customRequire = (name) => {
     if (name === 'react-native') return { Platform: { OS: 'ios' } };
-    if (name === './chatStorage') return { removeChatStorage: async () => {} };
+    if (name === './chatStorage')
+      return { activateChatStorage() {}, removeChatStorage: async () => {} };
     if (name === './network') return { nativeFetcher: fetch };
     if (name === './secure') return { vault, randomHex: () => 'f'.repeat(32) };
     if (name === './storage') return { openRepository: async () => repo };

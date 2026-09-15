@@ -134,7 +134,8 @@ function runtimeFixture() {
     load = (name) => {
       if (name === 'react-native') return { Platform: { OS: 'ios' } };
       if (name === './network') return { nativeFetcher: fetch };
-      if (name === './chatStorage') return { removeChatStorage: async () => {} };
+      if (name === './chatStorage')
+        return { activateChatStorage() {}, removeChatStorage: async () => {} };
       if (name === './secure') return { vault, randomHex: () => 'd'.repeat(64) };
       if (name === './storage') return { openRepository: async () => repo };
       if (name === './notifications') return { cancelAccountNotifications: async () => {} };

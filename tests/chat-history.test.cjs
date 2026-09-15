@@ -208,3 +208,52 @@ test('disconnect during durable outbox wait does not write on a changed connecti
     false,
   );
 });
+
+test('draining a disconnected outbox before deletion prevents late writes recreating messages', async (t) => {
+  let done;
+  const hold = new Promise((resolve) => {
+      done = resolve;
+    }),
+    saved = [];
+  const h = connected(t, {
+    saveMessage: async (m) => {
+      if (m.state === 'sending') await hold;
+      saved.push(m);
+    },
+  });
+  const pending = h.chat.send(OTHER, 'Pending before delete'),
+    rejected = assert.rejects(pending, code('CHAT_SEND'));
+  h.chat.disconnect(true);
+  let drained = false;
+  const flush = h.chat.flushPersistence().then(() => {
+    drained = true;
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(drained, false);
+  done();
+  await Promise.all([rejected, flush]);
+  const count = saved.length;
+  await new Promise((r) => setImmediate(r));
+  assert.equal(saved.length, count);
+  assert.equal(saved.at(-1).state, 'failed');
+  assert.equal(
+    h.writes.some((s) => s.startsWith('<message')),
+    false,
+  );
+});
+test('an unknown message namespace or invalid control character never enters durable history', async (t) => {
+  const saved = [],
+    h = connected(t, { saveMessage: async (m) => saved.push(m) });
+  h.feed(`<message from="${peer}" to="${own}"><body xmlns="malicious">untrusted</body></message>`);
+  await h.chat.flushPersistence();
+  assert.equal(saved.length, 0);
+});
+test('live message addressed to a different account is ignored', async (t) => {
+  const saved = [],
+    h = connected(t, { saveMessage: async (m) => saved.push(m) });
+  h.feed(
+    `<message from="${peer}" to="33333333-3333-4333-8333-333333333333@ap1.pvp.net"><body>other account</body></message>`,
+  );
+  await h.chat.flushPersistence();
+  assert.equal(saved.length, 0);
+});

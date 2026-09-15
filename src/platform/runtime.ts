@@ -1,5 +1,5 @@
 import { nativeFetcher } from './network';
-import { removeChatStorage } from './chatStorage';
+import { activateChatStorage, removeChatStorage } from './chatStorage';
 import { PlayerScope } from '../core/playerScope';
 import type { IdentityEdit } from '../core/playerTypes';
 import type { Loadout } from '../core/types';
@@ -104,6 +104,7 @@ export class Runtime {
         else await vault.remove(id);
         throw error;
       }
+      activateChatStorage(id);
       return session.account;
     } finally {
       this.linkingAccounts.delete(id);

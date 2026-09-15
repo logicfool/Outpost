@@ -1,3 +1,4 @@
+import { recordRequest } from '../core/diagnostics';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import type { Account, Catalog } from '../core/types';
@@ -86,6 +87,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const stop = useCallback((clear = false) => {
     clearTimeout(reconnectTimer.current);
+    clearTimeout(localTimer.current);
     epoch.current++;
     pending.current = false;
     session.current?.disconnect(clear);
@@ -111,6 +113,17 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     const previous = latest.current.id === a.puuid ? latest.current.state : EMPTY_CHAT;
     const publish = (state: ChatState) => {
       if (stamp !== epoch.current || active.current?.puuid !== a.puuid) return;
+      if (
+        latest.current.state.status !== state.status ||
+        latest.current.state.errorCode !== state.errorCode
+      )
+        recordRequest({
+          at: Date.now(),
+          service: 'Chat connection',
+          method: 'XMPP',
+          code: state.errorCode ?? state.status.toUpperCase(),
+          durationMs: 0,
+        });
       latest.current = { id: a.puuid, state };
       setValue(latest.current);
       if (state.status === 'ready') attempts.current = 0;
@@ -193,9 +206,10 @@ export function useSocial(account: Account | null, catalog: Catalog) {
           newId: randomHex,
           saveMessage: async (message) => {
             await store.save(message);
-            if (openSubject.current === message.subject && active.current?.puuid === a.puuid)
-              await store.markRead(message.subject);
-            scheduleLocal(a, store);
+            if (stamp === epoch.current && active.current?.puuid === a.puuid) {
+              if (openSubject.current === message.subject) await store.markRead(message.subject);
+              scheduleLocal(a, store);
+            }
           },
         },
       );
@@ -243,8 +257,21 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     return () => subscription.remove();
   }, [stop]);
   const disconnectChat = useCallback(() => {
+    const closing = session.current,
+      a = active.current;
     wanted.current = false;
     stop();
+    const stamp = epoch.current;
+    void closing?.flushPersistence().then(() => {
+      if (a && stamp === epoch.current && active.current?.puuid === a.puuid) void refreshLocal(a);
+    });
+  }, [stop, refreshLocal]);
+  const prepareChatRemoval = useCallback(async () => {
+    wanted.current = false;
+    const closing = session.current;
+    stop(true);
+    await closing?.flushPersistence();
+    clearTimeout(localTimer.current);
   }, [stop]);
   const loadChatMessages = useCallback(
     async (subject: string, before?: MessageCursor) => {
@@ -368,7 +395,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       const a = active.current;
       if (!a) return;
       wanted.current = false;
+      const closing = session.current;
       stop(true);
+      await closing?.flushPersistence();
       const store = await storeFor(a);
       await store.clear(subject);
       if (active.current?.puuid === a.puuid) {
@@ -404,6 +433,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     historyLoading: saved.loading,
     connectChat,
     disconnectChat,
+    prepareChatRemoval,
     sendChat,
     markChatRead,
     loadChatMessages,

@@ -137,3 +137,27 @@ test('closed account storage rejects new writes', async (t) => {
   await s.close();
   await assert.rejects(s.save(message(1)), code('CHAT_STORAGE_CLOSED'));
 });
+
+test('observed delivery rejection cannot be overwritten by a late local-write success', async (t) => {
+  const s = await fixture(t),
+    m = message(1, { direction: 'outgoing', source: 'outpost', state: 'sending' });
+  await s.save(m);
+  await s.save({ ...m, state: 'failed' });
+  await s.save({ ...m, state: 'sent' });
+  assert.equal((await s.messages(OTHER)).messages[0].state, 'failed');
+  await s.save({ ...m, state: 'sent', source: 'riot-archive', serverStored: true });
+  assert.equal((await s.messages(OTHER)).messages[0].state, 'sent');
+});
+test('FULL synchronous commits are enabled for durable message writes', async () => {
+  const db = adapter(),
+    s = await createChatStore(db);
+  assert.equal(db.raw.prepare('PRAGMA synchronous').get().synchronous, 2);
+  await s.close();
+  db.raw.close();
+});
+test('UUID case is normalized before message indexing', async (t) => {
+  const s = await fixture(t),
+    peer = 'abcdefab-cdef-4123-8123-abcdefabcdef';
+  await s.save(message(1, { subject: peer.toUpperCase() }));
+  assert.equal((await s.messages(peer)).messages[0].subject, peer);
+});

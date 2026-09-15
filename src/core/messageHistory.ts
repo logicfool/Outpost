@@ -8,7 +8,7 @@ export const FORWARD_NS = 'urn:xmpp:forward:0';
 export const messageKey = (m: Pick<ChatMessage, 'id' | 'direction'>) => `${m.direction}:${m.id}`;
 
 export function validateMessage(m: ChatMessage): ChatMessage {
-  uuid(m.subject);
+  const subject = uuid(m.subject);
   if (
     !m.id ||
     m.id.length > 8192 ||
@@ -20,7 +20,7 @@ export function validateMessage(m: ChatMessage): ChatMessage {
     throw new AppError('CHAT_DATA', 'The message format is invalid.');
   }
   messageText(m.body);
-  return m;
+  return { ...m, subject };
 }
 
 export function mergeMessage(old: ChatMessage | undefined, next: ChatMessage): ChatMessage {
@@ -32,7 +32,8 @@ export function mergeMessage(old: ChatMessage | undefined, next: ChatMessage): C
       ? next.direction === 'incoming'
         ? 'received'
         : 'sent'
-      : next.state === 'sending' && old.state !== 'sending'
+      : (next.state === 'sending' && old.state !== 'sending') ||
+          (old.state === 'failed' && next.state === 'sent' && next.source === 'outpost')
         ? old.state
         : next.state;
   return { ...old, state, serverStored: old.serverStored || next.serverStored || undefined };

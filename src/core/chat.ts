@@ -54,6 +54,8 @@ export class RiotChat {
     }
   >();
   private historyTimes = new Map<string, number>();
+  private persistence = new Set<Promise<unknown>>();
+  private sends = new Set<Promise<unknown>>();
   private roster = new Map<string, Friend>();
   private resources = new Map<string, Map<string, Partial<Friend>>>();
   private state: ChatState = { status: 'disconnected', unread: {}, friends: [], messages: {} };
@@ -373,8 +375,18 @@ export class RiotChat {
     }
     if (node.attrs.type && node.attrs.type !== 'chat' && node.attrs.type !== 'normal') return;
     const body = child(node, 'body')?.text;
-    if (!body || [...body].length > 1000) return;
-    const id = node.attrs.id?.slice(0, 200) || `incoming-${this.now()}-${++this.counter}`;
+    if (!body || !['', NS.client].includes(child(node, 'body')!.ns)) return;
+    try {
+      messageBody(body);
+    } catch {
+      return;
+    }
+    if (
+      node.attrs.to &&
+      parseJid(node.attrs.to)?.bare !== `${this.credentials?.subject}@${this.credentials?.domain}`
+    )
+      return;
+    const id = node.attrs.id?.slice(0, 512) || `incoming-${this.now()}-${++this.counter}`;
     if (
       (this.state.messages[jid.subject] ?? []).some(
         (m) => m.id === id && m.direction === 'incoming',
@@ -393,15 +405,29 @@ export class RiotChat {
       source: 'live',
     }).catch(() => {});
   }
-  private async persistMessage(message: ChatMessage) {
-    try {
-      await this.hooks.saveMessage?.(message);
-    } catch {
-      this.update({
-        storageError: 'A message could not be saved to local history. Check available storage.',
+  private persistMessage(message: ChatMessage): Promise<void> {
+    const work = Promise.resolve()
+      .then(() => this.hooks.saveMessage?.(message))
+      .then(() => {
+        if (this.state.storageError) this.update({ storageError: undefined });
+      })
+      .catch(() => {
+        this.update({
+          storageError: 'A message could not be saved to local history. Check available storage.',
+        });
+        throw new AppError('CHAT_STORAGE', 'The message could not be saved locally.');
       });
-      throw new AppError('CHAT_STORAGE', 'The message could not be saved locally.');
-    }
+    this.persistence.add(work);
+    void work.then(
+      () => this.persistence.delete(work),
+      () => this.persistence.delete(work),
+    );
+    return work;
+  }
+
+  async flushPersistence(): Promise<void> {
+    while (this.persistence.size || this.sends.size)
+      await Promise.allSettled([...this.persistence, ...this.sends]);
   }
   private async addMessage(message: ChatMessage, notify = true) {
     const old = this.state.messages[message.subject] ?? [],
@@ -535,7 +561,16 @@ export class RiotChat {
       request.reject(safeError(reason));
     }
   }
-  async send(subject: string, value: string): Promise<void> {
+  send(subject: string, value: string): Promise<void> {
+    const work = this.sendMessage(subject, value);
+    this.sends.add(work);
+    void work.then(
+      () => this.sends.delete(work),
+      () => this.sends.delete(work),
+    );
+    return work;
+  }
+  private async sendMessage(subject: string, value: string): Promise<void> {
     if (this.credentials && this.credentials.expiresAt <= this.now()) {
       this.fail('Chat session renewal is needed.', 'SESSION_EXPIRED');
       throw new AppError('SESSION_EXPIRED', 'Reconnect to renew chat.');

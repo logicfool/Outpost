@@ -233,7 +233,7 @@ export function useApp() {
   const remove = useCallback(
     async (id: string) => {
       try {
-        if (activeRef.current?.puuid === id) social.disconnectChat();
+        if (activeRef.current?.puuid === id) await social.prepareChatRemoval();
         const runtime = await getRuntime();
         await runtime.remove(id);
         const list = await runtime.repository.accounts();

@@ -23,7 +23,7 @@ export interface ChatStore {
 }
 
 export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
-  await db.execAsync(`PRAGMA journal_mode=WAL; PRAGMA secure_delete=ON;
+  await db.execAsync(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;
     CREATE TABLE IF NOT EXISTS conversations (peer TEXT PRIMARY KEY, identity TEXT, read_at INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS messages (peer TEXT NOT NULL, id TEXT NOT NULL, direction TEXT NOT NULL, at INTEGER NOT NULL, data TEXT NOT NULL, origin TEXT NOT NULL, PRIMARY KEY(peer,direction,id));
     CREATE INDEX IF NOT EXISTS chat_timeline ON messages(peer,at DESC,id DESC,direction DESC);
@@ -63,7 +63,7 @@ export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
   };
   return {
     save(message) {
-      validateMessage(message);
+      message = { ...validateMessage(message) };
       return write(async () => {
         const old = await db.getFirstAsync<{ data: string }>(
           'SELECT data FROM messages WHERE peer=? AND id=? AND direction=?',
