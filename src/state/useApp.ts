@@ -73,6 +73,7 @@ export function useApp() {
       ),
     setCatalog,
     setSnapshot,
+    () => ({ accountId: activeRef.current?.puuid, revision: epoch.current }),
   );
   useEffect(() => {
     if (snapshot?.loadout.status === 'ready' && snapshot.loadout.data.card) {
@@ -253,8 +254,11 @@ export function useApp() {
     async (tokens: LoginTokens, region?: Region, expectedId?: string) => {
       const runtime = await getRuntime(),
         account = await runtime.link(tokens, region, expectedId);
-      setAccounts(await runtime.repository.accounts());
-      switchAccount(account);
+      setAccounts((list) =>
+        list.some((a) => a.puuid === account.puuid)
+          ? list.map((a) => (a.puuid === account.puuid ? account : a))
+          : [...list, account],
+      );
       return account;
     },
     [switchAccount],

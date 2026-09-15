@@ -6,6 +6,8 @@ import {
   type LoadoutEditor,
 } from './presets';
 import { orderResult } from './purchases';
+import { submitConfirmedOffer } from './purchaseRequest';
+import { ownedItemIds } from './ownership';
 import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
 import { DAY_MS, FULL_SNAPSHOT, keepCached, type SnapshotPlan } from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
@@ -36,7 +38,7 @@ import {
   validateSession,
 } from './auth';
 import { CatalogClient } from './catalog';
-import { HttpClient, SingleFlightCache } from './http';
+import { HttpClient, SingleFlightCache, type RequestPolicy } from './http';
 import {
   AppError,
   array,
@@ -174,6 +176,7 @@ export class RiotClient {
     body?: unknown,
     expectedSubject = this.session.account.puuid,
     host: 'pd' | 'shared' | 'glz' = 'pd',
+    policy: RequestPolicy = {},
   ) {
     if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
     if (!sessionActive(this.session))
@@ -189,18 +192,22 @@ export class RiotClient {
       if (!this.isActive())
         throw new AppError('SESSION_EXPIRED', 'The account session changed. Refresh to retry.');
       const result = await this.http
-        .json(`${origin}${path}`, {
-          method,
-          ...(encoded !== undefined ? { body: encoded } : {}),
-          headers: {
-            Authorization: `Bearer ${this.session.accessToken}`,
-            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
-            'X-Riot-ClientVersion': clientVersion,
-            'X-Riot-ClientPlatform': PLATFORM,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
+        .json(
+          `${origin}${path}`,
+          {
+            method,
+            ...(encoded !== undefined ? { body: encoded } : {}),
+            headers: {
+              Authorization: `Bearer ${this.session.accessToken}`,
+              'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+              'X-Riot-ClientVersion': clientVersion,
+              'X-Riot-ClientPlatform': PLATFORM,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
           },
-        })
+          policy,
+        )
         .catch((error) => {
           if (safeError(error).status === 401) {
             this.sessionRejected = true;
@@ -499,12 +506,7 @@ export class RiotClient {
       raw = object(
         (await this.read(`/store/v1/entitlements/${id}/${type}`, fresh ? 0 : 60000)).data,
       );
-    const groups = Array.isArray(raw.EntitlementsByTypes)
-      ? raw.EntitlementsByTypes.map(object).filter((g) => g.ItemTypeID === type)
-      : [{ Entitlements: raw.Entitlements }];
-    if (!groups.length || groups.some((g) => !Array.isArray(g.Entitlements)))
-      throw new AppError('SCHEMA', 'Ownership could not be verified. No changes were sent.');
-    return new Set(groups.flatMap((g) => array(g.Entitlements)).map((v) => uuid(object(v).ItemID)));
+    return ownedItemIds(raw, type);
   }
   async wallet(fresh = false) {
     return normalizeWallet(
@@ -566,12 +568,27 @@ export class RiotClient {
     }
   }
 
-  async createOrder(xid: string, offerId: string) {
-    return orderResult(
-      (await this.read('/store/v1/order/', 0, 'POST', { XID: uuid(xid), OfferID: uuid(offerId) }))
-        .data,
+  async purchaseOffer(offerId: string, price: number, beforeDispatch: () => Promise<void>) {
+    const result = await submitConfirmedOffer(
+      (path, body, policy) =>
+        this.read(path, 0, 'POST', body, this.session.account.puuid, 'pd', policy),
+      offerId,
+      price,
+      async () => {
+        if (!this.isActive())
+          throw new AppError('SESSION_EXPIRED', 'The selected session expired before submission.');
+        await beforeDispatch();
+        if (!this.isActive())
+          throw new AppError(
+            'SESSION_EXPIRED',
+            'The selected session changed before network dispatch.',
+          );
+      },
     );
+    this.cache.clear();
+    return result;
   }
+
   async getOrder(orderId: string) {
     return orderResult((await this.read(`/store/v1/order/${uuid(orderId)}`, 0)).data, orderId);
   }

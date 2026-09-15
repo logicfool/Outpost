@@ -1,11 +1,18 @@
 import { mimeLabel, recordRequest, serviceLabel } from './diagnostics';
 import { AppError } from './validation';
+import { purchaseRejection, purchaseHttpError } from './purchaseErrors';
 import { parseJsonBody, readBoundedText } from './responseBody';
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 export interface JsonResponse {
   data: unknown;
   serverTime: number;
   receivedAt: number;
+  status?: number;
+}
+export interface RequestPolicy {
+  beforeDispatch?(): Promise<void>;
+  allowEmptyJson?: boolean;
+  purchase?: boolean;
 }
 export class HttpClient {
   private active = 0;
@@ -28,8 +35,12 @@ export class HttpClient {
     if (next) next();
     else this.active--;
   }
-  async json(url: string, init: RequestInit = {}): Promise<JsonResponse> {
-    return this.request(url, init, 'json');
+  async json(
+    url: string,
+    init: RequestInit = {},
+    policy: RequestPolicy = {},
+  ): Promise<JsonResponse> {
+    return this.request(url, init, 'json', policy);
   }
   async text(url: string, init: RequestInit = {}): Promise<JsonResponse> {
     return this.request(url, init, 'text');
@@ -38,6 +49,7 @@ export class HttpClient {
     url: string,
     init: RequestInit,
     format: 'json' | 'text',
+    policy: RequestPolicy = {},
   ): Promise<JsonResponse> {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port)
@@ -49,7 +61,7 @@ export class HttpClient {
       code = 'OK';
     await this.enter();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const until = this.cooldowns.get(parsed.origin) ?? 0;
       if (until > this.now())
@@ -59,6 +71,9 @@ export class HttpClient {
           until,
           429,
         );
+      await policy.beforeDispatch?.();
+
+      timeout = setTimeout(() => controller.abort(), 15000);
       let response: Response;
       try {
         response = await this.fetcher(url, {
@@ -117,6 +132,14 @@ export class HttpClient {
             429,
           );
         }
+        if (policy.purchase) {
+          let data: unknown;
+          try {
+            const body = await readBoundedText(response, 65536);
+            data = parseJsonBody(body, response.headers.get('content-type') ?? '');
+          } catch {}
+          throw purchaseRejection(data, response.status) ?? purchaseHttpError(response.status);
+        }
         if (response.status === 400) {
           let semanticCode = '';
           try {
@@ -144,11 +167,21 @@ export class HttpClient {
           'The response could not be read. Refresh to retry.',
         );
       }
-      const data = format === 'json' ? parseJsonBody(body, contentType) : body;
+      const data =
+        format === 'json'
+          ? policy.allowEmptyJson && !body.trim()
+            ? null
+            : parseJsonBody(body, contentType)
+          : body;
       shape = Array.isArray(data) ? 'array' : data === null ? 'null' : typeof data;
       const receivedAt = this.now();
       const date = Date.parse(response.headers.get('date') ?? '');
-      return { data, receivedAt, serverTime: Number.isFinite(date) ? date : receivedAt };
+      return {
+        data,
+        receivedAt,
+        serverTime: Number.isFinite(date) ? date : receivedAt,
+        status: response.status,
+      };
     } catch (error) {
       code = error instanceof AppError ? error.code : 'UNKNOWN';
       throw error;

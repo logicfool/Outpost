@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.6.1');
+const out = path.join(root, 'docs', 'validation-0.6.2');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -428,6 +428,18 @@ try {
       assert.equal(await nav.evaluate((n) => getComputedStyle(n).position), 'absolute');
       assert.equal(await nav.evaluate((n) => getComputedStyle(n).borderTopWidth), '0px');
       await shot('floating-store');
+    },
+  );
+  await check(
+    'account sheet survives repeated native-style open and close transitions',
+    async () => {
+      for (let i = 0; i < 6; i++) {
+        await click('Switch account');
+        await page.getByText('Switch account', { exact: true }).waitFor();
+        await click('Close account switcher');
+        await page.getByRole('button', { name: 'Switch account', exact: true }).waitFor();
+      }
+      await shot('account-sheet-return');
     },
   );
   assert.equal(errors.length, 0, JSON.stringify(errors));

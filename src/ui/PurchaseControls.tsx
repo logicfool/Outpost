@@ -1,72 +1,164 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, Switch } from 'react-native';
 import type { AppModel } from '../state/useApp';
 import type { CatalogItem } from '../core/types';
 import type { PurchaseQuote, PurchaseRecord } from '../core/purchases';
-import { safeError } from '../core/validation';
+import { safeError, type AppError } from '../core/validation';
 import { Button } from './components';
 import { useTheme } from './theme';
+
+const pending = (record: PurchaseRecord) =>
+  ['submitting', 'accepted', 'unknown'].includes(record.state);
+function Receipt({ record }: { record: PurchaseRecord }) {
+  const { C, S } = useTheme();
+  const label =
+    record.state === 'complete'
+      ? record.ownershipVerified
+        ? 'Skin ownership confirmed'
+        : 'Riot confirmed the order'
+      : record.state === 'failed'
+        ? 'Purchase rejected'
+        : record.state === 'not-submitted'
+          ? 'Purchase not sent'
+          : 'Checking purchase outcome';
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={S.h3}>{label}</Text>
+      <Text style={S.body}>
+        {record.message ?? 'The request has not yet been verified. Do not repeat it.'}
+      </Text>
+      {record.errorCode && (
+        <Text selectable style={[S.small, { color: C.gold }]}>
+          Code: {record.errorCode}
+          {record.httpStatus ? ` · HTTP ${record.httpStatus}` : ''}
+        </Text>
+      )}
+      {record.balanceAfter !== undefined && (
+        <Text style={S.small}>
+          Last verified balance: {record.balanceAfter.toLocaleString()} VP
+        </Text>
+      )}
+    </View>
+  );
+}
 export function PurchaseControls({ model, item }: { model: AppModel; item: CatalogItem }) {
   const { C, S } = useTheme();
   const [quote, setQuote] = useState<PurchaseQuote>(),
-    [record, setRecord] = useState<PurchaseRecord>(),
-    [accepted, setAccepted] = useState(false),
+    [record, setRecord] = useState<PurchaseRecord>();
+  const [accepted, setAccepted] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+    [error, setError] = useState<AppError>();
+  const [now, setNow] = useState(Date.now());
+  const scope = `${model.active?.puuid}:${item.id}`,
+    current = useRef(scope),
+    mounted = useRef(true),
+    running = useRef(false);
+  current.current = scope;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     setQuote(undefined);
     setRecord(undefined);
     setAccepted(false);
-    setError('');
-  }, [item.id, model.active?.puuid]);
+    setError(undefined);
+    running.current = false;
+    setBusy(false);
+  }, [scope]);
+  useEffect(() => {
+    if (!quote && !record) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [quote?.id, record?.id]);
+  const same = () => mounted.current && current.current === scope;
+  const run = async (operation: () => Promise<void>) => {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await operation();
+    } catch (reason) {
+      if (same()) setError(safeError(reason));
+    } finally {
+      if (same()) {
+        running.current = false;
+        setBusy(false);
+      }
+    }
+  };
   const daily =
     model.snapshot?.store.status === 'ready' &&
     model.snapshot.store.data.daily.some((o) => o.item.canonicalId === item.canonicalId);
   if (!daily || item.kind !== 'skin') return null;
-  const review = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      setQuote(await model.purchaseQuote(item.id));
-      setAccepted(false);
-    } catch (e) {
-      setError(safeError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const confirm = async () => {
-    if (!quote || !accepted || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      setRecord(await model.confirmPurchase(quote.id));
-      setQuote(undefined);
-    } catch (e) {
-      setError(safeError(e).message);
-      setQuote(undefined);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const review = () =>
+    run(async () => {
+      const next = await model.purchaseQuote(item.id);
+      if (same()) {
+        setQuote(next);
+        setRecord(undefined);
+        setAccepted(false);
+        setNow(Date.now());
+      }
+    });
+  const confirm = () =>
+    run(async () => {
+      if (!quote || !accepted || Date.now() >= quote.expiresAt) return;
+      try {
+        const next = await model.confirmPurchase(quote.id);
+        if (same()) {
+          setRecord(next);
+          setNow(Date.now());
+        }
+      } finally {
+        if (same()) {
+          setQuote(undefined);
+          setAccepted(false);
+        }
+      }
+    });
+  const check = () =>
+    run(async () => {
+      if (!record) return;
+      const next = await model.checkPurchase(record.id);
+      if (same()) {
+        setRecord(next);
+        setNow(Date.now());
+      }
+    });
+  const seconds = quote ? Math.max(0, Math.ceil((quote.expiresAt - now) / 1000)) : 0;
+  const nextCheck = Math.max(record?.retryAt ?? 0, (record?.lastCheckedAt ?? 0) + 60000);
   return (
     <View style={S.card}>
-      <Text style={S.h3}>Purchase with existing VP</Text>
+      <Text style={S.h3}>Buy with existing VP</Text>
       <Text style={S.small}>
-        Experimental unofficial purchase flow. No VP top-ups or automatic purchases. Only daily
-        weapon offers are supported.
+        Daily weapon offers only. This uses an unofficial Riot service; availability is not
+        guaranteed. No VP top-ups or automatic purchases.
       </Text>
       {error && (
-        <Text accessibilityRole="alert" style={[S.body, { color: C.gold }]}>
-          {error}
-        </Text>
+        <View accessibilityRole="alert" style={{ gap: 4 }}>
+          <Text style={[S.body, { color: C.gold }]}>{error.message}</Text>
+          <Text selectable style={S.small}>
+            Code: {error.code}
+            {error.status ? ` · HTTP ${error.status}` : ''}
+          </Text>
+        </View>
       )}
       {!model.settings.allowPurchases ? (
-        <Text style={S.small}>Enable Phone purchases in Settings to use this feature.</Text>
-      ) : !quote && !record ? (
+        <Text style={S.small}>Enable Phone purchases in Settings before reviewing a purchase.</Text>
+      ) : !quote && (!record || (!pending(record) && record.state !== 'complete')) ? (
         <Button
           secondary
-          title={busy ? 'Checking current offer…' : 'Review VP purchase'}
+          title={
+            busy
+              ? 'Checking current offer…'
+              : record
+                ? 'Review a new purchase'
+                : 'Review VP purchase'
+          }
           disabled={busy}
           onPress={() => void review()}
         />
@@ -74,47 +166,61 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
       {quote && (
         <>
           <Text style={S.h2}>{quote.price.toLocaleString()} VP</Text>
-          <Text style={S.body}>
-            {quote.offer.item.name} · {model.active?.gameName} #{model.active?.tagLine}
-          </Text>
+          <Text style={S.body}>{quote.offer.item.name}</Text>
           <Text style={S.small}>
-            Confirmation expires after 45 seconds. Price, available VP and ownership are rechecked
-            before submission. Uncertain transactions are never retried.
+            {model.active?.gameName} #{model.active?.tagLine} · Balance{' '}
+            {quote.balanceBefore?.toLocaleString() ?? 'verified'} VP
+          </Text>
+          <Text style={[S.small, !seconds && { color: C.gold }]}>
+            {seconds
+              ? `Confirm within ${seconds}s. Current price, balance and ownership are checked again.`
+              : 'This quote expired. Review the offer again; nothing is spent by an expired confirmation.'}
           </Text>
           <View style={S.row}>
             <Switch
               accessibilityLabel="I confirm this VP purchase"
               value={accepted}
               onValueChange={setAccepted}
-              disabled={busy}
+              disabled={busy || !seconds}
             />
-            <Text style={[S.body, { flex: 1 }]}>Spend VP from this account on this skin.</Text>
+            <Text style={[S.body, { flex: 1 }]}>
+              Spend {quote.price.toLocaleString()} VP from this account.
+            </Text>
           </View>
           <Button
-            title={busy ? 'Submitting once…' : `Confirm spend ${quote.price} VP`}
-            disabled={busy || !accepted}
+            title={busy ? 'Submitting once and verifying…' : `Confirm spend ${quote.price} VP`}
+            disabled={busy || !accepted || !seconds}
             onPress={() => void confirm()}
           />
           <Button
             secondary
-            title="Cancel purchase"
+            title={seconds ? 'Cancel purchase' : 'Discard expired quote'}
             disabled={busy}
-            onPress={() => setQuote(undefined)}
+            onPress={() => {
+              setQuote(undefined);
+              setAccepted(false);
+            }}
           />
         </>
       )}
       {record && (
         <>
-          <Text style={S.h3}>
-            {record.state === 'complete'
-              ? 'Riot confirmed the order'
-              : record.state === 'failed'
-                ? 'Riot rejected the order'
-                : 'Purchase needs verification'}
-          </Text>
-          <Text style={S.small}>
-            {record.message ?? 'Review the order status in Settings → Purchase history.'}
-          </Text>
+          <Receipt record={record} />
+          {pending(record) && (
+            <>
+              <Text style={S.small}>
+                {nextCheck > now
+                  ? `Next read-only check in ${Math.ceil((nextCheck - now) / 1000)}s.`
+                  : 'Checking ownership does not submit another purchase.'}
+              </Text>
+              <Button
+                secondary
+                title={busy ? 'Checking ownership…' : 'Check purchase outcome'}
+                disabled={busy || nextCheck > now}
+                onPress={() => void check()}
+              />
+            </>
+          )}
         </>
       )}
     </View>
@@ -125,53 +231,74 @@ export function PurchaseHistory({ model }: { model: AppModel }) {
   const [records, setRecords] = useState<PurchaseRecord[]>([]),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const identity = model.active?.puuid,
+    current = useRef(identity);
+  current.current = identity;
+  const load = useCallback(async () => {
+    const next = await model.purchaseRecords();
+    if (current.current === identity) setRecords(next);
+  }, [identity, model.purchaseRecords]);
   useEffect(() => {
     let alive = true;
+    setRecords([]);
+    setError('');
     void model
       .purchaseRecords()
       .then((r) => {
         if (alive) setRecords(r);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive)
+          setError('Purchase history could not be read. Existing receipts have not been deleted.');
+      });
     return () => {
       alive = false;
     };
-  }, [model.active?.puuid]);
+  }, [identity, model.purchaseRecords]);
   const check = async (id: string) => {
+    if (busy) return;
     setBusy(true);
     try {
       await model.checkPurchase(id);
-      setRecords(await model.purchaseRecords());
-      setError('');
-    } catch (e) {
-      setError(safeError(e).message);
+      await load();
+      if (current.current === identity) setError('');
+    } catch (reason) {
+      if (current.current === identity) {
+        const e = safeError(reason);
+        setError(`${e.message} (${e.code})`);
+      }
     } finally {
-      setBusy(false);
+      if (current.current === identity) setBusy(false);
     }
   };
   return (
     <View style={{ gap: 12 }}>
-      {error && <Text style={[S.small, { color: C.gold }]}>{error}</Text>}
+      {error && (
+        <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
+          {error}
+        </Text>
+      )}
       {!records.length ? (
         <Text style={S.small}>
-          No phone purchases recorded. Purchases are never made in the background.
+          No phone purchases recorded. No purchases run in the background.
         </Text>
       ) : (
-        records.map((r) => (
-          <View key={r.id} style={S.card}>
+        records.map((record) => (
+          <View key={record.id} style={S.card}>
             <Text style={S.h3}>
-              {r.name} · {r.price} VP
+              {record.name} · {record.price} VP
             </Text>
             <Text style={S.small}>
-              {r.state.toUpperCase()} · {new Date(r.at).toLocaleString()}
+              {new Date(record.at).toLocaleString()} ·{' '}
+              {record.protocol === 'direct-v2' ? 'Price-confirmed request' : 'Legacy order'}
             </Text>
-            {r.message && <Text style={S.small}>{r.message}</Text>}
-            {!['complete', 'failed'].includes(r.state) && (
+            <Receipt record={record} />
+            {pending(record) && (
               <Button
                 secondary
                 title="Check order status"
                 disabled={busy}
-                onPress={() => void check(r.id)}
+                onPress={() => void check(record.id)}
               />
             )}
           </View>

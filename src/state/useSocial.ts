@@ -296,9 +296,18 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     wanted.current = false;
     stop();
     const stamp = epoch.current;
-    void closing?.flushPersistence().then(() => {
-      if (a && stamp === epoch.current && active.current?.puuid === a.puuid) void refreshLocal(a);
-    });
+    void closing
+      ?.flushPersistence()
+      .then(() => {
+        if (a && stamp === epoch.current && active.current?.puuid === a.puuid) void refreshLocal(a);
+      })
+      .catch(() => {
+        if (a && active.current?.puuid === a.puuid)
+          setLocal((old) => ({
+            ...old,
+            error: 'Some messages are waiting for local storage. Existing history was kept.',
+          }));
+      });
   }, [stop, refreshLocal]);
   const prepareChatRemoval = useCallback(async () => {
     wanted.current = false;

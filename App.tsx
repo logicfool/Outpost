@@ -1,4 +1,4 @@
-import { AccountPicker } from './src/ui/AccountPicker';
+import { AccountsModal, type AccountRoute } from './src/ui/AccountsModal';
 import { NavInsetContext } from './src/ui/NavInsets';
 import { listenNotificationTaps } from './src/platform/notifications';
 import { LivePollingContext } from './src/state/useLivePolling';
@@ -26,7 +26,6 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp, type AppModel } from './src/state/useApp';
 import type { CatalogItem } from './src/core/types';
-import Login from './src/ui/Login';
 import { PrivacyGuard } from './src/ui/PrivacyGuard';
 import {
   AccountScreen,
@@ -81,7 +80,7 @@ function AppContent({ model }: { model: AppModel }) {
   const { C, S, isDark } = useTheme();
   const styles = useThemedStyles(makeStyles),
     insets = useSafeAreaInsets();
-  const [picker, setPicker] = useState(false),
+  const [accountRoute, setAccountRoute] = useState<AccountRoute | null>(null),
     [notice, setNotice] = useState<{ kind: string; accountId: string; peer?: string } | null>(null);
 
   useEffect(() => {
@@ -118,7 +117,6 @@ function AppContent({ model }: { model: AppModel }) {
       ),
     [],
   );
-  const [login, setLogin] = useState<{ expectedId?: string } | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30000);
@@ -129,7 +127,10 @@ function AppContent({ model }: { model: AppModel }) {
     setExplorer(null);
     setTab('store');
   }, [model.active?.puuid]);
-  const onLink = useCallback((expectedId?: string) => setLogin({ expectedId }), []);
+  const onLink = useCallback(
+    (expectedId?: string) => setAccountRoute({ type: 'login', expectedId }),
+    [],
+  );
   const onItem = useCallback(
     (value: CatalogItem) => {
       if (model.active) setItem({ accountId: model.active.puuid, value });
@@ -138,7 +139,7 @@ function AppContent({ model }: { model: AppModel }) {
   );
   useEffect(() => listenNotificationTaps(setNotice), []);
   useEffect(() => {
-    if (!notice || model.booting) return;
+    if (!notice || model.booting || accountRoute) return;
     const a = model.accounts.find((a) => a.puuid === notice.accountId);
     if (!a) {
       setNotice(null);
@@ -151,7 +152,7 @@ function AppContent({ model }: { model: AppModel }) {
     if (notice.kind === 'chat' && notice.peer) onNavigate({ type: 'chat', subject: notice.peer });
     else setTab('store');
     setNotice(null);
-  }, [notice, model.booting, model.accounts, model.active?.puuid, onNavigate]);
+  }, [notice, model.booting, model.accounts, model.active?.puuid, onNavigate, accountRoute]);
   const ownCard =
     model.snapshot?.loadout.status === 'ready'
       ? model.snapshot.loadout.data.card
@@ -163,10 +164,10 @@ function AppContent({ model }: { model: AppModel }) {
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <View
         style={styles.shell}
-        aria-hidden={!!explorer || !!item || !!login || picker}
-        accessibilityElementsHidden={!!explorer || !!item || !!login || picker}
+        aria-hidden={!!explorer || !!item || !!accountRoute}
+        accessibilityElementsHidden={!!explorer || !!item || !!accountRoute}
         importantForAccessibility={
-          explorer || item || login || picker ? 'no-hide-descendants' : 'auto'
+          explorer || item || accountRoute ? 'no-hide-descendants' : 'auto'
         }
       >
         {model.booting ? (
@@ -217,7 +218,7 @@ function AppContent({ model }: { model: AppModel }) {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Switch account"
-                onPress={() => setPicker(true)}
+                onPress={() => setAccountRoute({ type: 'picker' })}
                 style={styles.profile}
               >
                 <PlayerAvatar card={ownCard} catalog={model.catalog} size={26} />
@@ -244,7 +245,7 @@ function AppContent({ model }: { model: AppModel }) {
               </Pressable>
             )}
             <NavInsetContext.Provider value={76 + insets.bottom}>
-              <LivePollingContext.Provider value={!explorer && !item && !login && !picker}>
+              <LivePollingContext.Provider value={!explorer && !item && !accountRoute}>
                 <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
                   <ScreenSlot
                     key={`${model.active.puuid}:${tab}`}
@@ -296,15 +297,12 @@ function AppContent({ model }: { model: AppModel }) {
           </View>
         )}
       </View>
-      <AccountPicker
-        visible={picker}
+      <AccountsModal
+        route={accountRoute}
         model={model}
-        onClose={() => setPicker(false)}
-        onAdd={() => onLink()}
+        onRoute={setAccountRoute}
+        onClose={() => setAccountRoute(null)}
       />
-      {login && (
-        <Login expectedId={login.expectedId} onClose={() => setLogin(null)} onLink={model.link} />
-      )}
       {model.active && (
         <ItemModal
           item={item?.accountId === model.active.puuid ? item.value : null}

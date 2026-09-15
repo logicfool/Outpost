@@ -74,9 +74,9 @@ test('browser reset touches browser jars only, not secure account storage', asyn
 });
 test('login retains its WebView through exchange, waits for initial mounting, and does not sync the native cookie jar', () => {
   const ui = fs.readFileSync(path.join(__dirname, '../src/ui/Login.tsx'), 'utf8');
-  assert.match(ui, /state\.phase !== 'success' && \(?\s*<View/);
+  assert.match(ui, /hasBrowser && \(?\s*<View/);
   assert.match(ui, /sharedCookiesEnabled=\{false\}/);
-  assert.match(ui, /browserReady\.current!\.promise/);
+  assert.match(ui, /bounded\(\s*ready\.promise/);
   assert.doesNotMatch(ui, /WebView key=\{state\.url\}/);
   assert.match(ui, /onLoadEnd=/);
 });

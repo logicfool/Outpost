@@ -139,8 +139,11 @@ export class LoginFlow {
       if (generation === this.serial) this.fail(e);
     }
   }
-  browserError(message: string) {
-    if (this.state.phase === 'browser') this.fail(new AppError('LOGIN_BROWSER', message));
+  browserError(message: string, code = 'LOGIN_BROWSER') {
+    if (this.state.phase === 'browser' || this.state.phase === 'preparing') {
+      this.serial++;
+      this.fail(new AppError(code, message));
+    }
   }
   private fail(reason: unknown) {
     const e = safeError(reason);

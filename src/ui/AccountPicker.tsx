@@ -1,13 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  View,
-  Text,
-  FlatList,
-  useWindowDimensions,
-  Platform,
-} from 'react-native';
+import { Pressable, View, Text, FlatList, useWindowDimensions, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
 import type { CatalogItem, Account } from '../core/types';
@@ -21,11 +13,13 @@ export function AccountPicker({
   model,
   onClose,
   onAdd,
+  onSelect,
 }: {
   visible: boolean;
   model: AppModel;
   onClose(): void;
   onAdd(): void;
+  onSelect(account: Account): void;
 }) {
   const { C, S } = useTheme(),
     insets = useSafeAreaInsets(),
@@ -58,12 +52,10 @@ export function AccountPicker({
     };
   }, [visible, model.accounts]);
   const accounts = model.active?.demo ? [model.active, ...model.accounts] : model.accounts;
-  const select = (a: Account) => {
-    model.switchAccount(a);
-    onClose();
-  };
+  const select = (a: Account) => onSelect(a);
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable
           accessibilityLabel="Close account switcher"
@@ -137,13 +129,10 @@ export function AccountPicker({
             secondary
             title="Add Riot account"
             icon="plus"
-            onPress={() => {
-              onClose();
-              onAdd();
-            }}
+            onPress={onAdd}
           />
         </View>
       </View>
-    </Modal>
+    </>
   );
 }

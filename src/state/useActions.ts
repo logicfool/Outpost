@@ -15,12 +15,31 @@ export function useActions(
   updated: (loadout: Loadout) => void,
   catalogLoaded: (catalog: Catalog) => void,
   snapshotLoaded: (snapshot: Snapshot) => void,
+  selection?: () => { accountId?: string; revision: number },
 ) {
-  const current = useRef({ account, catalog, snapshot, updated, catalogLoaded, snapshotLoaded });
-  current.current = { account, catalog, snapshot, updated, catalogLoaded, snapshotLoaded };
+  const current = useRef({
+    account,
+    catalog,
+    snapshot,
+    updated,
+    catalogLoaded,
+    snapshotLoaded,
+    selection,
+  });
+  current.current = {
+    account,
+    catalog,
+    snapshot,
+    updated,
+    catalogLoaded,
+    snapshotLoaded,
+    selection,
+  };
   const selected = () => {
     const a = current.current.account;
     if (!a) throw new AppError('NO_ACCOUNT', 'Select an account.');
+    if (current.current.selection && current.current.selection().accountId !== a.puuid)
+      throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
     return a;
   };
   const assertCurrent = (id: string) => {
@@ -103,8 +122,19 @@ export function useActions(
   const confirmPurchase = useCallback(async (id: string): Promise<PurchaseRecord> => {
     const a = selected();
     if (a.demo) throw new AppError('DEMO_ONLY', 'Demo purchases never contact Riot or spend VP.');
-    const runtime = await getRuntime(),
-      record = await runtime.confirmPurchase(a.puuid, id);
+    const lease = current.current.selection?.();
+    const guard = () => {
+      assertCurrent(a.puuid);
+      const actual = current.current.selection?.();
+      if (lease && (actual?.accountId !== lease.accountId || actual?.revision !== lease.revision))
+        throw new AppError(
+          'ACCOUNT_CHANGED',
+          'The account selection changed after confirmation. Review a fresh quote.',
+        );
+    };
+    const runtime = await getRuntime();
+    guard();
+    const record = await runtime.confirmPurchase(a.puuid, id, guard);
     assertCurrent(a.puuid);
     const saved = await runtime.repository.snapshot(a.puuid);
     assertCurrent(a.puuid);
@@ -117,7 +147,13 @@ export function useActions(
   }, []);
   const checkPurchase = useCallback(async (id: string) => {
     const a = selected();
-    return (await getRuntime()).checkPurchase(a.puuid, id);
+    const runtime = await getRuntime(),
+      record = await runtime.checkPurchase(a.puuid, id);
+    assertCurrent(a.puuid);
+    const cached = await runtime.repository.snapshot(a.puuid);
+    assertCurrent(a.puuid);
+    if (cached) current.current.snapshotLoaded(cached);
+    return record;
   }, []);
   return {
     listPresets,

@@ -1997,7 +1997,7 @@ export function AccountScreen({ model, onLink }: Props) {
             retains. Removing an account deletes its local data but does not sign it out on Riot's
             side. Demo mode uses made-up data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.1</Text>
+          <Text style={S.small}>Outpost 0.6.2</Text>
         </View>
       </Page>
       <Modal
