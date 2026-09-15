@@ -1,5 +1,11 @@
 import type { Account, LoginAttempt, LoginTokens, Region, Session, Shard } from './types';
 import { AppError, number, object, text, token, uuid } from './validation';
+import {
+  SESSION_COOKIE_NAMES,
+  safeCookieValue,
+  cleanSessionCookies,
+  assertCookieSubject,
+} from './sessionCookies';
 export const AUTH_ORIGIN = 'https://auth.riotgames.com';
 export const REDIRECT_URI = 'https://playvalorant.com/opt_in';
 export const RIOT_CLIENT_ID = 'play-valorant-web-prod';
@@ -139,38 +145,56 @@ export function validateSession(raw: unknown): Session {
   let reauth: Session['reauth'];
   if (s.reauth) {
     const r = object(s.reauth),
-      rawCookies = object(r.cookies),
-      cookies: Record<string, string> = {};
-    for (const [name, value] of Object.entries(rawCookies))
-      if (
-        /^[a-z0-9_-]{1,32}$/i.test(name) &&
-        typeof value === 'string' &&
-        value.length > 0 &&
-        value.length < 8192
-      )
-        cookies[name] = value;
+      cookies = cleanSessionCookies(r.cookies);
+    assertCookieSubject(cookies, text(a.puuid));
     if (cookies.ssid) reauth = { cookies, capturedAt: Number(r.capturedAt) || Date.now() };
   }
+  const failure = object(s.renewalFailure);
+  if (s.accessRejected !== undefined && typeof s.accessRejected !== 'boolean')
+    throw new AppError(
+      'SESSION_INVALID',
+      'The saved renewal state is invalid. Reconnect this account.',
+    );
+  if (s.renewalPending !== undefined && typeof s.renewalPending !== 'boolean')
+    throw new AppError(
+      'SESSION_INVALID',
+      'The saved renewal state is invalid. Reconnect this account.',
+    );
   return {
     version: s.version as 1 | 2,
-    account: { ...a, puuid: uuid(a.puuid) } as unknown as Account,
+    account: {
+      ...a,
+      puuid: uuid(a.puuid),
+      canReauth: Boolean(reauth?.cookies.ssid),
+    } as unknown as Account,
     accessToken: token(s.accessToken),
     entitlementsToken: token(s.entitlementsToken),
     ...(reauth ? { reauth } : {}),
+    ...(s.renewalPending ? { renewalPending: true } : {}),
+    ...(s.accessRejected === true ? { accessRejected: true } : {}),
+    ...(typeof failure.code === 'string' &&
+    /^[A-Z0-9_]{1,48}$/.test(failure.code) &&
+    typeof failure.retryAt === 'number' &&
+    Number.isFinite(failure.retryAt)
+      ? { renewalFailure: { code: failure.code, retryAt: failure.retryAt } }
+      : {}),
   };
 }
 export function sessionActive(session: Session, now = Date.now()): boolean {
-  return session.account.expiresAt > now + 30000;
+  return (
+    !session.renewalPending && !session.accessRejected && session.account.expiresAt > now + 30000
+  );
 }
 
-const COOKIE_NAMES = new Set(['ssid', 'tdid', 'sub', 'csid', 'clid', 'did', 'asid']);
+const COOKIE_NAMES = SESSION_COOKIE_NAMES;
 export function rotatedCookies(
   previous: Record<string, string>,
   headers: Headers,
 ): Record<string, string> {
-  const result = { ...previous };
+  const result = cleanSessionCookies(previous);
   const native = headers as Headers & { getSetCookie?: () => string[] };
-  const rawValues = native.getSetCookie?.() ?? [headers.get('set-cookie') ?? ''];
+  const extracted = native.getSetCookie?.();
+  const rawValues = extracted?.length ? extracted : [headers.get('set-cookie') ?? ''];
   const values = rawValues.flatMap((value) => value.split(/,(?=\s*[a-z0-9_-]+=)/i));
   for (const line of values) {
     const pieces = line.split(';'),
@@ -180,11 +204,18 @@ export function rotatedCookies(
     const name = pair.slice(0, separator),
       value = pair.slice(separator + 1);
     if (!COOKIE_NAMES.has(name)) continue;
-    const expired = pieces.some(
-      (part) => /^\s*max-age=0\s*$/i.test(part) || /^\s*max-age=-/i.test(part),
-    );
+    const maxAge = pieces
+      .find((part) => /^\s*max-age=/i.test(part))
+      ?.split('=')[1]
+      ?.trim();
+    const expiresAttribute = pieces.find((part) => /^\s*expires=/i.test(part));
+    const expires = expiresAttribute?.slice(expiresAttribute.indexOf('=') + 1);
+    const expired =
+      maxAge !== undefined && Number.isFinite(Number(maxAge))
+        ? Number(maxAge) <= 0
+        : expires !== undefined && Date.parse(expires) <= Date.now();
     if (!value || expired) delete result[name];
-    else if (value.length <= 8192 && !/[\r\n;]/.test(value)) result[name] = value;
+    else if (safeCookieValue(value)) result[name] = value;
   }
   return result;
 }
@@ -194,10 +225,9 @@ export async function reauthenticateWithCookies(
   attempt: LoginAttempt,
   fetcher: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<LoginTokens> {
-  if (!cookies.ssid || cookies.ssid.length > 8192 || /[\r\n;]/.test(cookies.ssid))
+  if (!safeCookieValue(cookies.ssid))
     throw new AppError('REAUTH_UNAVAILABLE', 'This account has no reusable Riot session cookie.');
-  const cookie = Object.entries(cookies)
-    .filter(([k, v]) => COOKIE_NAMES.has(k) && v && v.length <= 8192 && !/[\r\n;]/.test(v))
+  const cookie = Object.entries(cleanSessionCookies(cookies))
     .map(([k, v]) => `${k}=${v}`)
     .join('; ');
   const controller = new AbortController(),
@@ -221,11 +251,19 @@ export async function reauthenticateWithCookies(
     if (response.redirected || (response.url && new URL(response.url).origin !== AUTH_ORIGIN))
       throw new AppError('AUTH_REDIRECT', 'An unexpected authentication redirect was blocked.');
     if (response.status === 429) {
-      const delay = Number(response.headers.get('retry-after'));
+      const raw = response.headers.get('retry-after') ?? '',
+        seconds = Number(raw),
+        date = Date.parse(raw);
+      const retryAt =
+        Number.isFinite(seconds) && seconds > 0
+          ? Date.now() + seconds * 1000
+          : Number.isFinite(date) && date > Date.now()
+            ? date
+            : Date.now() + 60000;
       throw new AppError(
         'RATE_LIMIT',
         'Riot asked this app to wait before renewing the session.',
-        Date.now() + (Number.isFinite(delay) && delay > 0 ? delay : 60) * 1000,
+        retryAt,
         429,
       );
     }

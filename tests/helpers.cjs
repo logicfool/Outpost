@@ -13,6 +13,7 @@ const session = (id = ID) => ({
     tagLine: 'TEST',
     region: 'ap',
     shard: 'ap',
+    canReauth: false,
     addedAt: Date.now(),
     expiresAt: Date.now() + 3600000,
   },

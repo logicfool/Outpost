@@ -1,5 +1,6 @@
 import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
 import { useNavInset } from './NavInsets';
+import { SessionStatus } from './SessionStatus';
 import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatSettings } from './ChatSettings';
 import { Image } from './CachedImage';
@@ -1821,6 +1822,7 @@ export function AccountScreen({ model, onLink }: Props) {
                   active.emailVerified === undefined ? '-' : active.emailVerified ? 'Yes' : 'No'
                 }
               />
+              <SessionStatus accountId={active.puuid} revision={model.snapshot?.fetchedAt} />
               <Button
                 title="Reconnect"
                 secondary
@@ -1995,7 +1997,7 @@ export function AccountScreen({ model, onLink }: Props) {
             retains. Removing an account deletes its local data but does not sign it out on Riot's
             side. Demo mode uses made-up data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.0</Text>
+          <Text style={S.small}>Outpost 0.6.1</Text>
         </View>
       </Page>
       <Modal

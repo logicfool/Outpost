@@ -146,3 +146,15 @@ test('reauth network errors cannot leak cookie or arbitrary upstream text', asyn
     (e) => e.code === 'NETWORK' && !e.message.includes('private'),
   );
 });
+
+test('silent renewal honors an HTTP-date Retry-After rather than falling back to a minute', async () => {
+  const date = new Date(Date.now() + 600000).toUTCString();
+  await assert.rejects(
+    reauthenticateWithCookies(
+      { ssid: 'fixture' },
+      attempt(),
+      async () => new Response(null, { status: 429, headers: { 'retry-after': date } }),
+    ),
+    (error) => error.code === 'RATE_LIMIT' && error.retryAt === Date.parse(date),
+  );
+});

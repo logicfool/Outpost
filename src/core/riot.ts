@@ -6,6 +6,7 @@ import {
   type LoadoutEditor,
 } from './presets';
 import { orderResult } from './purchases';
+import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
 import { DAY_MS, FULL_SNAPSHOT, keepCached, type SnapshotPlan } from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
@@ -82,6 +83,8 @@ export async function connectAccount(
     }),
   ]);
   const subject = uuid(object(info.data).sub);
+  const cookies = cleanSessionCookies(input.reauthCookies);
+  assertCookieSubject(cookies, subject);
   if (input.idToken) {
     const idSubject = text(decodeJwtClaimsUnverified(input.idToken).sub);
     if (idSubject && idSubject.toLowerCase() !== subject)
@@ -116,9 +119,7 @@ export async function connectAccount(
     ),
     accessToken: input.accessToken,
     entitlementsToken: token(object(entitlements.data).entitlements_token),
-    reauth: input.reauthCookies?.ssid
-      ? { cookies: input.reauthCookies, capturedAt: Date.now() }
-      : undefined,
+    reauth: cookies.ssid ? { cookies, capturedAt: Date.now() } : undefined,
   };
 
   session.account.canReauth = Boolean(session.reauth?.cookies.ssid);

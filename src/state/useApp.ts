@@ -184,6 +184,14 @@ export function useApp() {
     (async () => {
       try {
         const runtime = await getRuntime();
+        const savedAccount = await runtime.savedAccount(active.puuid).catch(() => null);
+        if (savedAccount && epoch.current === stamp) {
+          activeRef.current = savedAccount;
+          setActive(savedAccount);
+          setAccounts((list) =>
+            list.map((a) => (a.puuid === savedAccount.puuid ? savedAccount : a)),
+          );
+        }
         const [cached, wishes, entries, savedCatalog] = await Promise.all([
           runtime.repository.snapshot(active.puuid),
           runtime.repository.wishlist(active.puuid),

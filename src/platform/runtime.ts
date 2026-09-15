@@ -1,4 +1,11 @@
 import {
+  stageSessionRenewal,
+  sessionCheckpointMatches,
+  sessionHealth,
+} from '../core/sessionRenewal';
+import { recordRequest } from '../core/diagnostics';
+import type { Session } from '../core/types';
+import {
   quotePurchase,
   validatePurchaseQuote,
   type PurchaseQuote,
@@ -88,6 +95,32 @@ export class Runtime {
       if (this.catalogFlight === promise) this.catalogFlight = undefined;
     }
   }
+  private async persistSession(session: Session): Promise<void> {
+    await vault.write(session);
+    if (!sessionCheckpointMatches(await vault.read(session.account.puuid), session))
+      throw new AppError(
+        'SESSION_SAVE',
+        'Secure session verification failed. Reconnect this account without removing it.',
+      );
+  }
+  async savedAccount(id: string): Promise<Account | null> {
+    const generation = this.generations.get(id) ?? 0;
+    if (this.linkingAccounts.has(id)) return null;
+    const session = await vault.read(id);
+    if (!session) return null;
+    const listed = (await this.repository.accounts()).find((a) => a.puuid === id);
+    if (!listed || generation !== (this.generations.get(id) ?? 0) || this.linkingAccounts.has(id))
+      return null;
+    if (
+      listed.canReauth !== session.account.canReauth ||
+      listed.expiresAt !== session.account.expiresAt
+    )
+      await this.repository.saveAccount(session.account);
+    return session.account;
+  }
+  async sessionHealth(id: string) {
+    return sessionHealth(await vault.read(id), this.now());
+  }
   private linkQueue: Promise<unknown> = Promise.resolve();
   private linkingAccounts = new Set<string>();
   link(input: LoginTokens, region?: Region, expectedId?: string): Promise<Account> {
@@ -133,13 +166,21 @@ export class Runtime {
           (p): p is Promise<any> => !!p,
         ),
       );
-      const oldSession = old ? await vault.read(id) : null;
-      await vault.write(session);
+      let oldSession: Session | null = null;
+      if (old) {
+        try {
+          oldSession = await vault.read(id);
+        } catch (reason) {
+          if (safeError(reason).code !== 'VAULT_CORRUPT') throw reason;
+        }
+      }
       try {
+        await this.persistSession(session);
         await this.repository.saveAccount(session.account);
       } catch (error) {
         if (oldSession) await vault.write(oldSession);
-        else await vault.remove(id);
+        else if (!old) await vault.remove(id);
+
         throw error;
       }
       activateChatStorage(id);
@@ -182,33 +223,101 @@ export class Runtime {
           'Reconnect your Riot account to fetch fresh data. Cached data remains available.',
         );
       if (rejected || !sessionActive(session)) {
-        if (!session.reauth?.cookies?.ssid)
+        const failure = session.renewalFailure;
+        if (failure && failure.retryAt > this.now()) {
+          const loginRequired = [
+            'REAUTH_REQUIRED',
+            'REAUTH_UNAVAILABLE',
+            'REAUTH_COOKIE',
+            'REAUTH_ACCOUNT_MISMATCH',
+            'ACCOUNT_MISMATCH',
+          ].includes(failure.code);
+          throw new AppError(
+            loginRequired ? 'REAUTH_REQUIRED' : 'RENEWAL_WAIT',
+            loginRequired
+              ? 'Riot requires this account to sign in again. Its saved game data and chats are still present.'
+              : 'Session renewal is waiting after a temporary failure. Your saved session is still present.',
+            failure.retryAt,
+          );
+        }
+        const pendingUsable =
+          session.renewalPending && session.account.expiresAt > this.now() + 30000;
+        if (!pendingUsable && !session.reauth?.cookies?.ssid)
           throw new AppError(
             'SESSION_EXPIRED',
-            'Reconnect your Riot account to fetch fresh data. Cached data remains available.',
+            'This account has no reusable Riot cookie saved. Reconnect it once using Riot sign-in; do not remove the account.',
           );
-        const freshTokens = await reauthenticateWithCookies(
-          session.reauth.cookies,
-          { state: randomHex(), nonce: randomHex(), createdAt: Date.now() },
-          nativeFetcher,
-        );
-        const refreshed = await connectAccount(this.http, freshTokens, session.account.region);
-        if (refreshed.account.puuid !== id)
-          throw new AppError(
-            'ACCOUNT_MISMATCH',
-            'Silent reauthentication returned a different Riot account. Interactive sign-in is required.',
+        const report = (code: string) =>
+          recordRequest({
+            at: this.now(),
+            service: 'Session renewal',
+            method: 'STATE',
+            code,
+            durationMs: 0,
+          });
+        report(pendingUsable ? 'RESUME_PENDING_EXCHANGE' : 'START');
+        try {
+          if (!pendingUsable) {
+            session = {
+              ...session,
+              ...(rejected ? { accessRejected: true } : {}),
+              renewalFailure: { code: 'RENEWAL_IN_PROGRESS', retryAt: this.now() + 60000 },
+            };
+            await this.persistSession(session);
+            const freshTokens = await reauthenticateWithCookies(
+              session.reauth!.cookies,
+              { state: randomHex(), nonce: randomHex(), createdAt: Date.now() },
+              nativeFetcher,
+            );
+            if (generation !== (this.generations.get(id) ?? 0))
+              throw new AppError('SESSION_REMOVED', 'This account changed during renewal.');
+            session = stageSessionRenewal(session, freshTokens, this.now());
+            await this.persistSession(session);
+            report('ROTATION_SAVED');
+          }
+          if (generation !== (this.generations.get(id) ?? 0))
+            throw new AppError(
+              'SESSION_REMOVED',
+              'This account changed before renewal verification.',
+            );
+          const refreshed = await connectAccount(
+            this.http,
+            {
+              accessToken: session.accessToken,
+              expiresAt: session.account.expiresAt,
+              reauthCookies: session.reauth?.cookies,
+            },
+            session.account.region,
           );
-        refreshed.account.addedAt = session.account.addedAt;
-        if (generation !== (this.generations.get(id) ?? 0))
-          throw new AppError(
-            'SESSION_REMOVED',
-            'Session renewal was discarded after account removal.',
-          );
-        refreshed.account.canReauth = Boolean(refreshed.reauth?.cookies.ssid);
-        await vault.write(refreshed);
-        await this.repository.saveAccount(refreshed.account);
-        this.rejectedSessions.delete(id);
-        session = refreshed;
+          if (refreshed.account.puuid !== id)
+            throw new AppError(
+              'ACCOUNT_MISMATCH',
+              'Silent renewal returned another account. Reconnect this account.',
+            );
+          refreshed.account.addedAt = session.account.addedAt;
+          if (generation !== (this.generations.get(id) ?? 0))
+            throw new AppError(
+              'SESSION_REMOVED',
+              'Session renewal was discarded after an account change.',
+            );
+          await this.persistSession(refreshed);
+          session = refreshed;
+          this.rejectedSessions.delete(id);
+          await this.repository.saveAccount(refreshed.account);
+          report('RENEWED_AND_SAVED');
+        } catch (reason) {
+          const error = safeError(reason);
+          if (generation === (this.generations.get(id) ?? 0)) {
+            const retryAt = Math.max(this.now() + 60000, error.retryAt ?? 0);
+            await this.persistSession({
+              ...session,
+              renewalFailure: { code: error.code, retryAt },
+            }).catch(() => {});
+            report(error.code);
+            throw new AppError(error.code, error.message, retryAt, error.status);
+          }
+          throw error;
+        }
       }
       await this.loadCatalog(false, false);
       if (generation !== (this.generations.get(id) ?? 0))

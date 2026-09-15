@@ -15,7 +15,7 @@ import {
   isLoginNavigationAllowed,
   REGIONS,
 } from '../core/auth';
-import { LoginFlow, type LoginState } from '../core/loginFlow';
+import { bounded, LoginFlow, type LoginState } from '../core/loginFlow';
 import { recordLogin } from '../core/diagnostics';
 import { AppError, number, token } from '../core/validation';
 import type { Region } from '../core/types';
@@ -38,11 +38,28 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
   latest.current = { onLink, region, expectedId };
   const alive = useRef(true),
     currentUrl = useRef('');
+  const browserReady = useRef<{ promise: Promise<void>; resolve(): void; loaded: boolean } | null>(
+    null,
+  );
+  if (!browserReady.current) {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    browserReady.current = { promise, resolve, loaded: false };
+  }
   const flowRef = useRef<LoginFlow | null>(null);
   if (!flowRef.current)
     flowRef.current = new LoginFlow({
       attempt: () => ({ state: randomHex(), nonce: randomHex(), createdAt: Date.now() }),
-      clearBrowser: clearRiotWebCookies,
+      clearBrowser: async () => {
+        await bounded(
+          browserReady.current!.promise,
+          8000,
+          'The secure Riot sign-in window could not initialize. Close and retry.',
+        );
+        await clearRiotWebCookies();
+      },
       captureCookies: captureRiotReauthCookies,
       save: (tokens) => {
         const value = latest.current;
@@ -96,7 +113,8 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             <View style={{ gap: 8 }}>
               <Text style={S.title}>Sign in with Riot</Text>
               <Text style={S.body}>
-                Use the Riot account you want to add. Existing accounts stay saved separately.
+                Use the Riot account you want to add. Enable Stay signed in on Riot’s page when
+                offered. Existing accounts stay saved separately.
               </Text>
             </View>
             {state.error && (
@@ -133,7 +151,9 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             {advanced && (
               <View style={S.card}>
                 <Text style={S.body}>
-                  Paste only your own token. Select a region when you do not supply an ID token.
+                  A pasted token is temporary and cannot renew after it expires. Use Riot sign-in
+                  for persistent multi-account access. Select a region when you do not supply an ID
+                  token.
                 </Text>
                 <TextInput
                   style={S.input}
@@ -190,77 +210,102 @@ export default function Login({ onClose, onLink, expectedId }: LoginProps) {
             )}
           </ScrollView>
         )}
-        {state.phase === 'browser' && state.url && (
-          <WebView
-            key={state.url}
-            source={{ uri: state.url }}
-            incognito={false}
-            cacheEnabled={false}
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            mixedContentMode="never"
-            javaScriptEnabled
-            domStorageEnabled
-            javaScriptCanOpenWindowsAutomatically={false}
-            setSupportMultipleWindows
-            allowFileAccess={false}
-            allowFileAccessFromFileURLs={false}
-            allowUniversalAccessFromFileURLs={false}
-            webviewDebuggingEnabled={false}
-            originWhitelist={['https://*']}
-            startInLoadingState
-            renderLoading={() => <ActivityIndicator style={{ margin: 25 }} color={C.accent} />}
-            onShouldStartLoadWithRequest={(request) => {
-              if (request.isTopFrame === false) {
-                try {
-                  const u = new URL(request.url);
-                  return (
-                    isLoginNavigationAllowed(request.url) ||
-                    (u.protocol === 'https:' &&
-                      [
-                        'challenges.cloudflare.com',
-                        'hcaptcha.com',
-                        'newassets.hcaptcha.com',
-                        'www.google.com',
-                        'www.recaptcha.net',
-                      ].includes(u.hostname))
-                  );
-                } catch {
-                  return false;
+        {state.phase !== 'success' && (
+          <View
+            pointerEvents={state.phase === 'browser' ? 'auto' : 'none'}
+            accessibilityElementsHidden={state.phase !== 'browser'}
+            importantForAccessibility={state.phase === 'browser' ? 'auto' : 'no-hide-descendants'}
+            style={
+              state.phase === 'browser'
+                ? { flex: 1 }
+                : { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0 }
+            }
+          >
+            <WebView
+              source={{ uri: state.url ?? 'about:blank' }}
+              incognito={false}
+              cacheEnabled={false}
+              sharedCookiesEnabled={false}
+              thirdPartyCookiesEnabled
+              mixedContentMode="never"
+              javaScriptEnabled
+              domStorageEnabled
+              javaScriptCanOpenWindowsAutomatically={false}
+              setSupportMultipleWindows
+              allowFileAccess={false}
+              allowFileAccessFromFileURLs={false}
+              allowUniversalAccessFromFileURLs={false}
+              webviewDebuggingEnabled={false}
+              originWhitelist={['https://*', 'about:blank']}
+              onLoadEnd={(event) => {
+                if (event.nativeEvent.url === 'about:blank' && browserReady.current) {
+                  browserReady.current.loaded = true;
+                  browserReady.current.resolve();
                 }
+              }}
+              startInLoadingState
+              renderLoading={() => <ActivityIndicator style={{ margin: 25 }} color={C.accent} />}
+              onShouldStartLoadWithRequest={(request) => {
+                if (request.url === 'about:blank')
+                  return state.phase === 'start' || state.phase === 'preparing';
+                if (request.isTopFrame === false) {
+                  try {
+                    const u = new URL(request.url);
+                    return (
+                      isLoginNavigationAllowed(request.url) ||
+                      (u.protocol === 'https:' &&
+                        [
+                          'challenges.cloudflare.com',
+                          'hcaptcha.com',
+                          'newassets.hcaptcha.com',
+                          'www.google.com',
+                          'www.recaptcha.net',
+                        ].includes(u.hostname))
+                    );
+                  } catch {
+                    return false;
+                  }
+                }
+                return navigate(request.url);
+              }}
+              onNavigationStateChange={(event) => {
+                if (event.url !== 'about:blank' && browserReady.current?.loaded) {
+                  let resolve!: () => void;
+                  const promise = new Promise<void>((done) => {
+                    resolve = done;
+                  });
+                  browserReady.current = { promise, resolve, loaded: false };
+                }
+                if (isCallback(event.url)) navigate(event.url);
+                else {
+                  currentUrl.current = event.url;
+                  try {
+                    setOrigin(new URL(event.url).origin);
+                  } catch {}
+                }
+              }}
+              onOpenWindow={() =>
+                flow.browserError(
+                  'This option requires an external window. Use Riot username/password sign-in in this window.',
+                )
               }
-              return navigate(request.url);
-            }}
-            onNavigationStateChange={(event) => {
-              if (isCallback(event.url)) navigate(event.url);
-              else {
-                currentUrl.current = event.url;
-                try {
-                  setOrigin(new URL(event.url).origin);
-                } catch {}
+              onError={() => flow.browserError('Riot sign-in could not be loaded. Try again.')}
+              onHttpError={(event) => {
+                if (
+                  event.nativeEvent.statusCode >= 400 &&
+                  event.nativeEvent.url === currentUrl.current
+                )
+                  flow.browserError('Riot sign-in is temporarily unavailable. Try again.');
+              }}
+              onContentProcessDidTerminate={() =>
+                flow.browserError('The sign-in window was closed by the system. Please retry.')
               }
-            }}
-            onOpenWindow={() =>
-              flow.browserError(
-                'This option requires an external window. Use Riot username/password sign-in in this window.',
-              )
-            }
-            onError={() => flow.browserError('Riot sign-in could not be loaded. Try again.')}
-            onHttpError={(event) => {
-              if (
-                event.nativeEvent.statusCode >= 400 &&
-                event.nativeEvent.url === currentUrl.current
-              )
-                flow.browserError('Riot sign-in is temporarily unavailable. Try again.');
-            }}
-            onContentProcessDidTerminate={() =>
-              flow.browserError('The sign-in window was closed by the system. Please retry.')
-            }
-            onRenderProcessGone={() =>
-              flow.browserError('Android closed the sign-in window. Please retry.')
-            }
-            allowsLinkPreview={false}
-          />
+              onRenderProcessGone={() =>
+                flow.browserError('Android closed the sign-in window. Please retry.')
+              }
+              allowsLinkPreview={false}
+            />
+          </View>
         )}
         {working && (
           <View

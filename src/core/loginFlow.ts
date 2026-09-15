@@ -1,6 +1,13 @@
 import type { Account, LoginAttempt, LoginTokens } from './types';
-import { authorizationUrl, isCallback, isLoginNavigationAllowed, parseCallback } from './auth';
-import { AppError, safeError } from './validation';
+import {
+  authorizationUrl,
+  decodeJwtClaimsUnverified,
+  isCallback,
+  isLoginNavigationAllowed,
+  parseCallback,
+} from './auth';
+import { AppError, safeError, text } from './validation';
+import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
 
 export type LoginPhase = 'start' | 'preparing' | 'browser' | 'exchange' | 'success';
 export interface LoginState {
@@ -13,7 +20,7 @@ export interface LoginState {
 export interface LoginDependencies {
   attempt(): LoginAttempt;
   clearBrowser(): Promise<void>;
-  captureCookies(): Promise<Record<string, string>>;
+  captureCookies(expectedSubject?: string): Promise<Record<string, string>>;
   save(tokens: LoginTokens): Promise<Account>;
   emit(state: LoginState): void;
   diagnostic?(stage: string, code: string): void;
@@ -74,7 +81,7 @@ export class LoginFlow {
     try {
       if (!this.attempt) throw new AppError('AUTH_STATE', 'Open a new sign-in window.');
       const tokens = parseCallback(url, this.attempt);
-      this.set({ phase: 'exchange' });
+      this.set({ phase: 'exchange', url: this.state.url });
       void this.complete(tokens, this.serial, true);
     } catch (e) {
       this.fail(e);
@@ -90,16 +97,38 @@ export class LoginFlow {
   private async complete(tokens: LoginTokens, generation: number, cookies: boolean) {
     if (cookies) {
       try {
-        tokens = {
-          ...tokens,
-          reauthCookies: await bounded(
-            this.deps.captureCookies(),
-            4000,
-            'Cookie capture timed out.',
+        const expected =
+          text(decodeJwtClaimsUnverified(tokens.idToken ?? tokens.accessToken).sub) || undefined;
+        const savedCookies = cleanSessionCookies(
+          await bounded(
+            this.deps.captureCookies(expected),
+            7000,
+            'Reusable Riot session capture timed out. Retry sign-in.',
           ),
-        };
-      } catch {
-        this.deps.diagnostic?.('cookies', 'REAUTH_COOKIE_UNAVAILABLE');
+        );
+        if (!savedCookies.ssid)
+          throw new AppError(
+            'REAUTH_COOKIE',
+            'A reusable Riot session was not returned. Retry with Stay signed in enabled.',
+          );
+        assertCookieSubject(savedCookies, expected);
+        tokens = { ...tokens, reauthCookies: savedCookies };
+        this.deps.diagnostic?.('cookies', 'REUSABLE_COOKIE_CAPTURED');
+      } catch (reason) {
+        this.deps.diagnostic?.(
+          'cookies',
+          reason instanceof AppError ? reason.code : 'REAUTH_COOKIE',
+        );
+        if (generation === this.serial)
+          this.fail(
+            reason instanceof AppError
+              ? reason
+              : new AppError(
+                  'REAUTH_COOKIE',
+                  'The reusable Riot session could not be captured. Retry sign-in; no saved account was replaced.',
+                ),
+          );
+        return;
       }
     }
     if (generation !== this.serial) return;

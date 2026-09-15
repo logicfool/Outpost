@@ -1,26 +1,35 @@
 import CookieManager from '@react-native-cookies/cookies';
 import { Platform } from 'react-native';
 import { AppError } from '../core/validation';
+import { selectRiotCookies } from '../core/sessionCookies';
+import { bounded } from '../core/loginFlow';
 
-const ALLOWED = new Set(['ssid', 'tdid', 'sub', 'csid', 'clid', 'did', 'asid']);
-export async function captureRiotReauthCookies(): Promise<Record<string, string>> {
-  const raw = await CookieManager.get('https://auth.riotgames.com', Platform.OS === 'ios');
-  const out: Record<string, string> = {};
-  for (const [name, cookie] of Object.entries(raw)) {
-    if (
-      ALLOWED.has(name) &&
-      cookie?.value &&
-      cookie.value.length <= 8192 &&
-      !/[\r\n;]/.test(cookie.value)
-    )
-      out[name] = cookie.value;
+export async function captureRiotReauthCookies(
+  expectedSubject?: string,
+): Promise<Record<string, string>> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
+    try {
+      const webkit = Platform.OS === 'ios';
+      const raw = await bounded(
+        webkit
+          ? CookieManager.getAll(true)
+          : CookieManager.get('https://auth.riotgames.com/authorize', false),
+        1500,
+        'Riot session-cookie read timed out.',
+      );
+      return selectRiotCookies(raw, webkit, expectedSubject);
+    } catch (error) {
+      last = error;
+      if (error instanceof AppError && error.code === 'REAUTH_ACCOUNT_MISMATCH') throw error;
+    }
   }
-  if (!out.ssid)
-    throw new AppError(
-      'REAUTH_COOKIE',
-      'Riot did not return a reusable session cookie. This account may need sign-in again after expiry.',
-    );
-  return out;
+  if (last instanceof AppError && last.code === 'REAUTH_COOKIE') throw last;
+  throw new AppError(
+    'REAUTH_COOKIE',
+    'The reusable Riot session could not be captured. Retry sign-in; no saved account was replaced.',
+  );
 }
 export async function clearRiotWebCookies(): Promise<void> {
   if (!(await CookieManager.clearAll(false)))

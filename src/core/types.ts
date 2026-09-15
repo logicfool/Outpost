@@ -24,6 +24,9 @@ export interface Session {
   accessToken: string;
   entitlementsToken: string;
   reauth?: { cookies: Record<string, string>; capturedAt: number };
+  renewalPending?: boolean;
+  accessRejected?: boolean;
+  renewalFailure?: { code: string; retryAt: number };
 }
 export interface LoginAttempt {
   state: string;
