@@ -11,6 +11,8 @@ export interface ChatBootstrap {
 }
 export interface Friend extends PlayerRef {
   jid: string;
+  matchId?: string;
+  progress?: import('./matchTypes').MatchProgress;
   presence: 'offline' | 'online' | 'away' | 'in_game' | 'agent_select' | 'queue';
   presenceSource?: 'valorant' | 'riot';
   queue?: string;
@@ -45,6 +47,7 @@ export interface ChatState {
     { status: 'loading' | 'ready' | 'error'; message?: string; count?: number; at?: number }
   >;
   unread: Record<string, number>;
+  selfPresence?: Friend;
   friends: Friend[];
   messages: Record<string, ChatMessage[]>;
 }

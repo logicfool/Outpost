@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { presenceProgress } from './liveProgress';
 import { valorantActivity, presenceFields } from './presenceState';
 import type { Catalog } from './types';
 import type { Friend } from './chatTypes';
@@ -24,7 +25,7 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
       );
     } catch {}
   }
-  const { player, party } = presenceFields(data);
+  const { player, party, match } = presenceFields(data);
   const valOnline =
     !!valorant && data.isValid !== false && child(valorant, 'st')?.text !== 'offline';
   const activityData = valorantActivity(data);
@@ -67,6 +68,8 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
   return {
     presence: state,
     updatedAt,
+    progress: presenceProgress(data, state === 'in_game', now),
+    matchId: valOnline ? text(match.matchId) || text(match.matchID) || undefined : undefined,
     game,
     activity,
     queue: valOnline ? activityData.queue : undefined,

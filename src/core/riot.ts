@@ -21,6 +21,7 @@ import { prepareIdentityEdit, verifyIdentity } from './identity';
 import { PlayerScope } from './playerScope';
 import { hasPlayerName, nameAliases } from './playerNames';
 import { glzOrigin, normalizeLive } from './live';
+import { normalizeLiveEquipment } from './liveEquipment';
 import { catalogWithContent } from './rank';
 import type { PlayerRef, PlayerProfile, IdentityEdit } from './playerTypes';
 import type {
@@ -326,6 +327,29 @@ export class RiotClient {
       }
     }
     return { state: 'idle', observedAt: Date.now() };
+  }
+  async liveEquipment(matchId: string) {
+    const game = await this.liveGame(),
+      self = this.session.account.puuid;
+    if (
+      !game.matchId ||
+      game.matchId !== uuid(matchId) ||
+      !game.players?.some((p) => p.subject === self) ||
+      !['in_game', 'agent_select'].includes(game.state)
+    )
+      throw new AppError('MATCH_SCOPE', 'Open your current match to view equipped skins.');
+    const mode = game.state === 'in_game' ? 'core-game' : 'pregame';
+    const raw = (
+      await this.read(
+        `/${mode}/v1/matches/${game.matchId}/loadouts`,
+        60000,
+        'GET',
+        undefined,
+        self,
+        'glz',
+      )
+    ).data;
+    return normalizeLiveEquipment(raw, game, self, this.catalog);
   }
   async store(fresh = false): Promise<Store> {
     const id = this.session.account.puuid;

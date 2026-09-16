@@ -1,6 +1,15 @@
 import type { Catalog, CatalogItem, ItemKind, JsonObject } from './types';
 import { EMPTY_CATALOG } from './types';
-import { array, number, object, safeImage, safeMedia, text, timestamp } from './validation';
+import {
+  array,
+  number,
+  nullableNumber,
+  object,
+  safeImage,
+  safeMedia,
+  text,
+  timestamp,
+} from './validation';
 import { HttpClient, SingleFlightCache } from './http';
 export const PUBLIC_ORIGIN = 'https://valorant-api.com';
 export const CATALOG_PATHS = [
@@ -45,7 +54,8 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
-    schemaVersion: 7,
+    weapons: Object.create(null),
+    schemaVersion: 8,
     fetchedAt: now,
   };
   const themeNames = new Map(
@@ -59,7 +69,17 @@ export function buildCatalog(
       catalog.items[id.toLowerCase()] = { ...item, id: id.toLowerCase() };
   };
   for (const rawWeapon of dataList(responses.weapons)) {
-    const weapon = object(rawWeapon);
+    const weapon = object(rawWeapon),
+      weaponId = text(weapon.uuid).toLowerCase();
+    if (/^[a-f0-9-]{36}$/.test(weaponId))
+      catalog.weapons![weaponId] = {
+        id: weaponId,
+        name: text(weapon.displayName),
+        image: safeImage(weapon.displayIcon),
+        killIcon: safeImage(weapon.killStreamIcon),
+        category: text(weapon.category).split('::').pop(),
+        defaultSkinId: text(weapon.defaultSkinUuid) || undefined,
+      };
     for (const rawSkin of array(weapon.skins)) {
       const skin = object(rawSkin),
         levels = array(skin.levels).map(object),
@@ -205,6 +225,11 @@ export function buildCatalog(
         name: text(e.displayName),
         image: safeImage(e.splash),
         listImage: safeImage(e.listViewIcon),
+        minimap: safeImage(e.displayIcon),
+        xMultiplier: nullableNumber(e.xMultiplier) ?? undefined,
+        yMultiplier: nullableNumber(e.yMultiplier) ?? undefined,
+        xScalarToAdd: nullableNumber(e.xScalarToAdd) ?? undefined,
+        yScalarToAdd: nullableNumber(e.yScalarToAdd) ?? undefined,
       };
     catalog.maps[text(e.mapUrl)] = item;
     catalog.maps[text(e.uuid)] = item;
@@ -316,6 +341,7 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
   if (!previous) return fresh;
   return {
     ...fresh,
+    weapons: { ...previous.weapons, ...fresh.weapons },
     items: { ...previous.items, ...fresh.items },
     maps: { ...previous.maps, ...fresh.maps },
     bundles: Object.fromEntries(

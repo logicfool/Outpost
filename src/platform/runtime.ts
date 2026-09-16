@@ -45,7 +45,7 @@ import { HttpClient } from '../core/http';
 import { RiotClient, connectAccount } from '../core/riot';
 import { EMPTY_CATALOG, MAX_ACCOUNTS } from '../core/types';
 import type { Account, Catalog, LoginTokens, Region, Snapshot } from '../core/types';
-import { AppError, safeError } from '../core/validation';
+import { AppError, safeError, uuid } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
 import { openRepository } from './storage';
 import type { Repository } from './storage.types';
@@ -88,7 +88,7 @@ export class Runtime {
       if (
         cached &&
         (!allowNetwork ||
-          (!force && cached.schemaVersion === 7 && cached.fetchedAt + ttl > this.now()))
+          (!force && cached.schemaVersion === 8 && cached.fetchedAt + ttl > this.now()))
       ) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
@@ -593,6 +593,94 @@ export class Runtime {
       if (this.liveFlights.get(id) === work) this.liveFlights.delete(id);
     }
   }
+  private equipmentFlights = new Map<
+    string,
+    Promise<Section<import('../core/matchTypes').LiveEquipment>>
+  >();
+  async liveEquipment(
+    id: string,
+    matchId: string,
+  ): Promise<Section<import('../core/matchTypes').LiveEquipment>> {
+    uuid(id);
+    uuid(matchId);
+    const flight = this.equipmentFlights.get(id);
+    if (flight)
+      return flight.then((result) =>
+        result.status === 'ready' && result.data.matchId !== matchId
+          ? {
+              status: 'error' as const,
+              code: 'MATCH_CHANGED',
+              message: 'Open the current match again.',
+            }
+          : result,
+      );
+    const generation = this.generations.get(id) ?? 0;
+    const run = async (): Promise<Section<import('../core/matchTypes').LiveEquipment>> => {
+      const game = await this.live(id);
+      if (game.status !== 'ready') return game;
+      if (game.data.matchId !== matchId || !game.data.players?.some((p) => p.subject === id))
+        return {
+          status: 'error',
+          code: 'MATCH_SCOPE',
+          message: 'Open your current match to view skins.',
+        };
+      const gate = await this.repository.refreshGate(id, 'equipment'),
+        now = this.now();
+      if ((gate?.notBefore ?? 0) > now)
+        return gate?.matchId === matchId && gate.equipment
+          ? gate.equipment
+          : {
+              status: 'error',
+              code: 'LOCAL_COOLDOWN',
+              message: 'Match skins can be checked once a minute.',
+              retryAt: gate!.notBefore,
+            };
+      await this.repository.saveRefreshGate(id, 'equipment', {
+        attemptedAt: now,
+        notBefore: now + 60000,
+        failures: gate?.failures ?? 0,
+        matchId,
+      });
+      let result: Section<import('../core/matchTypes').LiveEquipment>;
+      try {
+        await this.loadCatalog().catch(() => {});
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError('SESSION_REMOVED', 'The account changed.');
+        result = {
+          status: 'ready',
+          data: await (await this.client(id)).liveEquipment(matchId),
+          fetchedAt: this.now(),
+        };
+      } catch (reason) {
+        const e = safeError(reason);
+        result = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+      }
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('SESSION_REMOVED', 'The account changed.');
+      const failed = result.status === 'error',
+        failures = failed ? (gate?.failures ?? 0) + 1 : 0;
+      const notBefore = Math.max(
+        this.now() + (failed ? failureDelay(failures) : 60000),
+        result.status === 'error' ? (result.retryAt ?? 0) : 0,
+      );
+      if (result.status === 'error') result = { ...result, retryAt: notBefore };
+      await this.repository.saveRefreshGate(id, 'equipment', {
+        attemptedAt: now,
+        notBefore,
+        failures,
+        matchId,
+        equipment: result,
+      });
+      return result;
+    };
+    const work = run();
+    this.equipmentFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.equipmentFlights.get(id) === work) this.equipmentFlights.delete(id);
+    }
+  }
   async saveIdentity(id: string, edit: IdentityEdit): Promise<Loadout> {
     if (this.identityFlights.has(id))
       throw new AppError('LOADOUT_BUSY', 'An identity update is already running.');
@@ -621,6 +709,7 @@ export class Runtime {
     const partial = buildCatalog({ weapons: await this.publicClient.weaponSkins() });
     this.catalog = {
       ...mergeCatalog(this.catalog, partial),
+      schemaVersion: this.catalog.schemaVersion,
       fetchedAt: this.catalog.fetchedAt,
       failedPaths: this.catalog.failedPaths,
     };
@@ -1018,6 +1107,7 @@ export class Runtime {
           this.flights.get(id),
           this.liveFlights.get(id),
           this.identityFlights.get(id),
+          this.equipmentFlights.get(id),
         ].filter(Boolean);
         this.invalidate(id);
         await Promise.allSettled(pending);
@@ -1065,6 +1155,7 @@ export class Runtime {
     this.invalidate(id);
     await initializing?.catch(() => {});
     await this.liveFlights.get(id)?.catch(() => {});
+    await this.equipmentFlights.get(id)?.catch(() => {});
 
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
@@ -1083,6 +1174,7 @@ export class Runtime {
       ...this.clientFlights.values(),
       ...this.identityFlights.values(),
       ...this.liveFlights.values(),
+      ...this.equipmentFlights.values(),
     ];
     for (const id of new Set([
       ...this.clients.keys(),
@@ -1090,6 +1182,7 @@ export class Runtime {
       ...this.flights.keys(),
       ...this.identityFlights.keys(),
       ...this.liveFlights.keys(),
+      ...this.equipmentFlights.keys(),
     ]))
       this.invalidate(id);
     await Promise.allSettled(pending);

@@ -7,7 +7,15 @@ export type ExplorerRoute =
   | { type: 'match'; id: string; subject?: string }
   | { type: 'career'; rank: Ranked }
   | { type: 'live' }
-  | { type: 'identity' }
+  | { type: 'identity'; initialTab?: 'card' | 'title' }
+  | {
+      type: 'collection';
+      kind: import('./CollectionHub').CollectionKind;
+      scope?: import('./CollectionHub').CollectionScope;
+    }
+  | { type: 'equipped' }
+  | { type: 'round'; detail: import('../core/types').MatchDetail; round: number; eventId?: string }
+  | { type: 'live-loadout'; matchId: string; subject?: string }
   | { type: 'presets' }
   | { type: 'friends' }
   | { type: 'chat-settings'; subject?: string }

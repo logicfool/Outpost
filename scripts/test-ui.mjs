@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.6.6');
+const out = path.join(root, 'docs', 'validation-0.7.0');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -121,6 +121,95 @@ try {
     await click('Back from player profile');
     await click('Close match report');
   });
+  await check('round timeline opens an event minimap without another match request', async () => {
+    await click('Open Ascent match');
+    await tab('Rounds');
+    await page.getByTestId('round-kill-chart').waitFor();
+    await shot('round-visual-overview');
+    await click('Details by round');
+    await page.getByText('Round 1 / 21', { exact: true }).waitFor();
+    await page.getByTestId('round-minimap').waitFor();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('[data-testid="round-minimap"] img')].some(
+        (i) => i.complete && i.naturalWidth > 0,
+      ),
+    );
+    assert.ok((await page.locator('[data-testid^="map-player-"]').count()) > 0);
+    await shot('round-detail-first');
+    await click('Next event');
+    await shot('round-detail-next-event');
+    await click('Next round');
+    await page.getByText('Round 2 / 21', { exact: true }).waitFor();
+    await shot('round-detail-second');
+    await click('Toggle round economy');
+    await page.getByText('Round economy', { exact: true }).waitFor();
+    await shot('round-economy');
+    await click('Previous round');
+    await page.getByText('Round 1 / 21', { exact: true }).waitFor();
+    await click('Back from round details');
+    await click('Close match report');
+  });
+  await check('duel matrix cells show paired events and link back to a round', async () => {
+    await click('Open Ascent match');
+    await tab('Duels');
+    await page.getByTestId('duel-matrix').waitFor();
+    assert.equal(await page.getByRole('button', { name: /^Duels / }).count(), 25);
+    await shot('duel-matrix');
+    const cells = page.getByRole('button', { name: /^Duels / });
+    let picked = false;
+    for (let i = 0; i < (await cells.count()); i++) {
+      const label = await cells.nth(i).getAttribute('aria-label');
+      if (label && !label.includes(': 0 kills 0 deaths')) {
+        await cells.nth(i).click();
+        picked = true;
+        break;
+      }
+    }
+    assert.equal(picked, true);
+    await shot('duel-pair-events');
+    await page
+      .getByRole('button', { name: /^Round \d+ event / })
+      .first()
+      .click();
+    await page.getByTestId('round-minimap').waitFor();
+    await click('Back from round details');
+    await click('Close match report');
+  });
+  await check(
+    'live round score and match skins are available from the current roster',
+    async () => {
+      await click('View live game details');
+      await page.getByRole('dialog').getByText('Round 13 · 7 - 5', { exact: true }).waitFor();
+      await click('Match skins');
+      await page
+        .getByText('Equipped cosmetics, not the weapon currently held.', { exact: true })
+        .waitFor();
+      await page.getByRole('tab', { name: 'Lumen', exact: true }).click();
+      await shot('live-match-skins');
+      await page.getByText('Reaver Vandal', { exact: true }).waitFor();
+      await click('Back from match skins');
+      await click('Back from live match');
+    },
+  );
+  await check(
+    'round map and duel matrix fit a narrow phone without document overflow',
+    async () => {
+      await page.setViewportSize({ width: 320, height: 740 });
+      await click('Open Ascent match');
+      await tab('Rounds');
+      await click('Details by round');
+      await page.getByTestId('round-minimap').waitFor();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await shot('round-map-320');
+      await click('Back from round details');
+      await tab('Duels');
+      await page.getByTestId('duel-matrix').waitFor();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+      await shot('duel-matrix-320');
+      await click('Close match report');
+      await page.setViewportSize({ width: 390, height: 844 });
+    },
+  );
   await check('owned player card can be selected, applied and reopened', async () => {
     await click('Change player card and title');
     const choices = page.getByRole('button', { name: /^Select / });
@@ -166,7 +255,7 @@ try {
   });
   await check('collection exposes chromas, levels and media choices', async () => {
     await tab('Collection');
-    await tab('All items');
+    await click('All items');
     await tab('Chromas');
     assert.ok((await page.getByRole('button', { name: /^View / }).count()) > 0);
     await shot('chromas');
@@ -180,7 +269,44 @@ try {
     );
     await shot('skin-levels');
     await click('Close item details');
+    await click('Back from collection browser');
   });
+  await check(
+    'Collection home groups loadout actions and categories instead of a giant grid',
+    async () => {
+      await tab('Collection');
+      await page.getByTestId('collection-home').waitFor();
+      for (const label of [
+        'Change banner',
+        'Change title',
+        'Weapon loadout',
+        'Saved loadouts',
+        'Skins',
+        'Buddies',
+        'Sprays',
+        'Player cards',
+        'Titles',
+      ])
+        await page.getByRole('button', { name: label, exact: true }).waitFor();
+      await page.evaluate(() => {
+        for (const node of document.querySelectorAll('*'))
+          if (node.scrollHeight > node.clientHeight) node.scrollTop = 0;
+      });
+      await shot('collection-home');
+      await click('Weapon loadout');
+      await page.getByRole('button', { name: 'View equipped Phantom', exact: true }).waitFor();
+      await shot('collection-equipped');
+      await click('Back from weapon loadout');
+      await click('Change title');
+      await page.getByRole('tab', { name: 'Owned titles', exact: true }).waitFor();
+      await click('Back from identity editor');
+      await click('Skins');
+      await page.getByRole('textbox', { name: 'Search collection', exact: true }).fill('Prime');
+      await page.getByRole('button', { name: 'View Prime Vandal', exact: true }).waitFor();
+      await shot('collection-search-owned');
+      await click('Back from collection browser');
+    },
+  );
   await check('Battle Pass has pass progress rather than an unrelated rank panel', async () => {
     await tab('Battle Pass');
     await page.getByText('CURRENT BATTLE PASS', { exact: true }).waitFor();

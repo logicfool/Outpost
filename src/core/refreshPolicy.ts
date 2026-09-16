@@ -5,13 +5,15 @@ export const LIVE_POLL_MS = 60_000;
 export const MANUAL_COOLDOWN_MS = 60_000;
 export const RESET_GRACE_MS = 2_000;
 export type RefreshReason = 'auto' | 'manual';
-export type RefreshPurpose = 'sync' | 'live';
+export type RefreshPurpose = 'sync' | 'live' | 'equipment';
 export interface RefreshGateState {
   attemptedAt: number;
   notBefore: number;
   autoNotBefore?: number;
   failures: number;
   sample?: Section<LiveGame>;
+  equipment?: Section<import('./matchTypes').LiveEquipment>;
+  matchId?: string;
 }
 export interface SnapshotPlan {
   store: boolean;

@@ -472,3 +472,63 @@ test('optional notification preferences failure does not turn successful store i
   assert.equal(result.store.status, 'ready');
   assert.equal(result.refreshIssue, undefined);
 });
+
+test('opening a report upgrades old map metadata once without refreshing the store', async () => {
+  const f = fixture();
+  let publicCalls = 0;
+  const old = {
+    items: { card: { name: 'Cached' } },
+    schemaVersion: 7,
+    maps: { ascent: { name: 'Ascent' } },
+    bundles: {},
+    contracts: {},
+    tiers: {},
+    fetchedAt: f.now,
+  };
+  const fresh = {
+    ...old,
+    schemaVersion: 8,
+    maps: {
+      ascent: {
+        name: 'Ascent',
+        minimap: 'https://media.valorant-api.com/maps/map.png',
+        xMultiplier: 0.1,
+        yMultiplier: 0.1,
+        xScalarToAdd: 0.5,
+        yScalarToAdd: 0.5,
+      },
+    },
+  };
+  f.runtime.repository.catalog = async () => old;
+  f.runtime.publicClient = {
+    load: async () => {
+      publicCalls++;
+      return fresh;
+    },
+  };
+  const load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  await load.call(f.runtime, false, false);
+  assert.equal(publicCalls, 0);
+  await load.call(f.runtime);
+  await load.call(f.runtime);
+  assert.equal(publicCalls, 1);
+  assert.equal(f.runtime.catalog.schemaVersion, 8);
+  assert.equal(f.calls.snapshots, 0);
+});
+test('a weapons-only media refresh cannot mark old map metadata as migrated', async () => {
+  const f = fixture();
+  f.runtime.catalog = {
+    items: {},
+    schemaVersion: 7,
+    maps: { ascent: { name: 'Ascent' } },
+    weapons: {},
+    bundles: {},
+    contracts: {},
+    tiers: {},
+    fetchedAt: f.now,
+  };
+  f.runtime.publicClient = { weaponSkins: async () => ({ data: [] }) };
+  await f.runtime.refreshMedia();
+  assert.equal(f.runtime.catalog.schemaVersion, 7);
+  assert.equal(f.runtime.catalog.maps.ascent.minimap, undefined);
+});

@@ -23,6 +23,7 @@ import type { Friend } from '../core/chatTypes';
 import type { Catalog } from '../core/types';
 import type { Navigate } from './explorerTypes';
 import { friendSections, friendStatus } from '../core/friends';
+import { ownLiveProgress, progressLabel } from '../core/liveProgress';
 import { playerLabel } from '../core/playerNames';
 import { Image } from './CachedImage';
 import { PlayerAvatar } from './PlayerAvatar';
@@ -35,7 +36,9 @@ const FriendRow = memo(function FriendRow({
   connected,
   onOpen,
   onChat,
+  now,
 }: {
+  now: number;
   friend: Friend;
   catalog: Catalog;
   connected: boolean;
@@ -61,7 +64,7 @@ const FriendRow = memo(function FriendRow({
         disabled={!connected || !!friend.hidden}
         onPress={() => onOpen(friend)}
       >
-        <PlayerAvatar card={friend.card} catalog={catalog} status={state} />
+        <PlayerAvatar card={friend.card} catalog={catalog} status={state} size={40} />
         <View style={styles.identity}>
           <Text style={S.h3} numberOfLines={1}>
             {playerLabel(friend)}
@@ -81,7 +84,7 @@ const FriendRow = memo(function FriendRow({
             ]}
             numberOfLines={2}
           >
-            {friendStatus(friend, connected)}
+            {friendStatus(friend, connected, now)}
           </Text>
         </View>
         {rank?.image && (
@@ -111,6 +114,11 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles);
   const navInset = useNavInset();
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
   const [query, setQuery] = useState(''),
     search = useDeferredValue(query);
   const connected = model.chat.status === 'ready',
@@ -139,11 +147,12 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
         friend={item}
         catalog={model.catalog}
         connected={connected}
+        now={now}
         onOpen={onOpen}
         onChat={onChat}
       />
     ),
-    [model.catalog, connected, onOpen, onChat],
+    [model.catalog, connected, onOpen, onChat, now],
   );
   const ownCard =
     model.snapshot?.loadout.status === 'ready'
@@ -152,14 +161,20 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
   const game =
     model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data : undefined;
-  const ownStatus =
-    game?.observedAt && Date.now() - game.observedAt > 120000
-      ? 'Status last checked earlier'
-      : game?.state === 'in_game'
-        ? `In game${game.map ? ' · ' + game.map : ''}`
-        : game?.state === 'agent_select'
-          ? 'Agent select'
-          : 'Your account';
+  const self = model.chat.selfPresence,
+    selfFresh = connected && !!self?.updatedAt && now - self.updatedAt <= 180000;
+  const reported = progressLabel(ownLiveProgress(game, self, connected, now), now);
+  const ownStatus = selfFresh
+    ? friendStatus(self!, connected, now)
+    : reported
+      ? reported
+      : game?.observedAt && Date.now() - game.observedAt > 120000
+        ? 'Status last checked earlier'
+        : game?.state === 'in_game'
+          ? `In game${game.map ? ' · ' + game.map : ''}`
+          : game?.state === 'agent_select'
+            ? 'Agent select'
+            : 'Your account';
   return (
     <SectionList
       sections={sections}
@@ -193,7 +208,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
             </Pressable>
           </View>
           <View style={[styles.row, { marginBottom: 0 }]}>
-            <PlayerAvatar card={ownCard} catalog={model.catalog} />
+            <PlayerAvatar card={ownCard ?? self?.card} catalog={model.catalog} size={40} />
             <View style={styles.identity}>
               <Text style={S.h3} numberOfLines={1}>
                 {model.active?.gameName}
@@ -272,14 +287,14 @@ const makeStyles = (C: Palette) =>
       alignItems: 'center',
       gap: 12,
       backgroundColor: C.surface,
-      borderRadius: 18,
-      padding: 12,
-      marginBottom: 10,
-      minHeight: 80,
+      borderRadius: 16,
+      padding: 10,
+      marginBottom: 8,
+      minHeight: 68,
     },
     person: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 12 },
     identity: { flex: 1, minWidth: 0, gap: 5 },
-    rank: { width: 33, height: 38, flexShrink: 0 },
+    rank: { width: 27, height: 32, flexShrink: 0 },
     chat: { width: 36, height: 44, alignItems: 'center', justifyContent: 'center' },
     section: {
       color: C.subtle,

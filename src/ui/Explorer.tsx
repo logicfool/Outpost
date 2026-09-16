@@ -1,3 +1,7 @@
+import { CollectionBrowser, EquippedPanel } from './CollectionHub';
+import { RoundPanel } from './RoundPanel';
+import { LiveEquipmentPanel } from './LiveEquipmentPanel';
+import { ownLiveProgress, progressLabel } from '../core/liveProgress';
 import { BundlePanel } from './BundlePanel';
 import { ItemModal } from './screens';
 import { useMatchPreviews } from '../state/useMatchPreviews';
@@ -142,6 +146,14 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       generation.current++;
     };
   }, [player.subject, version, model.playerProfile]);
+  const friend =
+    model.chat.status === 'ready'
+      ? model.chat.friends.find((f) => f.subject === player.subject)
+      : undefined;
+  const live =
+    model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data : undefined;
+  const liveParticipant =
+    !!live?.matchId && !!live.players?.some((p) => p.subject === player.subject && !p.hidden);
   const matches = data?.matches.status === 'ready' ? data.matches.data : [];
   const more = async () => {
     if (loading) return;
@@ -214,6 +226,29 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
               ownId={model.active?.puuid}
               catalog={model.catalog}
             />
+            {friend && (
+              <Text style={[S.small, { color: C.mint }]}>
+                {friend.presence === 'in_game'
+                  ? [friend.activity ?? 'In game', progressLabel(friend.progress), friend.map]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : (friend.activity ?? friend.presence)}
+              </Text>
+            )}
+            {liveParticipant && (
+              <Button
+                title="View match skins"
+                secondary
+                icon="crosshair"
+                onPress={() =>
+                  onNavigate({
+                    type: 'live-loadout',
+                    matchId: live!.matchId!,
+                    subject: player.subject,
+                  })
+                }
+              />
+            )}
             <Text style={S.small}>
               {data?.identitySource === 'friend'
                 ? 'Identity from your friend’s reported presence.'
@@ -267,6 +302,11 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
     section = model.snapshot?.liveGame;
   const [ranks, setRanks] = useState<Record<string, Ranked>>({});
   const gameData = section?.status === 'ready' ? section.data : undefined;
+  const progress = ownLiveProgress(
+    gameData,
+    model.chat.selfPresence,
+    model.chat.status === 'ready',
+  );
   const rosterKey = gameData?.players
     ?.filter((p) => !p.hidden)
     .map((p) => p.subject)
@@ -294,21 +334,32 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   return (
     <ModalPage>
       <ModalHeader title="Live match" closeLabel="Back from live match" onClose={onBack} />
-      <ScrollView contentContainerStyle={S.content}>
-        <Button
-          title={polling.busy ? 'Checking…' : 'Refresh live game'}
-          icon="refresh-cw"
-          secondary
-          disabled={polling.busy}
-          onPress={polling.refresh}
-        />
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={polling.busy}
+            onRefresh={polling.refresh}
+            tintColor={C.accent}
+          />
+        }
+        contentContainerStyle={S.content}
+      >
+        {false && (
+          <Button
+            title={polling.busy ? 'Checking…' : 'Refresh live game'}
+            icon="refresh-cw"
+            secondary
+            disabled={polling.busy}
+            onPress={polling.refresh}
+          />
+        )}
         <Resource title="Live game" section={section}>
           {(game) => (
             <>
               {game.mapImage && (
                 <Image
                   source={{ uri: game.mapImage }}
-                  style={{ width: '100%', height: 185, borderRadius: 24 }}
+                  style={{ width: '100%', height: 128, borderRadius: 18 }}
                   resizeMode="cover"
                 />
               )}
@@ -325,6 +376,12 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                 />
                 <Text style={S.h2}>{game.map ?? 'Map not returned'}</Text>
                 {game.queue && <Text style={S.body}>{queueName(game.queue)}</Text>}
+                {progressLabel(progress) && (
+                  <Text style={[S.h2, { color: C.mint }]}>{progressLabel(progress)}</Text>
+                )}
+                {progress?.roundEstimated && (
+                  <Text style={S.small}>Round estimate from the last reported score.</Text>
+                )}
                 <Text style={S.small}>
                   Checked {game.observedAt ? time(game.observedAt) : 'on the last refresh'} ·{' '}
                   {model.active?.region.toUpperCase()}
@@ -345,10 +402,17 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                 />
               )}
               {game.players?.length ? (
-                <Text style={S.small}>
-                  {game.players.length} players returned. Agent select may expose only your team.
-                  Tap a visible player for their profile; hidden identities stay hidden.
-                </Text>
+                <View style={S.between}>
+                  <Text style={S.small}>{game.players.length} players returned.</Text>
+                  <Button
+                    title="Match skins"
+                    icon="crosshair"
+                    secondary
+                    onPress={() =>
+                      game.matchId && onNavigate({ type: 'live-loadout', matchId: game.matchId })
+                    }
+                  />
+                </View>
               ) : null}
               {[...new Set(game.players?.map((p) => p.teamId))].map((team) => (
                 <View key={team} style={{ gap: 10 }}>
@@ -362,10 +426,10 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                         disabled={!!p.hidden}
                         accessibilityRole="button"
                         accessibilityLabel={`View ${playerLabel(p, model.active?.puuid)} profile`}
-                        style={[S.card, S.row]}
+                        style={[S.card, S.row, { padding: 12, gap: 10 }]}
                       >
                         {p.agentImage ? (
-                          <Image source={{ uri: p.agentImage }} style={{ width: 48, height: 48 }} />
+                          <Image source={{ uri: p.agentImage }} style={{ width: 34, height: 34 }} />
                         ) : (
                           <Feather name="crosshair" size={30} color={C.subtle} />
                         )}
@@ -419,11 +483,15 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   );
 }
 
-function IdentityPanel({ model, onBack }: PanelProps) {
+function IdentityPanel({
+  model,
+  onBack,
+  initialTab = 'card',
+}: PanelProps & { initialTab?: 'card' | 'title' }) {
   const { C, S, isDark } = useTheme();
 
   const [base, setBase] = useState<Loadout | null>(null),
-    [tab, setTab] = useState<'card' | 'title'>('card');
+    [tab, setTab] = useState<'card' | 'title'>(initialTab);
   const [cardId, setCardId] = useState<string | undefined>(),
     [titleId, setTitleId] = useState<string | undefined>();
   const [query, setQuery] = useState(''),
@@ -823,8 +891,39 @@ export function ExplorerModal({
         <CareerModal rank={route.rank} visible onClose={onBack} embedded />
       )}
       {route?.type === 'live' && <LivePanel {...props} />}
+      {route?.type === 'live-loadout' && (
+        <LiveEquipmentPanel
+          key={`${route.matchId}:${route.subject}`}
+          model={model}
+          matchId={route.matchId}
+          subject={route.subject}
+          onBack={onBack}
+        />
+      )}
       {route?.type === 'presets' && <PresetsPanel model={model} onBack={onBack} />}
-      {route?.type === 'identity' && <IdentityPanel {...props} />}
+      {route?.type === 'identity' && (
+        <IdentityPanel key={route.initialTab} {...props} initialTab={route.initialTab} />
+      )}
+      {route?.type === 'collection' && (
+        <CollectionBrowser
+          key={`${route.kind}:${route.scope}`}
+          {...props}
+          initialKind={route.kind}
+          initialScope={route.scope}
+        />
+      )}
+      {route?.type === 'equipped' && <EquippedPanel {...props} />}
+      {route?.type === 'round' && (
+        <RoundPanel
+          key={`${route.detail.id}:${route.round}:${route.eventId}`}
+          detail={route.detail}
+          initialRound={route.round}
+          eventId={route.eventId}
+          ownId={model.active?.puuid}
+          onBack={onBack}
+          onNavigate={onNavigate}
+        />
+      )}
       {route?.type === 'friends' && <FriendsPanel {...props} />}
       {route?.type === 'chat-settings' && (
         <ModalPage>

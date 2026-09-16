@@ -28,6 +28,7 @@ import {
   timestamp,
 } from './validation';
 import { catalogItem } from './catalog';
+import { normalizeAnalysis, isEnemyKill } from './matchAnalysis';
 export const CURRENCIES = {
   VP: '85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741',
   RP: 'e59aa87c-4cbf-517a-5983-6e81511be9b7',
@@ -402,6 +403,18 @@ export function normalizeMatchDetail(
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
   const self = players.find((p) => p.self)!,
     byId = new Map(players.map((p) => [p.subject, p]));
+  const analysis = normalizeAnalysis(raw, catalog, players);
+  duels.clear();
+  for (const event of analysis.events) {
+    if (!isEnemyKill(event, players)) continue;
+    const opponent =
+      event.actor === me ? event.victim : event.victim === me ? event.actor : undefined;
+    if (!opponent) continue;
+    const score = duels.get(opponent) ?? { kills: 0, deaths: 0 };
+    if (event.actor === me) score.kills++;
+    else score.deaths++;
+    duels.set(opponent, score);
+  }
   return {
     id: text(info.matchId),
     map: catalog.maps[text(info.mapId)]?.name ?? 'Unknown map',
@@ -437,8 +450,14 @@ export function normalizeMatchDetail(
       won: t.won === true,
     })),
     players,
+    analysis,
     rounds: roundResults.map((round, index) => ({
-      number: index + 1,
+      number:
+        typeof round.roundNum === 'number' &&
+        Number.isInteger(round.roundNum) &&
+        round.roundNum >= 0
+          ? round.roundNum + 1
+          : index + 1,
       winningTeam: text(round.winningTeam),
       outcome: roundOutcome(round),
     })),

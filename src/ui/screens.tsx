@@ -1,3 +1,5 @@
+import { CollectionHub } from './CollectionHub';
+import { RoundOverview, DuelMatrix } from './MatchVisuals';
 import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
 import { useNavInset } from './NavInsets';
 import { SessionStatus } from './SessionStatus';
@@ -642,198 +644,8 @@ function ItemTile({
     </Pressable>
   );
 }
-export function CollectionScreen({ model, onItem, onNavigate }: Props) {
-  const { C, S, isDark } = useTheme();
-  const navInset = useNavInset();
-  const styles = useThemedStyles(makeStyles);
-
-  const [tab, setTab] = useState<'owned' | 'wishlist' | 'catalog' | 'equipped'>('owned'),
-    [query, setQuery] = useState('');
-  const [kind, setKind] = useState<
-      'all' | 'skin' | 'buddy' | 'spray' | 'card' | 'agent' | 'chroma' | 'title'
-    >('all'),
-    [weapon, setWeapon] = useState('all');
-  const owned = model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : [];
-  const all = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          Object.values(model.catalog.items).map((item) => [
-            item.kind === 'chroma' ? item.id : item.canonicalId,
-            item.kind === 'chroma' ? item : { ...item, id: item.canonicalId },
-          ]),
-        ).values(),
-      ),
-    [model.catalog],
-  );
-  const weapons = useMemo(
-    () => ['all', ...Array.from(new Set(all.filter((i) => i.weapon).map((i) => i.weapon!))).sort()],
-    [all],
-  );
-  const items = useMemo(
-    () =>
-      (tab === 'owned'
-        ? owned
-        : tab === 'wishlist'
-          ? all.filter((item) => model.wishlist.includes(item.canonicalId))
-          : all
-      )
-        .filter(
-          (item) =>
-            (kind === 'all' || item.kind === kind) &&
-            (weapon === 'all' || item.weapon === weapon) &&
-            item.name.toLowerCase().includes(query.toLowerCase()),
-        )
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [tab, owned, all, kind, weapon, query, model.wishlist],
-  );
-  const header = (
-    <View style={{ gap: 14, paddingBottom: 16 }}>
-      <Heading eyebrow="BUILT OVER TIME" title="Collection" />
-      <Button
-        title="Saved loadouts"
-        secondary
-        icon="layers"
-        onPress={() => onNavigate({ type: 'presets' })}
-      />
-      <Button
-        title="Change player card & title"
-        secondary
-        icon="image"
-        onPress={() => onNavigate({ type: 'identity' })}
-      />
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        items={[
-          { id: 'owned', label: 'Owned' },
-          { id: 'wishlist', label: `Wishlist · ${model.wishlist.length}` },
-          { id: 'catalog', label: 'All items' },
-          { id: 'equipped', label: 'Loadout' },
-        ]}
-      />
-      {tab !== 'equipped' && (
-        <>
-          <View style={styles.search}>
-            <Feather name="search" size={16} color={C.subtle} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search skins, buddies, cards…"
-              placeholderTextColor={C.subtle}
-              value={query}
-              onChangeText={setQuery}
-              accessibilityLabel="Search collection"
-              autoCorrect={false}
-            />
-          </View>
-          <Tabs
-            value={kind}
-            onChange={setKind}
-            items={[
-              { id: 'all', label: 'All' },
-              { id: 'skin', label: 'Skins' },
-              { id: 'chroma', label: 'Chromas' },
-              { id: 'buddy', label: 'Buddies' },
-              { id: 'spray', label: 'Sprays' },
-              { id: 'card', label: 'Cards' },
-              { id: 'title', label: 'Titles' },
-              { id: 'agent', label: 'Agents' },
-            ]}
-          />
-          {(kind === 'skin' || kind === 'chroma') && (
-            <Tabs
-              value={weapon}
-              onChange={setWeapon}
-              items={weapons.map((id) => ({ id, label: id === 'all' ? 'All weapons' : id }))}
-            />
-          )}
-        </>
-      )}
-    </View>
-  );
-  if (tab === 'equipped')
-    return (
-      <Page model={model}>
-        {header}
-        <Resource title="Loadout" section={model.snapshot?.loadout}>
-          {(data) => (
-            <>
-              {data.card || data.title ? (
-                <View style={[S.card, S.row]}>
-                  {data.card && <ItemArt item={data.card} size={84} style={{ width: 64 }} />}
-                  <View style={{ flex: 1, gap: 4 }}>
-                    {data.card && <Text style={S.h3}>{data.card.name}</Text>}
-                    {data.title && (
-                      <Text style={[S.small, { color: C.gold }]}>{data.title.name}</Text>
-                    )}
-                  </View>
-                </View>
-              ) : null}
-              <View style={styles.tileGrid}>
-                {data.guns.map((gun, index) => (
-                  <View key={`${gun.weapon}:${index}`} style={styles.tileCell}>
-                    <ItemTile
-                      item={gun.skin}
-                      label={gun.weapon.toUpperCase()}
-                      onOpen={() => onItem(gun.skin)}
-                    />
-                  </View>
-                ))}
-              </View>
-            </>
-          )}
-        </Resource>
-      </Page>
-    );
-  const waiting = tab === 'owned' && model.snapshot?.collection.status !== 'ready';
-  return (
-    <FlatList
-      data={waiting ? [] : items}
-      numColumns={2}
-      keyExtractor={(item) => `${item.kind}:${item.id}`}
-      contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
-      columnWrapperStyle={{ gap: 12 }}
-      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-      ListHeaderComponent={header}
-      refreshControl={
-        <RefreshControl
-          refreshing={model.busy}
-          onRefresh={() => void model.refresh()}
-          tintColor={C.accent}
-        />
-      }
-      initialNumToRender={12}
-      maxToRenderPerBatch={12}
-      windowSize={7}
-      renderItem={({ item }) => (
-        <View style={{ flex: 1, maxWidth: '49%' }}>
-          <ItemTile
-            item={item}
-            wished={model.wishlist.includes(item.canonicalId)}
-            onOpen={() => onItem(item)}
-            onWish={() => void model.toggleWish(item.canonicalId)}
-          />
-        </View>
-      )}
-      ListEmptyComponent={
-        waiting ? (
-          <Resource section={model.snapshot?.collection} title="Collection">
-            {() => null}
-          </Resource>
-        ) : (
-          <Empty
-            title={tab === 'wishlist' ? 'Your wishlist is empty' : 'Nothing found'}
-            detail={
-              tab === 'wishlist'
-                ? 'Tap the heart on any item to save it.'
-                : 'Try a different search or filter.'
-            }
-            icon={tab === 'wishlist' ? 'heart' : 'search'}
-          />
-        )
-      }
-    />
-  );
+export function CollectionScreen({ model, onNavigate }: Props) {
+  return <CollectionHub model={model} onNavigate={onNavigate} />;
 }
 function BattlePassRewards({
   model,
@@ -1423,7 +1235,7 @@ function PlayerRow({
       style={[styles.playerCard, you && { borderColor: `${C.gold}59` }]}
     >
       <View style={[S.row, { gap: 12 }]}>
-        <AgentFrame image={player.agentImage} size={44} />
+        <AgentFrame image={player.agentImage} size={34} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[S.h3, you && { color: C.gold }]} numberOfLines={1}>
             {label}
@@ -1523,7 +1335,7 @@ export function MatchReport({
           <ActivityIndicator style={{ marginTop: 40 }} size="large" color={C.accent} />
         ) : (
           <>
-            <View style={styles.reportHero}>
+            <View style={[styles.reportHero, { minHeight: 132, padding: 16, gap: 5 }]}>
               {detail.mapImage ? (
                 <Image source={{ uri: detail.mapImage }} style={fill} resizeMode="cover" />
               ) : (
@@ -1548,7 +1360,7 @@ export function MatchReport({
                   .join(' · ')}
               </Text>
             </View>
-            <View style={S.card}>
+            <View style={[S.card, { padding: 12 }]}>
               <View style={S.row}>
                 <MiniStat
                   label="K/D/A"
@@ -1621,99 +1433,10 @@ export function MatchReport({
                       onOpen={() => onNavigate({ type: 'player', player })}
                     />
                   )))}
-            {tab === 'rounds' && own && other && (
-              <View style={[S.card, { gap: 14 }]}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={{ gap: 6 }}>
-                    <View style={styles.roundLine}>
-                      <View style={styles.roundLabel} />
-                      {detail.rounds.map((round) => (
-                        <Text key={round.number} style={styles.roundNumber}>
-                          {round.number}
-                        </Text>
-                      ))}
-                    </View>
-                    {[own, other].map((team) => {
-                      const color = team === own ? C.mint : C.accent;
-                      return (
-                        <View key={team.id} style={styles.roundLine}>
-                          <Text style={[styles.roundLabel, { color }]}>
-                            {team === own ? 'YOU' : 'ENEMY'}
-                          </Text>
-                          {detail.rounds.map((round) => {
-                            const won = round.winningTeam === team.id;
-                            return (
-                              <View
-                                key={round.number}
-                                style={[
-                                  styles.roundCell,
-                                  won && {
-                                    backgroundColor: `${color}2E`,
-                                    borderColor: `${color}66`,
-                                  },
-                                ]}
-                              >
-                                {won ? (
-                                  <MaterialCommunityIcons
-                                    name={ROUND_ICONS[round.outcome]}
-                                    size={14}
-                                    color={color}
-                                  />
-                                ) : null}
-                              </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    })}
-                  </View>
-                </ScrollView>
-                <View style={styles.legend}>
-                  {(['elimination', 'detonate', 'defuse', 'time'] as const).map((outcome) => (
-                    <View key={outcome} style={[S.row, { gap: 4 }]}>
-                      <MaterialCommunityIcons
-                        name={ROUND_ICONS[outcome]}
-                        size={13}
-                        color={C.muted}
-                      />
-                      <Text style={S.small}>
-                        {outcome === 'elimination'
-                          ? 'Elimination'
-                          : outcome === 'detonate'
-                            ? 'Spike detonated'
-                            : outcome === 'defuse'
-                              ? 'Spike defused'
-                              : 'Time expired'}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+            {tab === 'rounds' && <RoundOverview detail={detail} onNavigate={onNavigate} />}
+            {tab === 'duels' && (
+              <DuelMatrix detail={detail} ownId={model.active?.puuid} onNavigate={onNavigate} />
             )}
-            {tab === 'duels' &&
-              (detail.duels.length ? (
-                detail.duels.map((duel) => (
-                  <View key={duel.subject} style={[S.card, { gap: 10 }]}>
-                    <View style={[S.row, { gap: 12 }]}>
-                      <AgentFrame image={duel.agentImage} size={40} />
-                      <Text style={[S.h3, { flex: 1 }]} numberOfLines={1}>
-                        {duel.name}
-                      </Text>
-                      <Text style={styles.duelScore}>
-                        <Text style={{ color: C.mint }}>{duel.kills}</Text>
-                        <Text style={{ color: C.subtle }}> - </Text>
-                        <Text style={{ color: C.accent }}>{duel.deaths}</Text>
-                      </Text>
-                    </View>
-                    <View style={styles.duelBar}>
-                      <View style={{ flex: duel.kills || 0.0001, backgroundColor: C.mint }} />
-                      <View style={{ flex: duel.deaths || 0.0001, backgroundColor: C.accent }} />
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Empty title="No duels recorded" icon="crosshair" />
-              ))}
           </>
         )}
       </ScrollView>
@@ -2081,7 +1804,7 @@ export function AccountScreen({ model, onLink }: Props) {
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.6</Text>
+          <Text style={S.small}>Outpost 0.7.0</Text>
         </View>
       </Page>
       <Modal

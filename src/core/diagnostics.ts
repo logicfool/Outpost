@@ -14,6 +14,8 @@ export function serviceLabel(url: string): string {
     path = parsed.pathname;
   if (parsed.hostname === 'valorant-api.com') return 'Public catalog';
   if (parsed.hostname === 'clientconfig.rpg.riotgames.com') return 'Chat configuration';
+  if (path.endsWith('/loadouts') && (path.includes('/core-game/') || path.includes('/pregame/')))
+    return 'Live cosmetics';
   if (path.includes('/service/chat')) return 'Chat token';
   return (
     [

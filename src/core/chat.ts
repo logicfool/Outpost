@@ -304,12 +304,18 @@ export class RiotChat {
       });
     }
     this.roster = next;
-    for (const id of this.resources.keys()) if (!next.has(id)) this.resources.delete(id);
+    for (const id of this.resources.keys())
+      if (!next.has(id) && id !== this.credentials?.subject) this.resources.delete(id);
     this.publishFriends();
   }
   private applyPresence(node: XmlNode) {
     const jid = parseJid(node.attrs.from ?? ''),
-      friend = jid && this.roster.get(jid.subject);
+      c = this.credentials;
+    const own =
+      !!jid && !!c && jid.subject === c.subject && jid.bare === `${c.subject}@${c.domain}`;
+    const friend = own
+      ? { subject: c!.subject, jid: jid!.bare, name: 'You', tag: '', presence: 'offline' as const }
+      : jid && this.roster.get(jid.subject);
     if (
       !jid ||
       !friend ||
@@ -335,16 +341,23 @@ export class RiotChat {
           Number(b.presenceSource === 'valorant') - Number(a.presenceSource === 'valorant') ||
           (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
       )[0];
-    this.roster.set(jid.subject, {
+    const next = {
       ...friend,
       ...(active ?? {
         presence: 'offline' as const,
         map: undefined,
         mapId: undefined,
         status: undefined,
+        progress: undefined,
+        matchId: undefined,
       }),
       updatedAt: this.now(),
-    });
+    };
+    if (own) {
+      this.update({ selfPresence: next });
+      return;
+    }
+    this.roster.set(jid.subject, next);
     this.publishFriends(true);
   }
   private publishFriends(defer = false) {
@@ -699,6 +712,7 @@ export class RiotChat {
       ]),
     );
     this.update({
+      selfPresence: undefined,
       status: 'disconnected',
       friends,
       error: undefined,

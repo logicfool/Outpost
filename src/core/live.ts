@@ -2,6 +2,7 @@ import type { Catalog, LiveGame } from './types';
 import type { LivePlayer } from './playerTypes';
 import { catalogItem } from './catalog';
 import { tierMeta } from './rank';
+import { matchProgress } from './liveProgress';
 import { AppError, array, nullableNumber, object, text, uuid } from './validation';
 
 export function glzOrigin(region: string, shard: string): string {
@@ -75,6 +76,11 @@ export function normalizeLive(
   return {
     state,
     matchId: uuid(matchId),
+    mapId,
+    progress:
+      state === 'in_game'
+        ? matchProgress(raw, players.get(self)!.teamId, text(root.QueueID), Date.now())
+        : undefined,
     map: map?.name ?? (mapId.split('/').pop() || undefined),
     mapImage: map?.image,
     queue: text(root.QueueID) || undefined,

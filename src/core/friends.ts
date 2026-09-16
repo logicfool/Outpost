@@ -2,6 +2,7 @@ import type { Catalog, CatalogItem } from './types';
 import type { Friend, Conversation } from './chatTypes';
 import { safeImage } from './validation';
 import { queueName } from './normalize';
+import { progressLabel } from './liveProgress';
 import { presencePriority } from './chatPresence';
 
 export const DEFAULT_CARD_ART =
@@ -39,7 +40,7 @@ export function squareCardArt(
 ): string | undefined {
   return squareCardCandidates(card, catalog)[0];
 }
-export function friendStatus(friend: Friend, connected = true): string {
+export function friendStatus(friend: Friend, connected = true, now = Date.now()): string {
   if (!connected) return 'Last seen · connect for live status';
   if (friend.presence === 'offline') return 'Offline';
   if (friend.presence === 'away') return friend.game ? `Away · ${friend.game}` : 'Away';
@@ -59,6 +60,7 @@ export function friendStatus(friend: Friend, connected = true): string {
   return [
     game && game !== 'VALORANT' ? game : undefined,
     action,
+    friend.presence === 'in_game' ? progressLabel(friend.progress, now) : undefined,
     friend.queue && ['in_game', 'agent_select', 'queue'].includes(friend.presence)
       ? queueName(friend.queue)
       : undefined,

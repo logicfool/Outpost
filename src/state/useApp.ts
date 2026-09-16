@@ -601,6 +601,11 @@ export function useApp() {
     if (account.demo) return demoMatch(id, subject);
     const stamp = epoch.current,
       runtime = await getRuntime();
+
+    await runtime.loadCatalog().catch(() => {});
+    if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+      throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+    setCatalog(runtime.catalog);
     const detail = await (await runtime.client(account.puuid)).matchDetail(id, subject);
     const own = detail.players.find((p) => p.subject === account.puuid);
     if (own?.card && epoch.current === stamp && activeRef.current?.puuid === account.puuid)
@@ -696,6 +701,43 @@ export function useApp() {
     if (!account || account.demo) return [];
     return (await (await getRuntime()).client(account.puuid)).matchHistory(start, 20, subject);
   }, []);
+  const liveEquipment = useCallback(
+    async (matchId: string): Promise<Section<import('../core/matchTypes').LiveEquipment>> => {
+      const account = activeRef.current;
+      if (!account) return { status: 'error', code: 'NO_ACCOUNT', message: 'Select an account.' };
+      const stamp = epoch.current;
+      if (account.demo) {
+        const demo = makeDemo(),
+          game = demo.snapshot.liveGame;
+        if (game.status !== 'ready' || game.data.matchId !== matchId)
+          return { status: 'error', code: 'MATCH_SCOPE', message: 'Open the current demo match.' };
+        const skins = Object.values(demo.catalog.items).filter((i) => i.kind === 'skin');
+        return {
+          status: 'ready',
+          fetchedAt: Date.now(),
+          data: {
+            matchId,
+            observedAt: Date.now(),
+            players: (game.data.players ?? []).map((p, index) => ({
+              subject: p.subject,
+              weapons: skins
+                .filter((s, i) => i < 6 || index % 2 === 0)
+                .map((s) => ({
+                  weaponId: s.weaponId ?? s.id,
+                  weapon: s.weapon ?? 'Weapon',
+                  skin: s,
+                })),
+            })),
+          },
+        };
+      }
+      const result = await (await getRuntime()).liveEquipment(account.puuid, matchId);
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+        return { status: 'error', code: 'ACCOUNT_CHANGED', message: 'The account changed.' };
+      return result;
+    },
+    [],
+  );
   const freshLoadout = useCallback(async (): Promise<Loadout> => {
     const account = activeRef.current;
     if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
@@ -788,6 +830,7 @@ export function useApp() {
     playerProfile,
     playerMatches,
     playerRank,
+    liveEquipment,
     freshLoadout,
     saveIdentity,
   };

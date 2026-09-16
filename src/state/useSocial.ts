@@ -105,6 +105,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         : {
             ...previous.state,
             status: 'disconnected' as const,
+            selfPresence: undefined,
             friends: previous.state.friends.map((f) => ({ ...f, presence: 'offline' as const })),
           },
     };
@@ -158,7 +159,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         reconnectTimer.current = setTimeout(() => void connectRef.current(), delay);
       }
     };
-    publish({ ...previous, status: 'connecting', error: undefined });
+    publish({ ...previous, status: 'connecting', selfPresence: undefined, error: undefined });
     try {
       const store = await storeFor(a);
       if (stamp !== epoch.current) return;

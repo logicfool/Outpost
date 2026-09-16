@@ -1,5 +1,6 @@
 import { PlayerAvatar } from './PlayerAvatar';
 import { Image } from './CachedImage';
+import { ownLiveProgress, progressLabel } from '../core/liveProgress';
 import React, { useState } from 'react';
 import { playerLabel } from '../core/playerNames';
 import { hydrateItem } from '../core/catalog';
@@ -140,6 +141,7 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
   const polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
   const game = section?.status === 'ready' ? section.data : undefined;
+  const progress = ownLiveProgress(game, model.chat.selfPresence, model.chat.status === 'ready');
   const idle = !game || game.state === 'idle' || game.state === 'offline';
   const error = section?.status === 'error' ? section : game?.detailError;
   return (
@@ -163,7 +165,7 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
         accessibilityRole="button"
         accessibilityLabel="View live game details"
         onPress={onOpen}
-        style={[S.card, { overflow: 'hidden', minHeight: 94 }]}
+        style={[S.card, { overflow: 'hidden', minHeight: 78, padding: 12 }]}
       >
         {game?.mapImage && (
           <Image
@@ -185,7 +187,7 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
                 : !section
                   ? 'Checking current game…'
                   : game?.state === 'in_game'
-                    ? 'In progress'
+                    ? (progressLabel(progress) ?? 'In progress')
                     : game?.state === 'agent_select'
                       ? 'Agent selection'
                       : 'Not in a match'}

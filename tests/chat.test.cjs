@@ -330,3 +330,55 @@ test('stale socket events after disconnect cannot resurrect the account', (t) =>
   assert.equal(h.chat.snapshot.friends.length, 0);
   assert.deepEqual(h.chat.snapshot.messages, {});
 });
+
+function ownPresence(resource, loop = 'INGAME', extra = {}) {
+  const data = {
+    isValid: true,
+    matchPresenceData: {
+      sessionLoopState: loop,
+      queueId: 'competitive',
+      matchMap: 'ascent',
+      ...extra,
+    },
+    partyPresenceData: {
+      isPartyOwner: true,
+      partyOwnerMatchScoreAllyTeam: 7,
+      partyOwnerMatchScoreEnemyTeam: 5,
+    },
+  };
+  return `<presence from="${ID}@ap1.pvp.net/${resource}"><games><valorant><st>chat</st><p>${Buffer.from(JSON.stringify(data)).toString('base64')}</p></valorant></games></presence>`;
+}
+test('own account presence supplies round progress without entering the friend roster', (t) => {
+  const h = harness(t);
+  h.start();
+  h.feed(ownPresence('desktop'));
+  assert.equal(h.chat.snapshot.selfPresence.subject, ID);
+  assert.equal(h.chat.snapshot.selfPresence.progress.allyScore, 7);
+  assert.equal(h.chat.snapshot.selfPresence.progress.roundNumber, 13);
+  assert.equal(h.chat.snapshot.friends.length, 1);
+  assert.equal(h.chat.snapshot.friends[0].subject, OTHER);
+});
+test('a phone resource cannot replace active own VALORANT presence', (t) => {
+  const h = harness(t);
+  h.start();
+  h.feed(ownPresence('desktop'));
+  h.feed(`<presence from="${ID}@ap1.pvp.net/mobile"/>`);
+  assert.equal(h.chat.snapshot.selfPresence.presence, 'in_game');
+  assert.equal(h.chat.snapshot.selfPresence.progress.enemyScore, 5);
+});
+test('own match progress clears on menus and disconnect', (t) => {
+  const h = harness(t);
+  h.start();
+  h.feed(ownPresence('desktop'));
+  h.feed(ownPresence('desktop', 'MENUS'));
+  assert.equal(h.chat.snapshot.selfPresence.progress, undefined);
+  h.feed(ownPresence('desktop'));
+  h.chat.disconnect();
+  assert.equal(h.chat.snapshot.selfPresence, undefined);
+});
+test('a forged own presence from a different domain is ignored', (t) => {
+  const h = harness(t);
+  h.start();
+  h.feed(ownPresence('desktop').replace('@ap1.pvp.net/', '@other.pvp.net/'));
+  assert.equal(h.chat.snapshot.selfPresence, undefined);
+});

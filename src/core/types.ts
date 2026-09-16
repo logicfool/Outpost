@@ -94,7 +94,8 @@ export interface Catalog {
       membershipSource?: 'store' | 'catalog-theme';
     }
   >;
-  maps: Record<string, { name: string; image?: string; smallArt?: string; listImage?: string }>;
+  maps: Record<string, import('./matchTypes').MapMetadata>;
+  weapons?: Record<string, import('./matchTypes').WeaponMetadata>;
   tiers: Record<string, { name: string; image?: string; smallArt?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
   seasons?: Record<string, { name: string; startsAt?: number; endsAt?: number }>;
@@ -217,6 +218,7 @@ export interface MatchDetail {
   score: string;
   teamId?: string;
   teams: { id: string; roundsWon: number | null; won: boolean }[];
+  analysis?: import('./matchTypes').MatchAnalysis;
   players: MatchPlayer[];
   rounds: { number: number; winningTeam: string; outcome: RoundOutcome }[];
   duels: { subject: string; name: string; agentImage?: string; kills: number; deaths: number }[];
@@ -319,6 +321,8 @@ export interface LiveGame {
   gamePod?: string;
   observedAt?: number;
   nextCheckAt?: number;
+  mapId?: string;
+  progress?: import('./matchTypes').MatchProgress;
   detailError?: { code: string; message: string; retryAt?: number };
 }
 export interface MatchPlayer {

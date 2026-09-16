@@ -1,4 +1,6 @@
 import { DEMO_ART } from './demoAssets';
+import { DEMO_MATCH_ASSETS } from './demoMatchAssets';
+import { demoAnalysis, demoDuelStats } from './demoAnalysis';
 import { DEMO_ACCESSORIES } from './demoAccessories';
 import type {
   Account,
@@ -77,7 +79,8 @@ export function demoCatalog(): Catalog {
         membershipSource: 'store',
       },
     },
-    maps: DEMO_ART.maps,
+    weapons: DEMO_MATCH_ASSETS.weapons,
+    maps: { ...DEMO_ART.maps, ...DEMO_MATCH_ASSETS.maps },
     tiers: DEMO_ART.tiers,
     contracts: {
       'demo-pass': {
@@ -264,6 +267,8 @@ export function makeDemo(now = Date.now()): {
       state: 'in_game',
       matchId: '00000000-0000-4000-8005-000000000001',
       map: 'Abyss',
+      mapId: 'Abyss',
+      progress: { source: 'match', observedAt: now, allyScore: 7, enemyScore: 5, roundNumber: 13 },
       mapImage: DEMO_ART.maps.Abyss?.image,
       observedAt: now,
       queue: 'competitive',
@@ -364,6 +369,8 @@ export function demoMatch(id: string, subject = DEMO_ID): MatchDetail {
       outcome: OUTCOMES[(i + index) % OUTCOMES.length]!,
     };
   });
+  const analysis = demoAnalysis(rounds, players, demoCatalog(), entry?.map ?? 'Ascent');
+  const duels = demoDuelStats(players, analysis, subject);
   const self = players.find((p) => p.self) ?? players[0]!;
   const ownBlue = self.teamId === 'Blue';
   return {
@@ -387,15 +394,9 @@ export function demoMatch(id: string, subject = DEMO_ID): MatchDetail {
       { id: 'Blue', roundsWon: blue, won: win },
       { id: 'Red', roundsWon: red, won: !win },
     ],
+    analysis,
     players: players.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
     rounds,
-    duels: players
-      .filter((p) => p.teamId !== self.teamId)
-      .map((p, i) => ({
-        subject: p.subject,
-        name: p.name,
-        kills: 5 - i + (index % 2),
-        deaths: 2 + (i % 3),
-      })),
+    duels,
   };
 }
