@@ -1,17 +1,46 @@
 {
-  "cli": { "version": ">=16.0.0", "appVersionSource": "local" },
+  "cli": {
+    "version": ">=16.0.0",
+    "appVersionSource": "local"
+  },
   "build": {
-    "development": { "developmentClient": true, "distribution": "internal" },
-    "preview": { "distribution": "internal", "android": { "buildType": "apk" } },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "unsigned": {
       "distribution": "internal",
-      "android": { "buildType": "apk", "withoutCredentials": true },
-      "ios": { "simulator": true }
+      "android": {
+        "buildType": "apk",
+        "withoutCredentials": true
+      },
+      "ios": {
+        "simulator": true
+      }
     },
     "unsigned-ipa": {
       "distribution": "internal",
-      "ios": { "withoutCredentials": true, "config": "unsigned-ios.yml" }
+      "ios": {
+        "withoutCredentials": true,
+        "config": "unsigned-ios.yml"
+      }
     },
-    "production": { "autoIncrement": true }
+    "production": {
+      "autoIncrement": true
+    },
+    "login-smoke": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true,
+        "config": "login-smoke.yml",
+        "image": "latest"
+      }
+    }
   }
 }

@@ -69,3 +69,21 @@ if (fs.existsSync(tcp)) {
     console.log('Applied Android TLS peer-host verification');
   }
 }
+
+const webview = path.join(
+  __dirname,
+  '..',
+  'node_modules',
+  'react-native-webview',
+  'apple',
+  'RNCWebViewImpl.m',
+);
+if (fs.existsSync(webview)) {
+  const { patchWebViewSource } = require('./patch-webview-source.cjs');
+  const original = fs.readFileSync(webview, 'utf8'),
+    patched = patchWebViewSource(original);
+  if (patched !== original) {
+    fs.writeFileSync(webview, patched);
+    console.log('Applied iOS WebView file-scheme guard');
+  }
+}

@@ -9,6 +9,7 @@ import {
 } from '../core/auth';
 import { bounded, LoginFlow, type LoginState } from '../core/loginFlow';
 import { recordLogin } from '../core/diagnostics';
+import { loginWebSource } from '../core/loginBootstrap';
 import { AppError, number, token } from '../core/validation';
 import type { Region } from '../core/types';
 import { randomHex } from '../platform/secure';
@@ -128,7 +129,7 @@ export default function Login({
   const close = () => {
     if (!working) onClose();
   };
-  const source = useMemo(() => ({ uri: state.url ?? 'about:blank' }), [state.url]);
+  const source = useMemo(() => loginWebSource(state.url), [state.url]);
   const hasBrowser =
     browserGeneration > 0 &&
     (state.phase === 'preparing' ||
@@ -268,6 +269,7 @@ export default function Login({
       {hasBrowser && (
         <View style={{ flex: 1, minHeight: 160 }}>
           <WebView
+            testID="riot-signin-webview"
             key={browserGeneration}
             source={source}
             style={{ flex: 1 }}

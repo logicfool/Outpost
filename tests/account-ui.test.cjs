@@ -274,6 +274,8 @@ test('account picker transitions to login in one modal and waits for host presen
   await h.press('Continue to Riot sign-in');
   assert.equal(h.counts.webMount, 1);
   assert.equal(h.counts.clears, 0);
+  assert.equal(h.web().props.source.uri, undefined);
+  assert.match(h.web().props.source.html, /outpost-login-bootstrap/);
   await h.ready();
   assert.equal(h.counts.clears, 1);
   assert.equal(new URL(h.web().props.source.uri).searchParams.get('prompt'), 'login');

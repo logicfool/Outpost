@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.6.2');
+const out = path.join(root, 'docs', 'validation-0.6.3');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',

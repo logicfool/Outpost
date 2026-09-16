@@ -1,0 +1,23 @@
+appId: app.outpost.valorant
+---
+# This clears ONLY the isolated cloud simulator. Never used against a user's phone.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Connect Riot account"
+    timeout: 45000
+- repeat:
+    times: 3
+    commands:
+      - tapOn: "Connect Riot account"
+      - tapOn: "Continue to Riot sign-in"
+      - extendedWaitUntil:
+          visible: '.*(auth|authenticate|login)\.riotgames\.com.*'
+          timeout: 25000
+      - waitForAnimationToEnd:
+          timeout: 10000
+      - assertNotVisible: "Opening secure sign-in…"
+      - takeScreenshot: login-native-loaded
+      - tapOn: "Close sign-in"
+      - assertVisible: "Connect Riot account"
+- takeScreenshot: login-native-returned
