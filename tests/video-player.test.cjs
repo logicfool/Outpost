@@ -38,10 +38,11 @@ function harness(autoplay = true) {
       };
     },
   };
-  const useVideoPlayer = (initial, setup) =>
-    React.useMemo(() => {
+  const useVideoPlayer = (initial, setup) => {
+    const object = React.useMemo(() => {
       assert.equal(initial, null);
       const listeners = new Map();
+      let released = false;
       const p = {
         status: 'idle',
         playing: false,
@@ -72,14 +73,22 @@ function harness(autoplay = true) {
           p.emit('playingChange', { isPlaying: true });
         },
         pause() {
+          if (released) throw Error('Native player is already released');
           p.playing = false;
           p.emit('playingChange', { isPlaying: false });
+        },
+        release() {
+          released = true;
+          p.playing = false;
         },
       };
       setup(p);
       players.push(p);
       return p;
     }, []);
+    React.useEffect(() => () => object.release(), [object]);
+    return object;
+  };
   const mod = { exports: {} },
     req = (n) =>
       n === 'react' || n === 'react/jsx-runtime'
@@ -219,4 +228,11 @@ test('retry refreshes metadata once and creates a fresh player', async (t) => {
   assert.equal(h.refreshes, 1);
   assert.notEqual(old, h.player);
   assert.equal(h.loads, 2);
+});
+
+test('closing a preview does not call a player already released by the Expo hook', async () => {
+  const h = harness();
+  await h.mount();
+  await h.close();
+  assert.equal(h.player.playing, false);
 });

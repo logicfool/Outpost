@@ -134,13 +134,13 @@ function VideoSession({
       .catch(() => {
         if (alive) setStatus('error');
       });
+
     return () => {
       alive = false;
       statusListener.remove();
       playback.remove();
       sound.remove();
       app.remove();
-      player.pause();
     };
   }, [player, source]);
   useEffect(() => {
