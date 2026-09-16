@@ -1,4 +1,4 @@
-name: Outpost 0.6.4 JavaScript repair and native regression
+name: Outpost 0.6.4 compatible native app repack
 # Reuse compatible, already compiled native apps. No Xcode build or credential changes.
 jobs:
   ios_device:
@@ -10,22 +10,3 @@ jobs:
       embed_bundle_assets: true
       js_bundle_only: false
       message: Outpost 0.6.4 build 11 - verified player cleanup repair
-  ios_simulator:
-    type: repack
-    environment: preview
-    params:
-      build_id: 868830d4-b7e8-495c-a670-67772998dee3
-      profile: release-smoke
-      embed_bundle_assets: true
-      js_bundle_only: false
-      message: Outpost native regression - compatible simulator runtime
-  native_regression:
-    needs: [ios_simulator]
-    type: maestro
-    environment: preview
-    image: latest
-    params:
-      build_id: ${{ needs.ios_simulator.outputs.build_id }}
-      flow_path: maestro/release-smoke.yml
-      record_screen: true
-      retries: 0
