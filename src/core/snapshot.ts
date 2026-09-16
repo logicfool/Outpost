@@ -18,15 +18,16 @@ export function mergeSnapshot(previous: Snapshot | null, next: Snapshot): Snapsh
   for (const key of keys) {
     const old = previous[key],
       incoming = next[key];
-    if (
-      incoming.status === 'error' &&
-      ['NOT_LOADED', 'INITIAL_SYNC_WAIT', 'LIVE_NOT_CHECKED'].includes(incoming.code)
-    ) {
+    const placeholder = (section: typeof incoming | undefined) =>
+      section?.status === 'error' &&
+      ['NOT_LOADED', 'INITIAL_SYNC_WAIT', 'LIVE_NOT_CHECKED'].includes(section.code);
+
+    if (placeholder(incoming) && old && !placeholder(old)) {
       Object.assign(merged, { [key]: old });
       continue;
     }
     if (
-      old.status === 'ready' &&
+      old?.status === 'ready' &&
       incoming.status === 'ready' &&
       old.fetchedAt > incoming.fetchedAt
     ) {

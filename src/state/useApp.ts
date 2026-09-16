@@ -1,6 +1,8 @@
 import { useActions } from './useActions';
+import { useNotificationSetup } from './useNotificationSetup';
 import {
   storeResetAt,
+  hasUnloadedSections,
   failedSnapshot,
   waitingSnapshot,
   type RefreshReason,
@@ -56,10 +58,10 @@ export function useApp() {
     [message, setMessage] = useState<string | null>(null);
   const activeRef = useRef(active),
     epoch = useRef(0),
-    lastForegroundRefresh = useRef(0),
     demoWishes = useRef<string[]>([]),
     demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
+  const appFocused = useRef(true);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
   const social = useSocial(active, catalog);
@@ -68,31 +70,6 @@ export function useApp() {
       void social.connectChat();
     }
   }, [active?.puuid, settings.chatAlerts]);
-  const servicesStarted = useRef(false);
-  useEffect(() => {
-    if (booting || !active || active.demo || Platform.OS === 'web') return;
-    void configureBackground(settings.backgroundSync).catch(() => {});
-    if (
-      servicesStarted.current ||
-      !(settings.reminders || settings.chatAlerts || settings.wishlistAlerts)
-    )
-      return;
-    servicesStarted.current = true;
-    void (async () => {
-      const runtime = await getRuntime(),
-        stamp = await runtime.repository.notificationStamp('notification.permission.prompted.v1');
-      if (stamp) return;
-      await runtime.repository.setNotificationStamp('notification.permission.prompted.v1', 'true');
-      await enableNotifications();
-    })().catch(() => setMessage('Allow notifications in device Settings to receive alerts.'));
-  }, [
-    booting,
-    active?.puuid,
-    settings.backgroundSync,
-    settings.reminders,
-    settings.chatAlerts,
-    settings.wishlistAlerts,
-  ]);
   const actions = useActions(
     active,
     catalog,
@@ -245,6 +222,73 @@ export function useApp() {
   }, []);
   const refresh = useCallback(() => syncAccount('manual'), [syncAccount]);
   const refreshAutomatic = useCallback(() => syncAccount('auto'), [syncAccount]);
+  const notificationSettled = useCallback(
+    async (accountId: string, granted: boolean) => {
+      const current = activeRef.current;
+      if (!current || current.puuid !== accountId) return;
+      const cached = snapshotRef.current;
+
+      if (granted && cached?.accountId === accountId && cached.store.status === 'ready') {
+        const runtime = await getRuntime();
+        if (activeRef.current?.puuid === accountId)
+          await updateStoreNotifications(
+            current,
+            cached.store.data,
+            await runtime.repository.wishlist(accountId),
+            runtime.repository,
+          );
+      }
+      const latest = snapshotRef.current;
+      if (
+        activeRef.current?.puuid === accountId &&
+        AppState.currentState === 'active' &&
+        (!latest ||
+          hasUnloadedSections(latest) ||
+          (latest.nextAutoRefreshAt ?? storeResetAt(latest)) <= Date.now())
+      )
+        await refreshAutomatic();
+    },
+    [refreshAutomatic],
+  );
+  useNotificationSetup({
+    account: active,
+    snapshot,
+    booting,
+    loading: busy,
+    settings,
+    settled: notificationSettled,
+    failed: setMessage,
+  });
+  useEffect(() => {
+    if (
+      booting ||
+      busy ||
+      !active ||
+      active.demo ||
+      Platform.OS === 'web' ||
+      snapshot?.accountId !== active.puuid ||
+      snapshot.store.status !== 'ready' ||
+      snapshot.wallet.status !== 'ready'
+    )
+      return;
+    void configureBackground(settings.backgroundSync).catch(() =>
+      recordRequest({
+        at: Date.now(),
+        service: 'Background setup',
+        method: 'LOCAL',
+        code: 'BACKGROUND_SETUP_FAILED',
+        durationMs: 0,
+      }),
+    );
+  }, [
+    booting,
+    busy,
+    active?.puuid,
+    snapshot?.accountId,
+    snapshot?.store.status,
+    snapshot?.wallet.status,
+    settings.backgroundSync,
+  ]);
   useEffect(() => {
     const stamp = ++epoch.current;
     setSnapshot(null);
@@ -315,25 +359,62 @@ export function useApp() {
   }, [active?.puuid, linkRevision, refreshAutomatic]);
   useEffect(() => {
     if (!active || active.demo) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined,
+      stopped = false,
+      queued = false;
+    const visible = () => !stopped && appFocused.current && AppState.currentState === 'active';
     const schedule = () => {
       clearTimeout(timer);
-      if (!snapshot || AppState.currentState !== 'active') return;
-      const at = snapshot.nextAutoRefreshAt ?? storeResetAt(snapshot);
-      timer = setTimeout(
-        () => void refreshAutomatic(),
-        Math.min(2147480000, Math.max(1000, at - Date.now())),
-      );
+      const current = snapshotRef.current;
+      if (!visible() || !current || current.accountId !== active.puuid) return;
+      const at = current.nextAutoRefreshAt ?? storeResetAt(current);
+      timer = setTimeout(check, Math.min(2147480000, Math.max(1000, at - Date.now())));
+    };
+    const check = () => {
+      if (!visible()) return;
+      const current = snapshotRef.current;
+      if (
+        !current ||
+        current.accountId !== active.puuid ||
+        (current.nextAutoRefreshAt ?? storeResetAt(current)) <= Date.now()
+      )
+        void refreshAutomatic();
+      else schedule();
+    };
+    const resume = () => {
+      if (queued) return;
+      queued = true;
+
+      void Promise.resolve().then(() => {
+        queued = false;
+        check();
+      });
     };
     schedule();
-    const listener = AppState.addEventListener('change', (state) => {
+    const state = AppState.addEventListener('change', (value) => {
       clearTimeout(timer);
-
-      if (state === 'active') void refreshAutomatic();
+      if (value === 'active') resume();
     });
+    const blur =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('blur', () => {
+            appFocused.current = false;
+            clearTimeout(timer);
+          })
+        : undefined;
+    const focus =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('focus', () => {
+            appFocused.current = true;
+            resume();
+          })
+        : undefined;
     return () => {
+      stopped = true;
       clearTimeout(timer);
-      listener.remove();
+      state.remove();
+      blur?.remove();
+      focus?.remove();
     };
   }, [active?.puuid, snapshot?.nextAutoRefreshAt, snapshot?.store, refreshAutomatic]);
   const switchAccount = useCallback(

@@ -41,3 +41,14 @@ test('missing-only snapshots keep previously attempted errors instead of hammeri
   assert.deepEqual(next.rank, saved.rank);
   assert.equal(next.wallet.status, 'ready');
 });
+
+test('an initial retry placeholder replaces NOT_LOADED and retains the retry deadline', () => {
+  const { emptySnapshot, waitingSnapshot } = require('../.test-build/refreshPolicy.js');
+  const { mergeSnapshot } = require('../.test-build/snapshot.js');
+  const old = emptySnapshot(ID),
+    next = waitingSnapshot(ID, old, Date.now() + 60000);
+  const result = mergeSnapshot(old, next);
+  assert.equal(result.store.code, 'INITIAL_SYNC_WAIT');
+  assert.equal(result.store.retryAt, next.store.retryAt);
+  assert.equal(result.wallet.code, 'INITIAL_SYNC_WAIT');
+});

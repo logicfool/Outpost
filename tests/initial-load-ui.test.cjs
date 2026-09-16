@@ -39,8 +39,10 @@ function goodSnapshot(id = ID, at = Date.now()) {
 }
 async function harness(t, options = {}) {
   const accounts = [session(ID).account, session(OTHER).account],
-    counts = { sync: [], history: 0, accounts: 0 },
-    listeners = new Set();
+    counts = { sync: [], history: 0, accounts: 0, permission: 0, notices: 0, background: 0 },
+    listeners = new Map(),
+    stamps = new Map();
+  if (options.alreadyPrompted) stamps.set('notification.permission.prompted.v1', 'true');
   let rendered, renderer;
   const prefs = {
     ...DEFAULT_SETTINGS,
@@ -48,6 +50,9 @@ async function harness(t, options = {}) {
     reminders: false,
     wishlistAlerts: false,
     chatAlerts: false,
+    ...(options.notifications
+      ? { reminders: true, chatAlerts: true, wishlistAlerts: true, backgroundSync: true }
+      : {}),
   };
   const repository = {
     accounts: async () => {
@@ -74,6 +79,13 @@ async function harness(t, options = {}) {
       return null;
     },
     clearCache: async () => {},
+    notificationStamp: async (key) => {
+      if (options.stampError) throw Error('stamp read');
+      return stamps.get(key) ?? null;
+    },
+    setNotificationStamp: async (key, value) => {
+      stamps.set(key, value);
+    },
   };
   const runtime = {
     repository,
@@ -95,23 +107,64 @@ async function harness(t, options = {}) {
   const native = {
     Platform: { OS: 'android' },
     AppState: {
-      currentState: 'active',
-      addEventListener: (_, fn) => {
-        listeners.add(fn);
-        return { remove: () => listeners.delete(fn) };
+      currentState: options.initialState ?? 'active',
+      addEventListener: (event, fn) => {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event).add(fn);
+        return { remove: () => listeners.get(event).delete(fn) };
       },
     },
+  };
+  const emit = (event, value) => {
+    if (event === 'change') native.AppState.currentState = value;
+    for (const fn of [...(listeners.get(event) ?? [])]) fn(value);
+  };
+  const notifications = {
+    enableNotifications: async () => {
+      counts.permission++;
+      if (options.onPermission) options.onPermission({ emit, model: () => rendered });
+      if (options.permission) await options.permission;
+    },
+    updateStoreNotifications: async () => {
+      counts.notices++;
+    },
+    cancelResetNotifications: async () => {},
+    cancelAllNotifications: async () => {},
   };
   const load = (name) => {
     if (name === 'react') return React;
     if (name === 'react-native') return native;
+    if (name === './useNotificationSetup') {
+      const mod = { exports: {} },
+        js = ts.transpileModule(
+          fs.readFileSync(path.join(__dirname, '../src/state/useNotificationSetup.ts'), 'utf8'),
+          {
+            compilerOptions: {
+              module: ts.ModuleKind.CommonJS,
+              target: ts.ScriptTarget.ES2022,
+              esModuleInterop: true,
+            },
+          },
+        ).outputText;
+      vm.runInThisContext('(function(require,module,exports){' + js + '\n})')(
+        load,
+        mod,
+        mod.exports,
+      );
+      return mod.exports;
+    }
     if (name === './useActions') return { useActions: () => ({}) };
     if (name === './useSocial') return { useSocial: () => social };
     if (name.endsWith('/runtime')) return { getRuntime: async () => runtime };
     if (name.endsWith('/artwork') && name.includes('platform'))
       return { warmArtwork() {}, clearArtworkCache: async () => {} };
-    if (name.endsWith('/background')) return { configureBackground: async () => {} };
-    if (name.endsWith('/notifications')) return new Proxy({}, { get: () => async () => {} });
+    if (name.endsWith('/background'))
+      return {
+        configureBackground: async () => {
+          counts.background++;
+        },
+      };
+    if (name.endsWith('/notifications')) return notifications;
     if (name.startsWith('../core/'))
       return require(path.join(__dirname, '../.test-build', name.slice(8) + '.js'));
     throw Error('Unexpected useApp dependency: ' + name);
@@ -144,6 +197,7 @@ async function harness(t, options = {}) {
     runtime,
     repository,
     accounts,
+    stamps,
     settle,
     async invoke(fn) {
       await act(async () => {
@@ -152,10 +206,16 @@ async function harness(t, options = {}) {
       });
       await settle();
     },
+    async focus(value) {
+      await act(async () => {
+        emit(value ? 'focus' : 'blur');
+        await tick();
+      });
+      await settle();
+    },
     async state(value) {
       await act(async () => {
-        native.AppState.currentState = value;
-        for (const listener of listeners) listener(value);
+        emit('change', value);
         await tick();
       });
       await settle();
@@ -267,4 +327,148 @@ test('initial retry waits while backgrounded and reevaluates policy once on fore
   await h.state('active');
   assert.equal(calls, 2);
   assert.equal(h.model().snapshot.wallet.status, 'ready');
+});
+
+test('notification onboarding waits for first store and balances instead of interrupting initialization', async (t) => {
+  const work = deferred(),
+    permission = deferred();
+  const h = await harness(t, {
+    notifications: true,
+    permission: permission.promise,
+    sync: () => work.promise,
+  });
+  assert.equal(h.model().chat.status, 'ready');
+  assert.equal(h.counts.permission, 0);
+  assert.equal(h.counts.background, 0);
+  await h.invoke(async () => {
+    work.resolve(goodSnapshot());
+  });
+  assert.equal(h.counts.permission, 1);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+  assert.equal(h.model().snapshot.wallet.status, 'ready');
+  await h.focus(false);
+  await h.invoke(async () => {
+    permission.resolve();
+  });
+  await h.focus(true);
+  assert.equal(h.counts.sync.length, 1);
+  assert.equal(h.counts.notices, 1);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+});
+test('denying notifications leaves account data ready and does not refetch the store', async (t) => {
+  const permission = deferred(),
+    h = await harness(t, { notifications: true, permission: permission.promise });
+  await h.focus(false);
+  await h.state('background');
+  await h.invoke(async () => {
+    permission.reject(new AppError('NOTIFICATIONS_DENIED', 'Denied'));
+  });
+  await h.state('active');
+  await h.focus(true);
+  assert.equal(h.counts.sync.length, 1);
+  assert.equal(h.model().snapshot.wallet.status, 'ready');
+  assert.match(h.model().message, /Your account still works/);
+  assert.equal(h.stamps.get('notification.permission.prompted.v1'), 'true');
+});
+test('notification prompt failure cannot replace loaded data or invalidate the account', async (t) => {
+  const permission = deferred(),
+    h = await harness(t, { notifications: true, permission: permission.promise });
+  await h.invoke(async () => {
+    permission.reject(Error('permission service unavailable'));
+  });
+  assert.equal(h.model().active.puuid, ID);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+  assert.equal(h.counts.sync.length, 1);
+});
+test('no second automatic prompt after an already-recorded allow or deny result', async (t) => {
+  const h = await harness(t, { notifications: true, alreadyPrompted: true });
+  await h.state('background');
+  await h.state('active');
+  await h.focus(false);
+  await h.focus(true);
+  assert.equal(h.counts.permission, 0);
+  assert.equal(h.model().snapshot.wallet.status, 'ready');
+  assert.equal(h.counts.sync.length, 1);
+});
+test('pending initial cooldown does not show the notification prompt', async (t) => {
+  const { waitingSnapshot } = require('../.test-build/refreshPolicy.js');
+  const h = await harness(t, {
+    notifications: true,
+    sync: () => waitingSnapshot(ID, null, Date.now() + 60000),
+  });
+  assert.equal(h.counts.permission, 0);
+  assert.equal(h.counts.background, 0);
+  assert.equal(h.model().snapshot.store.code, 'INITIAL_SYNC_WAIT');
+});
+test('Android focus-only return resumes an overdue initial load without an AppState change', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.parse('2026-09-17T00:00:00Z') });
+  const { waitingSnapshot } = require('../.test-build/refreshPolicy.js');
+  let calls = 0;
+  const h = await harness(t, {
+    sync: async () =>
+      ++calls === 1 ? waitingSnapshot(ID, null, Date.now() + 60000) : goodSnapshot(),
+  });
+  await h.focus(false);
+  await act(async () => {
+    t.mock.timers.tick(60001);
+    await tick();
+  });
+  assert.equal(calls, 1);
+  await h.focus(true);
+  assert.equal(calls, 2);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+});
+test('healthy foreground and focus events do not cause an extra API refresh', async (t) => {
+  const h = await harness(t);
+  for (let n = 0; n < 5; n++) {
+    await h.focus(false);
+    await h.state('background');
+    await h.state('active');
+    await h.focus(true);
+  }
+  assert.equal(h.counts.sync.length, 1);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+});
+test('grant completion after account switching cannot rewrite or clear the selected account', async (t) => {
+  const permission = deferred(),
+    h = await harness(t, { notifications: true, permission: permission.promise });
+  await h.invoke((m) => m.switchAccount(h.accounts[1]));
+  await h.invoke(async () => {
+    permission.resolve();
+  });
+  assert.equal(h.model().active.puuid, OTHER);
+  assert.equal(h.model().snapshot.accountId, OTHER);
+  assert.equal(h.counts.permission, 1);
+  assert.equal(h.counts.notices, 0);
+});
+test('notification stamp storage failure does not prevent store initialization', async (t) => {
+  const h = await harness(t, { notifications: true, stampError: true });
+  assert.equal(h.counts.permission, 0);
+  assert.equal(h.model().snapshot.store.status, 'ready');
+  assert.equal(h.model().snapshot.wallet.status, 'ready');
+});
+
+test('a first load completing while backgrounded defers permission until foreground', async (t) => {
+  const work = deferred(),
+    h = await harness(t, { notifications: true, sync: () => work.promise });
+  await h.state('background');
+  await h.invoke(async () => {
+    work.resolve(goodSnapshot());
+  });
+  assert.equal(h.counts.permission, 0);
+  await h.state('active');
+  assert.equal(h.counts.permission, 1);
+  assert.equal(h.counts.sync.length, 1);
+});
+test('a first load completing while Android is blurred does not prompt over another surface', async (t) => {
+  const work = deferred(),
+    h = await harness(t, { notifications: true, sync: () => work.promise });
+  await h.focus(false);
+  await h.invoke(async () => {
+    work.resolve(goodSnapshot());
+  });
+  assert.equal(h.counts.permission, 0);
+  await h.focus(true);
+  assert.equal(h.counts.permission, 1);
+  assert.equal(h.counts.sync.length, 1);
 });

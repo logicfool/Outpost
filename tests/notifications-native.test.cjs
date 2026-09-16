@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(
   fs.readFileSync(path.join(__dirname, '../src/platform/notifications.ts'), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
-function fixture() {
+function fixture(os = 'ios') {
   const scheduled = [],
     cancelled = [],
     receipts = new Map();
@@ -24,7 +24,10 @@ function fixture() {
     chatAlerts: true,
     notificationPreviews: false,
   };
+  const calls = { requests: 0, channels: [] };
   const notifications = {
+    AndroidImportance: { DEFAULT: 3, HIGH: 4 },
+    setNotificationChannelAsync: async (id) => calls.channels.push(id),
     setNotificationHandler() {},
     getPermissionsAsync: async () => ({ granted: permission }),
     requestPermissionsAsync: async () => ({ granted: permission }),
@@ -47,7 +50,7 @@ function fixture() {
   };
   const m = { exports: {} },
     load = (name) => {
-      if (name === 'react-native') return { Platform: { OS: 'ios' } };
+      if (name === 'react-native') return { Platform: { OS: os } };
       if (name === 'expo-notifications') return notifications;
       if (name === 'expo-crypto')
         return {
@@ -66,6 +69,8 @@ function fixture() {
     receipts,
     repo,
     prefs,
+    notifications,
+    calls,
     revoke: () => (permission = false),
     remove: () => (linked = false),
   };
@@ -129,4 +134,31 @@ test('reset reminder is independent from wishlist and uses local server-correcte
   await h.updateStoreNotifications(session().account, s, [], h.repo);
   assert.equal(h.scheduled.length, 1);
   assert.equal(h.scheduled[0].trigger.date.getTime(), s.dailyExpiresAt - 5000);
+});
+
+test('Android permission prompt is single-flight across automatic and manual setup', async () => {
+  const h = fixture('android');
+  h.revoke();
+  let finish;
+  h.notifications.requestPermissionsAsync = async () => {
+    h.calls.requests++;
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  };
+  const a = h.enableNotifications(),
+    b = h.enableNotifications();
+  assert.equal(a, b);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.calls.requests, 1);
+  assert.deepEqual(h.calls.channels, ['store', 'chat']);
+  finish({ granted: true });
+  await Promise.all([a, b]);
+});
+test('denied permission releases the setup flight for a later explicit retry', async () => {
+  const h = fixture('android');
+  h.revoke();
+  await assert.rejects(h.enableNotifications(), { code: 'NOTIFICATIONS_DENIED' });
+  h.notifications.getPermissionsAsync = async () => ({ granted: true });
+  await h.enableNotifications();
 });

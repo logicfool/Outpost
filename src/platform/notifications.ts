@@ -23,7 +23,18 @@ function serial(key: string, work: () => Promise<void>) {
     if (lanes.get(key) === p) lanes.delete(key);
   });
 }
-export async function enableNotifications(): Promise<void> {
+let permissionFlight: Promise<void> | undefined;
+export function enableNotifications(): Promise<void> {
+  if (permissionFlight) return permissionFlight;
+  const work = requestNotifications();
+  permissionFlight = work;
+  const clear = () => {
+    if (permissionFlight === work) permissionFlight = undefined;
+  };
+  void work.then(clear, clear);
+  return work;
+}
+async function requestNotifications(): Promise<void> {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('store', {
       name: 'Wishlist and store',
