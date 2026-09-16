@@ -1,0 +1,54 @@
+appId: app.outpost.valorant
+---
+# Isolated cloud simulator only. No credentials, purchases, or real sign-out.
+- runFlow: login-smoke.yml
+- tapOn: "Try the demo"
+- extendedWaitUntil:
+    visible: "View Reaver Vandal"
+    timeout: 45000
+- tapOn: "View Reaver Vandal"
+- scrollUntilVisible:
+    element:
+      text: "Pause video"
+    direction: DOWN
+    timeout: 90000
+- extendedWaitUntil:
+    visible:
+      id: "skin-video-frame-ready"
+    timeout: 90000
+- takeScreenshot: native-video-autoplay
+- tapOn: "Pause video"
+- assertVisible: "Play video"
+- tapOn: "Play video"
+- assertVisible: "Pause video"
+- takeScreenshot: native-video-resumed
+- tapOn: "Close item details"
+- tapOn:
+    id: "tab-collection"
+- tapOn: "Saved loadouts"
+- tapOn: "Create loadout"
+- tapOn: "Loadout name"
+- inputText: "Cloud native preset"
+- hideKeyboard
+- tapOn: "Edit Vandal skin"
+- scrollUntilVisible:
+    element:
+      text: "Use Prime Vandal"
+    direction: DOWN
+    timeout: 20000
+- tapOn: "Use Prime Vandal"
+- takeScreenshot: native-owned-skin-selection
+- tapOn: "Done with weapon"
+- tapOn: "Save loadout"
+- assertVisible: "Cloud native preset"
+- takeScreenshot: native-preset-saved
+- tapOn: "Back from loadouts"
+- tapOn:
+    id: "tab-account"
+- assertNotVisible: "Accounts"
+- scrollUntilVisible:
+    element:
+      text: "Autoplay previews"
+    direction: DOWN
+    timeout: 20000
+- takeScreenshot: native-settings-clean

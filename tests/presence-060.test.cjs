@@ -24,7 +24,7 @@ test('another party member does not inherit the leaders game state', () => {
     valorantActivity({ partyOwnerSessionLoopState: 'INGAME', isPartyOwner: true }).presence,
     'in_game',
   );
-  assert.equal(valorantActivity({}).activity, 'Status not reported');
+  assert.equal(valorantActivity({}).activity, 'Online');
 });
 test('friend status includes queue for agent select and active matches', () => {
   assert.match(
@@ -40,6 +40,6 @@ test('square avatar has alternative square URLs but never banner or poster URLs'
     image: `https://media.valorant-api.com/playercards/${ID}/largeart.png`,
     wideArt: `https://media.valorant-api.com/playercards/${ID}/wideart.png`,
   });
-  assert.equal(urls.length, 2);
+  assert.equal(urls.length, 3);
   assert.ok(urls.every((u) => !/largeart|wideart/.test(u)));
 });

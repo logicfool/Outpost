@@ -25,7 +25,7 @@ import {
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { SkinVideo } from './SkinVideo';
 import type { AppModel } from '../state/useApp';
 import type {
   CatalogItem,
@@ -70,9 +70,11 @@ type Props = {
   onLink(expectedId?: string): void;
   onNavigate: Navigate;
 };
+export const SHOW_SETTINGS_ACCOUNTS = false;
 const date = (value?: number) =>
   value
     ? new Date(value).toLocaleString(undefined, {
+        year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
@@ -296,11 +298,21 @@ const DailyOffer = memo(function DailyOffer({
     </Pressable>
   );
 });
-export function StoreScreen({ model, onItem }: Props) {
+export function StoreScreen({ model, onItem, onNavigate }: Props) {
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles),
     navInset = useNavInset();
-  const [bundleLimit, setBundleLimit] = useState(12);
+  const [bundleLimit, setBundleLimit] = useState(12),
+    [bundleSearch, setBundleSearch] = useState(false),
+    [bundleQuery, setBundleQuery] = useState('');
+  const archive = useMemo(
+    () =>
+      Object.entries(model.catalog.bundles)
+        .filter(([, b]) => b.name.toLowerCase().includes(bundleQuery.trim().toLowerCase()))
+        .sort((a, b) => a[1].name.localeCompare(b[1].name)),
+    [model.catalog.bundles, bundleQuery],
+  );
+  useEffect(() => setBundleLimit(12), [bundleQuery]);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
   );
@@ -327,18 +339,17 @@ export function StoreScreen({ model, onItem }: Props) {
     };
     if (tab === 'history')
       return model.history.map((entry) => ({ id: entry.id, kind: 'history' as const, entry }));
-    if (!store) return result;
-    if (tab === 'daily') addOffers('daily', store.daily, true);
-    if (tab === 'accessories') addOffers('accessory', store.accessories);
-    if (tab === 'night') addOffers('night', store.nightMarket?.offers ?? []);
+    if (!store && tab !== 'bundles') return result;
+    if (tab === 'daily') addOffers('daily', store?.daily ?? [], true);
+    if (tab === 'accessories') addOffers('accessory', store?.accessories ?? []);
+    if (tab === 'night') addOffers('night', store?.nightMarket?.offers ?? []);
     if (tab === 'bundles') {
-      for (const bundle of store.bundles) {
+      for (const bundle of (store?.bundles ?? []).filter((b) =>
+        b.name.toLowerCase().includes(bundleQuery.trim().toLowerCase()),
+      )) {
         result.push({ id: 'bundle' + bundle.id, kind: 'bundle', bundle });
         addOffers(bundle.id, bundle.offers);
       }
-      const archive = Object.entries(model.catalog.bundles).sort((a, b) =>
-        a[1].name.localeCompare(b[1].name),
-      );
       result.push({
         id: 'archive-heading',
         kind: 'heading',
@@ -349,7 +360,7 @@ export function StoreScreen({ model, onItem }: Props) {
         result.push({ id: 'archive' + i, kind: 'archive', entries: archive.slice(i, i + 2) });
     }
     return result;
-  }, [tab, store, model.catalog, model.history, bundleLimit]);
+  }, [tab, store, model.catalog, model.history, bundleLimit, archive, bundleQuery]);
   const grid = useCallback(
     (offers: StoreOffer[]) => (
       <OfferGrid offers={offers} wishlist={model.wishlist} onWish={onWish} onOpen={onItem} />
@@ -383,7 +394,13 @@ export function StoreScreen({ model, onItem }: Props) {
         return (
           <View style={{ flexDirection: 'row', gap: 12 }}>
             {row.entries.map(([id, bundle]) => (
-              <View key={id} style={[styles.archiveCard, { flex: 1, width: undefined }]}>
+              <Pressable
+                key={id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${bundle.name} bundle`}
+                onPress={() => onNavigate({ type: 'bundle', id })}
+                style={[styles.archiveCard, { flex: 1, width: undefined }]}
+              >
                 {bundle.image ? (
                   <Image
                     source={{ uri: bundle.image }}
@@ -397,14 +414,19 @@ export function StoreScreen({ model, onItem }: Props) {
                 <Text style={[S.h3, { fontSize: 13, paddingHorizontal: 10 }]} numberOfLines={2}>
                   {bundle.name}
                 </Text>
-              </View>
+              </Pressable>
             ))}
             {row.entries.length === 1 && <View style={{ flex: 1 }} />}
           </View>
         );
       const bundle = row.bundle;
       return (
-        <View style={styles.bundle}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${bundle.name} bundle`}
+          onPress={() => onNavigate({ type: 'bundle', id: bundle.id })}
+          style={styles.bundle}
+        >
           {bundle.image && (
             <Image
               source={{ uri: bundle.image }}
@@ -429,10 +451,21 @@ export function StoreScreen({ model, onItem }: Props) {
               />
             </View>
           </View>
-        </View>
+        </Pressable>
       );
     },
-    [model.wishlist, model.catalog, onWish, onItem, grid, styles, C, S, store?.clockOffsetMs],
+    [
+      model.wishlist,
+      model.catalog,
+      onWish,
+      onItem,
+      onNavigate,
+      grid,
+      styles,
+      C,
+      S,
+      store?.clockOffsetMs,
+    ],
   );
   const expiry =
     tab === 'daily'
@@ -476,6 +509,33 @@ export function StoreScreen({ model, onItem }: Props) {
               { id: 'history', label: 'History' },
             ]}
           />
+          {tab === 'bundles' && (
+            <View style={S.between}>
+              <Text style={S.small}>Browse collections</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={bundleSearch ? 'Close bundle search' : 'Search bundles'}
+                onPress={() => {
+                  setBundleSearch((v) => !v);
+                  setBundleQuery('');
+                }}
+                style={{ padding: 8 }}
+              >
+                <Feather name={bundleSearch ? 'x' : 'search'} size={22} color={C.ink} />
+              </Pressable>
+            </View>
+          )}
+          {tab === 'bundles' && bundleSearch && (
+            <TextInput
+              autoFocus
+              value={bundleQuery}
+              onChangeText={setBundleQuery}
+              accessibilityLabel="Bundle search"
+              placeholder="Search bundles"
+              placeholderTextColor={C.subtle}
+              style={S.input}
+            />
+          )}
           {expiry !== undefined && (
             <View style={[S.between, { paddingHorizontal: 4, paddingVertical: 2 }]}>
               <View style={{ gap: 3 }}>
@@ -486,7 +546,7 @@ export function StoreScreen({ model, onItem }: Props) {
                       ? 'Night Market ends'
                       : 'Accessories reset'}
                 </Text>
-                <Text style={[S.small, { fontSize: 11 }]}>Cached · pull down to refresh</Text>
+                <Text style={[S.small, { fontSize: 11 }]}>Pull down to refresh</Text>
               </View>
               <View style={S.row}>
                 <Feather name="clock" color={C.subtle} size={16} />
@@ -516,14 +576,14 @@ export function StoreScreen({ model, onItem }: Props) {
                   ? 'No saved rotations yet'
                   : 'No offers returned'
             }
-            detail="Pull down to refresh. Automatic updates happen at the daily reset."
+            detail="Pull down to refresh."
             icon={tab === 'night' ? 'moon' : 'shopping-bag'}
           />
         ) : null
       }
       ListFooterComponent={
         <View style={{ paddingVertical: 18, gap: 16 }}>
-          {tab === 'bundles' && Object.keys(model.catalog.bundles).length > bundleLimit && (
+          {tab === 'bundles' && archive.length > bundleLimit && (
             <Button
               title="Show more bundles"
               secondary
@@ -1766,18 +1826,27 @@ export function AccountScreen({ model, onLink }: Props) {
   const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
-  const [confirm, setConfirm] = useState<'remove' | 'cache' | null>(null),
-    [working, setWorking] = useState(false);
+  const [confirm, setConfirm] = useState<'remove' | 'cache' | 'signout' | null>(null),
+    [working, setWorking] = useState(false),
+    [actionError, setActionError] = useState<string>();
   const active = model.active!;
+  useEffect(() => {
+    setConfirm(null);
+    setActionError(undefined);
+  }, [active.puuid]);
   const confirmAction = async () => {
-    if (!confirm) return;
+    if (!confirm || working) return;
     setWorking(true);
+    setActionError(undefined);
     try {
-      if (confirm === 'remove') await model.remove(active.puuid);
+      if (confirm === 'signout') await model.signOut(active.puuid);
+      else if (confirm === 'remove') await model.remove(active.puuid);
       else await model.clearCache();
+      setConfirm(null);
+    } catch (e) {
+      setActionError(safeError(e).message);
     } finally {
       setWorking(false);
-      setConfirm(null);
     }
   };
   const live = active.expiresAt > Date.now(),
@@ -1823,53 +1892,72 @@ export function AccountScreen({ model, onLink }: Props) {
                 }
               />
               <SessionStatus accountId={active.puuid} revision={model.snapshot?.fetchedAt} />
-              <Button
-                title="Reconnect"
-                secondary
-                icon="refresh-cw"
-                onPress={() => onLink(active.puuid)}
-              />
+              <View style={S.row}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Reconnect"
+                    secondary
+                    icon="refresh-cw"
+                    onPress={() => onLink(active.puuid)}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Sign out"
+                    secondary
+                    icon="log-out"
+                    onPress={() => {
+                      setActionError(undefined);
+                      setConfirm('signout');
+                    }}
+                  />
+                </View>
+              </View>
             </>
           )}
         </View>
-        <SectionHeader title="Accounts" detail={`${model.accounts.length} / ${MAX_ACCOUNTS}`} />
-        {model.accounts.map((account) => {
-          const current = account.puuid === active.puuid;
-          return (
-            <Pressable
-              key={account.puuid}
-              accessibilityRole="button"
-              onPress={() => model.switchAccount(account)}
-              style={[S.card, S.between, current && { borderColor: `${C.accent}80` }]}
-            >
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={S.h3}>
-                  {account.gameName}
-                  <Text style={{ color: C.subtle }}>#{account.tagLine}</Text>
-                </Text>
-                <Text style={S.small}>
-                  {account.region.toUpperCase()} ·{' '}
-                  {account.expiresAt > Date.now()
-                    ? 'Connected'
-                    : account.canReauth
-                      ? 'Auto-renew available'
-                      : 'Sign in again'}
-                </Text>
-              </View>
-              <Feather
-                name={current ? 'check-circle' : 'chevron-right'}
-                size={20}
-                color={current ? C.accent : C.subtle}
-              />
-            </Pressable>
-          );
-        })}
-        <Button
-          title="Add account"
-          icon="plus"
-          disabled={model.accounts.length >= MAX_ACCOUNTS || Platform.OS === 'web'}
-          onPress={() => onLink()}
-        />
+        {SHOW_SETTINGS_ACCOUNTS && (
+          <>
+            <SectionHeader title="Accounts" detail={`${model.accounts.length} / ${MAX_ACCOUNTS}`} />
+            {model.accounts.map((account) => {
+              const current = account.puuid === active.puuid;
+              return (
+                <Pressable
+                  key={account.puuid}
+                  accessibilityRole="button"
+                  onPress={() => model.switchAccount(account)}
+                  style={[S.card, S.between, current && { borderColor: `${C.accent}80` }]}
+                >
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={S.h3}>
+                      {account.gameName}
+                      <Text style={{ color: C.subtle }}>#{account.tagLine}</Text>
+                    </Text>
+                    <Text style={S.small}>
+                      {account.region.toUpperCase()} ·{' '}
+                      {account.expiresAt > Date.now()
+                        ? 'Connected'
+                        : account.canReauth
+                          ? 'Auto-renew available'
+                          : 'Sign in again'}
+                    </Text>
+                  </View>
+                  <Feather
+                    name={current ? 'check-circle' : 'chevron-right'}
+                    size={20}
+                    color={current ? C.accent : C.subtle}
+                  />
+                </Pressable>
+              );
+            })}
+            <Button
+              title="Add account"
+              icon="plus"
+              disabled={model.accounts.length >= MAX_ACCOUNTS || Platform.OS === 'web'}
+              onPress={() => onLink()}
+            />
+          </>
+        )}
         {active.demo && <Button title="Leave demo" secondary onPress={model.leaveDemo} />}
         <SectionHeader title="Appearance" />
         <View style={S.card}>
@@ -1883,9 +1971,15 @@ export function AccountScreen({ model, onLink }: Props) {
               { id: 'system', label: 'System' },
             ]}
           />
-          <Text style={S.small}>
-            Theme applies to all screens, dialogs and chat. System follows your device appearance.
-          </Text>
+        </View>
+        <SectionHeader title="Video" />
+        <View style={S.card}>
+          <Setting
+            title="Autoplay previews"
+            detail="Muted until you unmute."
+            value={model.settings.autoplayVideos !== false}
+            onChange={(value) => void model.setAutoplayVideos(value)}
+          />
         </View>
         <SectionHeader title="Chat history" />
         <View style={S.card}>
@@ -1898,17 +1992,13 @@ export function AccountScreen({ model, onLink }: Props) {
           <InfoRow label="Automatic store refresh" value="When the daily timer resets" />
           <View style={S.divider} />
           <InfoRow label="Skins & catalog" value="Cached for 24 hours" />
-          <Text style={S.small}>
-            Pull down for a manual refresh. Repeated pulls and live checks share a one-minute limit.
-            Server cooldowns always take priority. Friends' presence arrives over the chat
-            connection, not by polling every friend.
-          </Text>
+          <Text style={S.small}>Pull down to refresh. Requests stay rate-limited.</Text>
         </View>
         <SectionHeader title="Notifications" />
         <View style={S.card}>
           <Setting
             title="Store reminders"
-            detail="A reminder when the current daily rotation ends."
+            detail="At the daily reset."
             value={model.settings.reminders}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) => void model.saveSettings({ ...model.settings, reminders: value })}
@@ -1916,7 +2006,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <Setting
             title="Wishlist alerts"
-            detail="Notify when a saved skin appears in daily offers, Night Market or an active bundle. Uses scheduled refreshes, not extra polling."
+            detail="Daily store, Night Market and bundles."
             value={!!model.settings.wishlistAlerts}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) =>
@@ -1926,7 +2016,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <Setting
             title="Chat alerts"
-            detail="Alert on new incoming messages while the chat connection is active. No alerts for history imports or the open conversation. Fully closed-app push needs a separate relay and is not enabled."
+            detail="New messages while Outpost is open."
             value={!!model.settings.chatAlerts}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) => void model.saveSettings({ ...model.settings, chatAlerts: value })}
@@ -1934,7 +2024,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <Setting
             title="Notification previews"
-            detail="Show skin names or message text in device notifications. Off keeps lock-screen alerts private."
+            detail="Show names and message text on the lock screen."
             value={!!model.settings.notificationPreviews}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) =>
@@ -1944,7 +2034,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <Setting
             title="Background refresh"
-            detail="Refresh only an expired daily rotation when the system wakes the app. No background live-match polling."
+            detail="At store reset, when your phone allows it."
             value={model.settings.backgroundSync}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) =>
@@ -1956,7 +2046,7 @@ export function AccountScreen({ model, onLink }: Props) {
         <View style={S.card}>
           <Setting
             title="Allow VP purchases"
-            detail="Experimental daily skin orders with a separate price and account confirmation. No automatic purchases, VP top-ups, gifts or bulk orders."
+            detail="Daily skins only. Confirmation required."
             value={!!model.settings.allowPurchases}
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) =>
@@ -1985,19 +2075,13 @@ export function AccountScreen({ model, onLink }: Props) {
         <SectionHeader title="About" />
         <View style={S.card}>
           <Text style={S.body}>
-            Outpost is an independent companion app and is not affiliated with or endorsed by Riot
-            Games. Store, collection and match data come from unofficial Riot client services that
-            can change or stop working at any time. Item art, videos and catalog details come from
-            valorant-api.com.
+            Unofficial VALORANT companion. Not endorsed by Riot Games. Assets: valorant-api.com.
           </Text>
           <Text style={S.body}>
-            Your Riot password is never stored. Session tokens and sign-in cookies stay in secure
-            storage. Chats are encrypted locally with a separate key for each account. Sending a
-            whisper transmits it to Riot and the recipient; syncing history reads messages Riot
-            retains. Removing an account deletes its local data but does not sign it out on Riot's
-            side. Demo mode uses made-up data.
+            Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
+            Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.3</Text>
+          <Text style={S.small}>Outpost 0.6.4</Text>
         </View>
       </Page>
       <Modal
@@ -2011,13 +2095,35 @@ export function AccountScreen({ model, onLink }: Props) {
         <View style={styles.scrim}>
           <View style={[S.card, { width: '100%', maxWidth: 440 }]}>
             <Text style={S.h2}>
-              {confirm === 'remove' ? 'Remove this account?' : 'Clear cached data?'}
+              {confirm === 'signout'
+                ? 'Sign out of this account?'
+                : confirm === 'remove'
+                  ? 'Remove this account?'
+                  : 'Clear cached data?'}
             </Text>
             <Text style={S.body}>
-              {confirm === 'remove'
-                ? 'Its saved session, game history, encrypted messages, wishlist and notifications will be deleted from this device.'
-                : 'Cached game data, artwork and catalog will be cleared. Accounts, saved chats and wishlists stay.'}
+              {confirm === 'signout'
+                ? 'End this Riot web session and delete this account’s local chats, wishlist and presets? Other accounts and devices are not signed out.'
+                : confirm === 'remove'
+                  ? 'Delete this account and its local chats, wishlist and presets?'
+                  : 'Cached game data, artwork and catalog will be cleared. Accounts, saved chats and wishlists stay.'}
             </Text>
+            {actionError && (
+              <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
+                {actionError}
+              </Text>
+            )}
+            {confirm === 'signout' && actionError && (
+              <Button
+                secondary
+                title="Remove locally instead"
+                disabled={working}
+                onPress={() => {
+                  setActionError(undefined);
+                  setConfirm('remove');
+                }}
+              />
+            )}
             <Button
               title={working ? 'Working…' : 'Confirm'}
               disabled={working}
@@ -2062,28 +2168,16 @@ function Setting({
     </View>
   );
 }
-function SkinVideo({ uri }: { uri: string }) {
-  const { C, S, isDark } = useTheme();
-  const navInset = useNavInset();
-  const styles = useThemedStyles(makeStyles);
-
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-  });
-  return (
-    <View style={styles.videoShell}>
-      <VideoView player={player} style={styles.video} nativeControls contentFit="contain" />
-    </View>
-  );
-}
 export function ItemModal({
   item: original,
   model,
   onClose,
+  embedded = false,
 }: {
   item: CatalogItem | null;
   model: AppModel;
   onClose(): void;
+  embedded?: boolean;
 }) {
   const { C, S, isDark } = useTheme();
   const navInset = useNavInset();
@@ -2092,141 +2186,155 @@ export function ItemModal({
   const item = original ? hydrateItem(model.catalog, original) : null;
   const [preview, setPreview] = useState<CatalogMedia | null>(null);
   useEffect(() => setPreview(null), [item?.id]);
-  const shown = preview ?? item,
-    video = preview ? preview.video : item?.video,
+  const selectedPreview = preview
+    ? ([...(item?.levels ?? []), ...(item?.chromas ?? [])].find((p) => p.id === preview.id) ??
+      preview)
+    : null;
+  const shown = selectedPreview ?? item,
+    video = selectedPreview ? selectedPreview.video : item?.video,
     tint = rarityColor(item?.rarity);
   const wished = item ? model.wishlist.includes(item.canonicalId) : false,
     weaponItem = item?.kind === 'skin' || item?.kind === 'chroma';
-  return (
-    <Modal visible={!!item} animationType="slide" onRequestClose={onClose}>
-      <ModalPage>
-        <ModalHeader
-          eyebrow={(item?.weapon ?? item?.kind ?? '').toUpperCase()}
-          title={item?.name ?? ''}
-          closeLabel="Close item details"
-          onClose={onClose}
-        />
-        {item && (
-          <ScrollView contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}>
-            <LinearGradient
-              colors={[`${tint}40`, `${tint}0D`, C.background]}
-              style={styles.detailHero}
-            >
-              {shown?.image ? (
-                <Image
-                  source={{ uri: shown.image }}
-                  style={{ width: '100%', height: 200 }}
-                  resizeMode="contain"
-                />
-              ) : (
-                <ItemArt item={item} size={200} />
-              )}
-            </LinearGradient>
-            <View style={S.between}>
-              <View style={{ flex: 1, gap: 6 }}>
-                <Text style={S.title} numberOfLines={2}>
-                  {shown?.name ?? item.name}
-                </Text>
-                {item.rarity ? (
-                  <View style={[S.row, { gap: 6 }]}>
-                    <RarityIcon rarity={item.rarity} size={16} />
-                    <Text style={[S.small, { color: tint, fontWeight: '700' }]}>
-                      {item.rarity.toUpperCase()}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-              <WishButton
-                wished={wished}
-                name={item.name}
-                size={26}
-                onPress={() => void model.toggleWish(item.canonicalId)}
+  const content = (
+    <ModalPage>
+      <ModalHeader
+        eyebrow={(item?.weapon ?? item?.kind ?? '').toUpperCase()}
+        title={item?.name ?? ''}
+        closeLabel="Close item details"
+        onClose={onClose}
+      />
+      {item && (
+        <ScrollView contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}>
+          <LinearGradient
+            colors={[`${tint}40`, `${tint}0D`, C.background]}
+            style={styles.detailHero}
+          >
+            {shown?.image ? (
+              <Image
+                source={{ uri: shown.image }}
+                style={{ width: '100%', height: 200 }}
+                resizeMode="contain"
               />
+            ) : (
+              <ItemArt item={item} size={200} />
+            )}
+          </LinearGradient>
+          <View style={S.between}>
+            <View style={{ flex: 1, gap: 6 }}>
+              <Text style={S.title} numberOfLines={2}>
+                {shown?.name ?? item.name}
+              </Text>
+              {item.rarity ? (
+                <View style={[S.row, { gap: 6 }]}>
+                  <RarityIcon rarity={item.rarity} size={16} />
+                  <Text style={[S.small, { color: tint, fontWeight: '700' }]}>
+                    {item.rarity.toUpperCase()}
+                  </Text>
+                </View>
+              ) : null}
             </View>
-            <PurchaseControls key={`${model.active?.puuid}:${item.id}`} item={item} model={model} />
-            {video ? (
-              <SkinVideo key={video} uri={video} />
-            ) : weaponItem ? (
-              <Text style={S.small}>No video preview is available for this selection.</Text>
-            ) : null}
-            {item.levels && item.levels.length > 1 ? (
-              <>
-                <SectionHeader title="Levels" />
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 10 }}
-                >
-                  {item.levels.map((level, index) => (
-                    <Pressable
-                      key={level.id}
-                      onPress={() => setPreview(level)}
-                      style={[
-                        styles.mediaChip,
-                        preview?.id === level.id && { borderColor: C.accent },
-                      ]}
-                    >
-                      <View style={S.between}>
-                        <Text style={[S.small, { fontWeight: '700' }]}>LEVEL {index + 1}</Text>
-                        {level.video ? (
-                          <Feather name="play-circle" color={C.accent} size={14} />
-                        ) : null}
-                      </View>
-                      {level.image ? (
-                        <Image
-                          source={{ uri: level.image }}
-                          style={{ width: 120, height: 56 }}
-                          resizeMode="contain"
-                        />
+            <WishButton
+              wished={wished}
+              name={item.name}
+              size={26}
+              onPress={() => void model.toggleWish(item.canonicalId)}
+            />
+          </View>
+          <PurchaseControls key={`${model.active?.puuid}:${item.id}`} item={item} model={model} />
+          {video ? (
+            <SkinVideo
+              key={video}
+              uri={video}
+              autoplay={model.settings.autoplayVideos !== false}
+              refresh={model.refreshMedia}
+            />
+          ) : weaponItem ? (
+            <Text style={S.small}>No preview for this selection.</Text>
+          ) : null}
+          {item.levels && item.levels.length > 1 ? (
+            <>
+              <SectionHeader title="Levels" />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10 }}
+              >
+                {item.levels.map((level, index) => (
+                  <Pressable
+                    key={level.id}
+                    onPress={() => setPreview(level)}
+                    style={[
+                      styles.mediaChip,
+                      preview?.id === level.id && { borderColor: C.accent },
+                    ]}
+                  >
+                    <View style={S.between}>
+                      <Text style={[S.small, { fontWeight: '700' }]}>LEVEL {index + 1}</Text>
+                      {level.video ? (
+                        <Feather name="play-circle" color={C.accent} size={14} />
                       ) : null}
-                      <Text style={[S.h3, { fontSize: 13 }]} numberOfLines={1}>
-                        {level.name}
+                    </View>
+                    {level.image ? (
+                      <Image
+                        source={{ uri: level.image }}
+                        style={{ width: 120, height: 56 }}
+                        resizeMode="contain"
+                      />
+                    ) : null}
+                    <Text style={[S.h3, { fontSize: 13 }]} numberOfLines={1}>
+                      {level.name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+          {item.chromas && item.chromas.length > 1 ? (
+            <>
+              <SectionHeader title="Variants" />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10 }}
+              >
+                {item.chromas.map((chroma) => (
+                  <Pressable
+                    key={chroma.id}
+                    onPress={() => setPreview(chroma)}
+                    style={[
+                      styles.mediaChip,
+                      preview?.id === chroma.id && { borderColor: C.accent },
+                    ]}
+                  >
+                    {chroma.image ? (
+                      <Image
+                        source={{ uri: chroma.image }}
+                        style={{ width: 120, height: 64 }}
+                        resizeMode="contain"
+                      />
+                    ) : null}
+                    <View style={S.between}>
+                      <Text style={[S.h3, { fontSize: 13, flex: 1 }]} numberOfLines={1}>
+                        {chroma.name}
                       </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </>
-            ) : null}
-            {item.chromas && item.chromas.length > 1 ? (
-              <>
-                <SectionHeader title="Variants" />
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ gap: 10 }}
-                >
-                  {item.chromas.map((chroma) => (
-                    <Pressable
-                      key={chroma.id}
-                      onPress={() => setPreview(chroma)}
-                      style={[
-                        styles.mediaChip,
-                        preview?.id === chroma.id && { borderColor: C.accent },
-                      ]}
-                    >
-                      {chroma.image ? (
-                        <Image
-                          source={{ uri: chroma.image }}
-                          style={{ width: 120, height: 64 }}
-                          resizeMode="contain"
-                        />
+                      {chroma.video ? (
+                        <Feather name="play-circle" color={C.accent} size={14} />
                       ) : null}
-                      <View style={S.between}>
-                        <Text style={[S.h3, { fontSize: 13, flex: 1 }]} numberOfLines={1}>
-                          {chroma.name}
-                        </Text>
-                        {chroma.video ? (
-                          <Feather name="play-circle" color={C.accent} size={14} />
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </>
-            ) : null}
-          </ScrollView>
-        )}
-      </ModalPage>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          ) : null}
+        </ScrollView>
+      )}
+    </ModalPage>
+  );
+  return embedded ? (
+    content
+  ) : (
+    <Modal visible={!!item} animationType="slide" onRequestClose={onClose}>
+      {content}
     </Modal>
   );
 }

@@ -141,6 +141,7 @@ export function normalizeStore(
       }
     bundles.push({
       id,
+      catalogId: text(b.DataAssetID) || undefined,
       name: meta?.name ?? 'Featured collection',
       image: meta?.image,
       prices: money(b.TotalDiscountedCost ?? b.TotalBaseCost),

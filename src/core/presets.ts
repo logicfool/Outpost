@@ -1,3 +1,4 @@
+import { unlockedLevels, unlockedChromas } from './loadoutOptions';
 import type { Catalog } from './types';
 import { AppError, object, requiredArray, text, uuid } from './validation';
 export interface WeaponChoice {
@@ -45,13 +46,19 @@ export function validatePreset(p: LoadoutPreset, accountId: string): LoadoutPres
   )
     throw new AppError('PRESET_INVALID', 'Give this preset a name and select at least one weapon.');
   const ids = new Set<string>();
-  for (const g of p.weapons) {
-    for (const v of [g.weaponId, g.skinId, g.levelId, g.chromaId]) uuid(v);
-    if (ids.has(g.weaponId))
+  const weapons = p.weapons.map((g) => {
+    const slot = {
+      weaponId: uuid(g.weaponId),
+      skinId: uuid(g.skinId),
+      levelId: uuid(g.levelId),
+      chromaId: uuid(g.chromaId),
+    };
+    if (ids.has(slot.weaponId))
       throw new AppError('PRESET_INVALID', 'A weapon appears twice in this preset.');
-    ids.add(g.weaponId);
-  }
-  return { ...p, name };
+    ids.add(slot.weaponId);
+    return slot;
+  });
+  return { ...p, id: uuid(p.id), accountId: uuid(p.accountId), name, weapons };
 }
 export function preparePreset(
   raw: unknown,
@@ -61,7 +68,7 @@ export function preparePreset(
   chromas: Set<string>,
   catalog: Catalog,
 ) {
-  validatePreset(preset, accountId);
+  preset = validatePreset(preset, accountId);
   const r = object(raw),
     current = weaponChoices(raw);
   if (
@@ -73,7 +80,11 @@ export function preparePreset(
   const replacements = new Map(preset.weapons.map((w) => [w.weaponId, w]));
   for (const desired of preset.weapons) {
     const old = current.find((g) => g.weaponId === desired.weaponId),
-      skin = catalog.items[desired.skinId];
+      skin =
+        catalog.items[desired.skinId] ??
+        Object.values(catalog.items).find(
+          (i) => i.kind === 'skin' && i.canonicalId.toLowerCase() === desired.skinId.toLowerCase(),
+        );
     if (!old) throw new AppError('PRESET_WEAPON', 'A saved weapon is not in the current loadout.');
     if (JSON.stringify(old) === JSON.stringify(desired)) continue;
     if (
@@ -87,13 +98,19 @@ export function preparePreset(
         'PRESET_CATALOG',
         'A selected skin, level or colour does not belong to this weapon. Refresh the catalog.',
       );
-    if (desired.levelId !== old.levelId && !levels.has(desired.levelId))
+    if (
+      !unlockedLevels(skin, { current, ownedLevels: [...levels], ownedChromas: [...chromas] }).some(
+        (l) => l.id.toLowerCase() === desired.levelId.toLowerCase(),
+      )
+    )
       throw new AppError('ITEM_NOT_OWNED', 'A saved skin level is not unlocked on this account.');
 
     if (
-      desired.chromaId !== old.chromaId &&
-      desired.chromaId !== skin.chromas[0]?.id &&
-      !chromas.has(desired.chromaId)
+      !unlockedChromas(skin, {
+        current,
+        ownedLevels: [...levels],
+        ownedChromas: [...chromas],
+      }).some((c) => c.id.toLowerCase() === desired.chromaId.toLowerCase())
     )
       throw new AppError(
         'ITEM_NOT_OWNED',
@@ -102,7 +119,7 @@ export function preparePreset(
   }
   const Guns = requiredArray(r.Guns, 'weapons').map((v) => {
     const g = object(v),
-      next = replacements.get(text(g.ID));
+      next = replacements.get(text(g.ID).toLowerCase());
     return next
       ? { ...g, SkinID: next.skinId, SkinLevelID: next.levelId, ChromaID: next.chromaId }
       : g;

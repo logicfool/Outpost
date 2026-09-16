@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.6.3');
+const out = path.join(root, 'docs', 'validation-0.6.4');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -306,7 +306,7 @@ try {
       .waitFor();
     await click('Conversation settings');
     await click('Sync this conversation now');
-    await page.getByText('History sync completed.', { exact: false }).waitFor();
+    await page.getByText('History synced.', { exact: true }).waitFor();
     await click('Back from chat settings');
     await click('Delete saved conversation');
     await click('Keep messages');
@@ -364,7 +364,7 @@ try {
       await shot('refresh-policy');
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await tab('Store');
-      await page.getByText('Cached · pull down to refresh', { exact: true }).waitFor();
+      await page.getByText('Pull down to refresh', { exact: true }).waitFor();
       await shot('store-light');
     },
   );
@@ -386,7 +386,7 @@ try {
   await check('named loadout presets can be saved edited applied and deleted in demo', async () => {
     await tab('Collection');
     await click('Saved loadouts');
-    await click('Create from equipped loadout');
+    await click('Create loadout');
     await page.getByRole('textbox', { name: 'Loadout name', exact: true }).fill('Night set');
     await click('Save loadout');
     await click('Edit Night set');
@@ -394,16 +394,14 @@ try {
     await click('Save loadout');
     await click('Apply Day set');
     await click('Apply demo preset');
-    await page
-      .getByText('Demo preset selected. No Riot account changed.', { exact: true })
-      .waitFor();
+    await page.getByText('Demo loadout applied.', { exact: true }).waitFor();
     await shot('loadout-presets');
     await click('Delete Day set');
     await click('Confirm delete preset');
-    await page.getByText('Build your first loadout', { exact: true }).waitFor();
+    await page.getByText('Create your first loadout', { exact: true }).waitFor();
     await click('Back from loadouts');
   });
-  await check('notification controls and optional VP purchases default off', async () => {
+  await check('notification defaults are enabled and VP purchase stays off', async () => {
     await tab('Settings');
     for (const name of [
       'Wishlist alerts',
@@ -413,7 +411,7 @@ try {
     ]) {
       const toggle = page.getByRole('switch', { name, exact: true });
       await toggle.scrollIntoViewIfNeeded();
-      assert.equal(await toggle.isChecked(), false);
+      assert.equal(await toggle.isChecked(), name !== 'Allow VP purchases');
       assert.equal(await toggle.isDisabled(), true);
     }
     await shot('notification-purchase-settings');
@@ -442,6 +440,150 @@ try {
       await shot('account-sheet-return');
     },
   );
+  await check('bundle search is local and cards open their items and media', async () => {
+    await tab('Store');
+    await tab('Bundles');
+    await page
+      .getByRole('button', { name: 'Open After-hours collection bundle', exact: true })
+      .first()
+      .click();
+    await page.getByText('Included items', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'View RGX 11z Pro Blade', exact: true }).click();
+    await page.getByRole('button', { name: 'Close item details', exact: true }).waitFor();
+    await click('Close item details');
+    await shot('bundle-contents');
+    await click('Back from bundle');
+    await click('Search bundles');
+    const query = page.getByRole('textbox', { name: 'Bundle search', exact: true });
+    await query.fill('After-hours');
+    await page
+      .getByRole('button', { name: 'Open After-hours collection bundle', exact: true })
+      .first()
+      .waitFor();
+    await shot('bundle-search');
+    await query.fill('nothing-matches-064');
+    assert.equal(await page.getByRole('button', { name: /^Open .* bundle$/ }).count(), 0);
+    await click('Close bundle search');
+    assert.equal(
+      await page.getByRole('textbox', { name: 'Bundle search', exact: true }).count(),
+      0,
+    );
+    await tab('Today');
+  });
+  await check(
+    'a preset chooses an alternate owned skin in the app and keeps it on reopening',
+    async () => {
+      await tab('Collection');
+      await click('Saved loadouts');
+      await click('Create loadout');
+      await page.getByRole('textbox', { name: 'Loadout name', exact: true }).fill('Selected here');
+      await click('Edit Vandal skin');
+      await page.getByRole('textbox', { name: 'Search owned skins', exact: true }).fill('Prime');
+      await click('Use Prime Vandal');
+      await shot('loadout-owned-skins');
+      await click('Done with weapon');
+      await click('Save loadout');
+      await click('Edit Selected here');
+      await click('Edit Vandal skin');
+      await page
+        .getByRole('button', { name: 'Use Prime Vandal', exact: true })
+        .getByText('Selected', { exact: true })
+        .waitFor();
+      await click('Back to preset');
+      await click('Cancel preset editing');
+      await click('Delete Selected here');
+      await click('Confirm delete preset');
+      await click('Back from loadouts');
+    },
+  );
+  await check('video autoplay progresses and pause/play controls work', async () => {
+    await tab('Store');
+    await click('View Reaver Vandal');
+    const video = page.locator('video').first();
+    await video.scrollIntoViewIfNeeded();
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector('video');
+        return v && v.currentTime > 0.25 && !v.paused && v.muted;
+      },
+      null,
+      { timeout: 45000 },
+    );
+    await click('Pause video');
+    await page.waitForFunction(() => document.querySelector('video')?.paused);
+    const at = await video.evaluate((v) => v.currentTime);
+    await page.waitForTimeout(500);
+    assert.ok(Math.abs((await video.evaluate((v) => v.currentTime)) - at) < 0.25);
+    await click('Play video');
+    await page.waitForFunction(
+      (t) => {
+        const v = document.querySelector('video');
+        return v && !v.paused && v.currentTime > t + 0.15;
+      },
+      at,
+      { timeout: 15000 },
+    );
+    await shot('video-playing');
+    await click('Close item details');
+    assert.equal(await page.locator('video').count(), 0);
+  });
+  await check('autoplay opt-out survives restart and manual play remains available', async () => {
+    await tab('Settings');
+    await page.getByRole('switch', { name: 'Autoplay previews', exact: true }).uncheck();
+    await page.waitForFunction(() => localStorage.getItem('outpost.autoplayVideos') === 'false');
+    await page.reload();
+    await click('Try the demo');
+    await click('View Reaver Vandal');
+    await page.getByRole('button', { name: 'Play video', exact: true }).waitFor();
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector('video');
+        return v && v.readyState >= 1;
+      },
+      null,
+      { timeout: 45000 },
+    );
+    assert.equal(
+      await page
+        .locator('video')
+        .first()
+        .evaluate((v) => v.paused),
+      true,
+    );
+    await click('Play video');
+    await page.waitForFunction(
+      () => {
+        const v = document.querySelector('video');
+        return v && v.currentTime > 0.25;
+      },
+      null,
+      { timeout: 15000 },
+    );
+    await click('Close item details');
+    await tab('Settings');
+    await page.getByRole('switch', { name: 'Autoplay previews', exact: true }).check();
+  });
+  await check('settings hide duplicate accounts and keep concise appearance controls', async () => {
+    await tab('Settings');
+    assert.equal(await page.getByText('Accounts', { exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Add account', exact: true }).count(), 0);
+    assert.equal(
+      await page
+        .getByText(
+          'Theme applies to all screens, dialogs and chat. System follows your device appearance.',
+          { exact: true },
+        )
+        .count(),
+      0,
+    );
+    for (const name of ['System', 'Navy', 'Dark', 'Light'])
+      await page.getByRole('tab', { name, exact: true }).waitFor();
+    assert.equal(
+      await page.getByRole('switch', { name: 'Allow VP purchases', exact: true }).isChecked(),
+      false,
+    );
+    await shot('settings-clean');
+  });
   assert.equal(errors.length, 0, JSON.stringify(errors));
 } catch (e) {
   process.exitCode = 1;

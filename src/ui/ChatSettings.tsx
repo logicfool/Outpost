@@ -15,7 +15,7 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
     try {
       if (subject) await model.syncChatHistory(subject);
       else await model.syncSavedChatHistory();
-      setResult('History sync completed. Only messages retained by Riot can be retrieved.');
+      setResult('History synced.');
     } catch (reason) {
       setResult(safeError(reason).message);
     } finally {
@@ -27,10 +27,7 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
       <View style={S.row}>
         <View style={{ flex: 1, gap: 5 }}>
           <Text style={S.h3}>Automatic chat history</Text>
-          <Text style={S.small}>
-            Sync on opening and reconnecting, then at most once a minute while this conversation
-            stays open. Saved messages remain available offline.
-          </Text>
+          <Text style={S.small}>Sync the open conversation. Saved chats work offline.</Text>
         </View>
         <Switch
           accessibilityLabel="Automatic chat history"
@@ -53,17 +50,8 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
         onPress={() => void sync()}
         icon="refresh-cw"
       />
-      {model.chat.status !== 'ready' && (
-        <Text style={S.small}>
-          Connect chat to sync. Local history is not deleted when you disconnect.
-        </Text>
-      )}
-      {!subject && (
-        <Text style={S.small}>
-          Manual sync checks up to ten recent saved conversations with current friends. Opening any
-          other conversation syncs it automatically.
-        </Text>
-      )}
+      {model.chat.status !== 'ready' && <Text style={S.small}>Connect chat to sync.</Text>}
+      {!subject && <Text style={S.small}>Checks up to 10 recent conversations.</Text>}
       {result && (
         <Text accessibilityRole="alert" style={S.body}>
           {result}

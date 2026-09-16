@@ -33,6 +33,7 @@ const NAMES = [
   'Sovereign Ghost',
   'Reaver Operator',
   'Spectrum Phantom',
+  'Prime Vandal',
 ];
 const RARITIES = [
   'Premium',
@@ -65,7 +66,17 @@ export function demoCatalog(): Catalog {
       items[chroma.id] = { ...skin, ...chroma, canonicalId: skin.id, kind: 'chroma' };
   return {
     items,
-    bundles: DEMO_ART.bundles,
+    bundles: {
+      ...DEMO_ART.bundles,
+      'demo-featured': {
+        name: 'After-hours collection',
+        itemIds: Object.values(items)
+          .filter((i) => i.kind === 'skin')
+          .slice(4, 8)
+          .map((i) => i.canonicalId),
+        membershipSource: 'store',
+      },
+    },
     maps: DEMO_ART.maps,
     tiers: DEMO_ART.tiers,
     contracts: {
@@ -151,6 +162,7 @@ export function makeDemo(now = Date.now()): {
       bundles: [
         {
           id: 'demo-bundle',
+          catalogId: 'demo-featured',
           name: 'After-hours collection',
           prices: [{ currencyId: CURRENCIES.VP, symbol: 'VP', amount: 7100 }],
           expiresAt: now + 5 * 86400000,

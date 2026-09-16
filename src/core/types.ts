@@ -67,6 +67,9 @@ export interface CatalogItem {
   video?: string;
   levels?: CatalogMedia[];
   chromas?: CatalogMedia[];
+  isDefault?: boolean;
+  collectionKey?: string;
+  collectionName?: string;
 }
 export interface ContractDefinition {
   id: string;
@@ -79,7 +82,18 @@ export interface Catalog {
   schemaVersion?: number;
   failedPaths?: string[];
   items: Record<string, CatalogItem>;
-  bundles: Record<string, { name: string; image?: string }>;
+  bundles: Record<
+    string,
+    {
+      name: string;
+      image?: string;
+      isDefault?: boolean;
+      collectionKey?: string;
+      collectionName?: string;
+      itemIds?: string[];
+      membershipSource?: 'store' | 'catalog-theme';
+    }
+  >;
   maps: Record<string, { name: string; image?: string; smallArt?: string; listImage?: string }>;
   tiers: Record<string, { name: string; image?: string; smallArt?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
@@ -96,6 +110,7 @@ export interface StoreOffer {
   seen?: boolean;
 }
 export interface Bundle {
+  catalogId?: string;
   id: string;
   name: string;
   image?: string;
@@ -266,18 +281,22 @@ export interface Settings {
   allowPurchases?: boolean;
   theme?: import('./theme').ThemePreference;
   autoChatHistory?: boolean;
+  autoplayVideos?: boolean;
+  defaultsVersion?: number;
 }
 export const MAX_ACCOUNTS = 10;
 export const XP_PER_LEVEL = 5000;
 export const DEFAULT_SETTINGS: Settings = {
-  reminders: false,
-  backgroundSync: false,
-  wishlistAlerts: false,
-  chatAlerts: false,
-  notificationPreviews: false,
+  reminders: true,
+  backgroundSync: true,
+  wishlistAlerts: true,
+  chatAlerts: true,
+  notificationPreviews: true,
   allowPurchases: false,
   theme: 'navy',
   autoChatHistory: true,
+  autoplayVideos: true,
+  defaultsVersion: 2,
 };
 export const EMPTY_CATALOG: Catalog = {
   items: {},

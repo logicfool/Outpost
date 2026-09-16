@@ -196,3 +196,12 @@ test('an uncertain result offers read-only checking rather than another purchase
   assert.equal(h.calls, 1);
   assert.equal(h.checks, 1);
 });
+
+test('disabled phone purchasing does not fill item details with a purchase panel', async (t) => {
+  const h = fixture();
+  h.model.settings.allowPurchases = false;
+  await h.mount();
+  t.after(() => h.close());
+  assert.equal(h.button('Review VP purchase'), undefined);
+  assert.equal(h.root().findAllByType('Text').length, 0);
+});

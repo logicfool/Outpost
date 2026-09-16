@@ -267,6 +267,7 @@ function AppContent({ model }: { model: AppModel }) {
                 return (
                   <Pressable
                     key={nav.id}
+                    testID={`tab-${nav.id}`}
                     accessibilityRole="tab"
                     accessibilityLabel={nav.label}
                     accessibilityState={{ selected }}

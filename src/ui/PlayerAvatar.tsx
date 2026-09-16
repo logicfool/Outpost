@@ -2,7 +2,7 @@ import React, { memo, useState, useEffect } from 'react';
 import { View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { Catalog, CatalogItem } from '../core/types';
-import { squareCardCandidates } from '../core/friends';
+import { squareCardCandidates, DEFAULT_CARD_ART } from '../core/friends';
 import { Image } from './CachedImage';
 import { useTheme } from './theme';
 export const PlayerAvatar = memo(function PlayerAvatar({
@@ -42,7 +42,9 @@ export const PlayerAvatar = memo(function PlayerAvatar({
             contentFit="cover"
             transition={0}
             style={{ width: size, height: size }}
-            accessibilityLabel="Player card portrait"
+            accessibilityLabel={
+              uri === DEFAULT_CARD_ART ? 'Default VALORANT card' : 'Player card portrait'
+            }
             onError={() => setIndex((n) => n + 1)}
           />
         ) : (

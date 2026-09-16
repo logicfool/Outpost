@@ -392,18 +392,24 @@ export const DEMO_ART: {
         {
           'id': '6f9ba692-4618-d0e6-3099-42b4dc5fce89',
           'name': 'Reaver Vandal Level 2',
+          'image':
+            'https://media.valorant-api.com/weaponskins/30388628-42f0-606c-82c0-73ad43de997f/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/78146b6e-49fc-115d-995e-309c5f18e3fd_default_universal.mp4',
         },
         {
           'id': '98597b95-451c-70cf-46fb-31b4c5a54394',
           'name': 'Reaver Vandal Level 3',
+          'image':
+            'https://media.valorant-api.com/weaponskins/30388628-42f0-606c-82c0-73ad43de997f/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/b21243ec-4cf0-37c0-43b4-15bf84de9d1d_default_universal.mp4',
         },
         {
           'id': '8c282914-446a-3e99-095a-cd97df201c8b',
           'name': 'Reaver Vandal Level 4',
+          'image':
+            'https://media.valorant-api.com/weaponskins/30388628-42f0-606c-82c0-73ad43de997f/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/d262fccc-465a-2da6-74ac-049ef3b3f759_default_universal.mp4',
         },
@@ -434,6 +440,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/b2619c1c-4974-4f06-f37b-c68b1d6d7bd1/fullrender.png',
         },
       ],
+      'weaponId': '9c82e19d-4575-0200-1a81-3eacf00cf872',
+      'weapon': 'Vandal',
+      'collectionKey': 'soulstealer',
     },
     'Spectrum Phantom': {
       'image':
@@ -452,6 +461,8 @@ export const DEMO_ART: {
         {
           'id': '8021e6d9-4916-32a9-e2cd-ff9c947a96c5',
           'name': 'Spectrum Phantom Level 2',
+          'image':
+            'https://media.valorant-api.com/weaponskins/980fa063-436e-e51f-c38d-70a5b93a0f1c/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/fe20185e-43e5-c02e-24cd-97b04179e7ed_default_universal.mp4',
         },
@@ -466,6 +477,8 @@ export const DEMO_ART: {
         {
           'id': '2a744a2b-4dab-71a6-0e2e-7f84d4cf8365',
           'name': 'Spectrum Phantom Level 4',
+          'image':
+            'https://media.valorant-api.com/weaponskins/980fa063-436e-e51f-c38d-70a5b93a0f1c/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/5e0c9119-42ab-7fb3-b6f6-d081fc77fa2a_default_universal.mp4',
         },
@@ -502,6 +515,9 @@ export const DEMO_ART: {
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/16e41132-4a98-c5cb-d067-80b0599b23cc_default_universal.mp4',
         },
       ],
+      'weaponId': 'ee8e8d15-496b-07ac-e5f6-8fae5d4c7b1a',
+      'weapon': 'Phantom',
+      'collectionKey': 'atlas',
     },
     'Oni Phantom': {
       'image':
@@ -568,6 +584,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/32dfe871-4906-d2ce-4835-2d99aaa52f84/fullrender.png',
         },
       ],
+      'weaponId': 'ee8e8d15-496b-07ac-e5f6-8fae5d4c7b1a',
+      'weapon': 'Phantom',
+      'collectionKey': 'oni',
     },
     'Prime Classic': {
       'image':
@@ -634,6 +653,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/9fcc46a1-42f8-6407-787d-cb9d3e0bb718/fullrender.png',
         },
       ],
+      'weaponId': '29a0cfab-485b-f5d5-779a-b59f85e204a8',
+      'weapon': 'Classic',
+      'collectionKey': 'hypebeast',
     },
     'Sovereign Ghost': {
       'image':
@@ -700,6 +722,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/c208e6a1-4bb8-e1d9-6943-848db2aaf3bb/fullrender.png',
         },
       ],
+      'weaponId': '1baa85b4-4c70-1284-64bb-6481dfc3bb4e',
+      'weapon': 'Ghost',
+      'collectionKey': 'sovereign',
     },
     'Ion Sheriff': {
       'image':
@@ -718,18 +743,24 @@ export const DEMO_ART: {
         {
           'id': 'a60421b9-4b86-ccd3-ca08-808ef4cf112b',
           'name': 'Ion Sheriff Level 2',
+          'image':
+            'https://media.valorant-api.com/weaponskins/83778c03-45a3-67a2-3c89-6b8598327d58/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/f8c2e883-453f-99b2-06b6-5ea30b33b7ac_default_universal.mp4',
         },
         {
           'id': '1ad8e7b3-4547-0890-aa8d-d79be028e48f',
           'name': 'Ion Sheriff Level 3',
+          'image':
+            'https://media.valorant-api.com/weaponskins/83778c03-45a3-67a2-3c89-6b8598327d58/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/ad9f078e-4088-4e60-71a7-4d8d38027a19_default_universal.mp4',
         },
         {
           'id': 'becd58d6-4da0-db56-a748-35923d2750e1',
           'name': 'Ion Sheriff Level 4',
+          'image':
+            'https://media.valorant-api.com/weaponskins/83778c03-45a3-67a2-3c89-6b8598327d58/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/21d51f61-43d2-250e-16e8-ab810c2a6907_default_universal.mp4',
         },
@@ -742,6 +773,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/d3f81911-44e7-f0c1-cc6c-34bda3bff6d3/fullrender.png',
         },
       ],
+      'weaponId': 'e336c6b8-418d-9340-d77f-7a9e4cfe0702',
+      'weapon': 'Sheriff',
+      'collectionKey': 'oblivion',
     },
     'Reaver Operator': {
       'image':
@@ -760,18 +794,24 @@ export const DEMO_ART: {
         {
           'id': 'bf02e33f-4d16-e361-d1ed-1eb58de846c3',
           'name': 'Reaver Operator Level 2',
+          'image':
+            'https://media.valorant-api.com/weaponskins/aecab890-43b7-d719-06bc-9295e3d116dc/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/3c3c69e2-4bb1-7188-1002-f988ab0db603_default_universal.mp4',
         },
         {
           'id': '59409cb0-4583-20a4-c905-4db393712af7',
           'name': 'Reaver Operator Level 3',
+          'image':
+            'https://media.valorant-api.com/weaponskins/aecab890-43b7-d719-06bc-9295e3d116dc/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/a66f510e-4c04-b495-67cf-a8bde5d8fb4a_default_universal.mp4',
         },
         {
           'id': '21305a72-4374-67c7-c25b-e0bb8dc2da52',
           'name': 'Reaver Operator Level 4',
+          'image':
+            'https://media.valorant-api.com/weaponskins/aecab890-43b7-d719-06bc-9295e3d116dc/displayicon.png',
           'video':
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/245283ef-493b-4f79-a9fb-30a3075fffe0_default_universal.mp4',
         },
@@ -802,6 +842,9 @@ export const DEMO_ART: {
             'https://media.valorant-api.com/weaponskinchromas/4244d37b-4129-175d-a2dc-98a8e1de89c6/fullrender.png',
         },
       ],
+      'weaponId': 'a03b24d3-4319-996d-0f8c-94bbfba1dfc7',
+      'weapon': 'Operator',
+      'collectionKey': 'soulstealer',
     },
     'RGX 11z Pro Blade': {
       'image':
@@ -858,6 +901,78 @@ export const DEMO_ART: {
             'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/feda7ab0-4c93-87be-f3a3-d88b4fdab039_default_universal.mp4',
         },
       ],
+      'weaponId': '2f59173c-4bed-b6c3-2191-dea9b58be9c7',
+      'weapon': 'Melee',
+      'collectionKey': 'afterglow',
+    },
+    'Prime Vandal': {
+      'weaponId': '9c82e19d-4575-0200-1a81-3eacf00cf872',
+      'weapon': 'Vandal',
+      'collectionKey': 'hypebeast',
+      'levels': [
+        {
+          'id': 'c9678d8c-4327-f397-b0ec-dca3c3d6fb15',
+          'name': 'Prime Vandal',
+          'image':
+            'https://media.valorant-api.com/weaponskinlevels/c9678d8c-4327-f397-b0ec-dca3c3d6fb15/displayicon.png',
+          'video':
+            'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/d9fe3b9b-6d9e-451f-84bd-b85d7f91a106_default_universal.mp4',
+        },
+        {
+          'id': 'c6f9c7ef-4a35-fa14-c9ed-bd80e37be826',
+          'name': 'Prime Vandal Level 2',
+          'image':
+            'https://media.valorant-api.com/weaponskinlevels/c6f9c7ef-4a35-fa14-c9ed-bd80e37be826/displayicon.png',
+          'video':
+            'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/b3ac314b-100a-4822-8464-e0c861ca9171_default_universal.mp4',
+        },
+        {
+          'id': 'fc332008-475f-5555-0155-4cb3bce714ff',
+          'name': 'Prime Vandal Level 3',
+          'image':
+            'https://media.valorant-api.com/weaponskinlevels/fc332008-475f-5555-0155-4cb3bce714ff/displayicon.png',
+          'video':
+            'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/3dce5c84-8554-4fba-aaa1-af725779014c_default_universal.mp4',
+        },
+        {
+          'id': '22821a32-4e04-ad4a-1893-95904c08b264',
+          'name': 'Prime Vandal Level 4',
+          'image':
+            'https://media.valorant-api.com/weaponskinlevels/22821a32-4e04-ad4a-1893-95904c08b264/displayicon.png',
+          'video':
+            'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/97f7aa62-ede2-4e34-b5f8-efa798be6e86_default_universal.mp4',
+        },
+      ],
+      'chromas': [
+        {
+          'id': 'a26e0d1d-4886-7d62-6b4f-1996e706463d',
+          'name': 'Prime Vandal',
+          'image':
+            'https://media.valorant-api.com/weaponskinchromas/a26e0d1d-4886-7d62-6b4f-1996e706463d/fullrender.png',
+        },
+        {
+          'id': 'ad2b0b8b-4da8-9c88-331a-028f2026ab66',
+          'name': 'Prime Vandal Level 4\r\n(Variant 1 Orange)',
+          'image':
+            'https://media.valorant-api.com/weaponskinchromas/ad2b0b8b-4da8-9c88-331a-028f2026ab66/fullrender.png',
+        },
+        {
+          'id': 'cd3ebdc1-4858-efda-6cee-c683726f8ca9',
+          'name': 'Prime Vandal Level 4\r\n(Variant 2 Blue)',
+          'image':
+            'https://media.valorant-api.com/weaponskinchromas/cd3ebdc1-4858-efda-6cee-c683726f8ca9/fullrender.png',
+        },
+        {
+          'id': 'd43b8d21-4fb2-1224-1392-53ab6d829ed1',
+          'name': 'Prime Vandal Level 4\r\n(Variant 3 Yellow)',
+          'image':
+            'https://media.valorant-api.com/weaponskinchromas/d43b8d21-4fb2-1224-1392-53ab6d829ed1/fullrender.png',
+        },
+      ],
+      'image':
+        'https://media.valorant-api.com/weaponskins/b9ee2457-481c-6776-3f5b-0ca8e8f90c89/displayicon.png',
+      'video':
+        'https://valorant.dyn.riotcdn.net/x/videos/release-13.05/d9fe3b9b-6d9e-451f-84bd-b85d7f91a106_default_universal.mp4',
     },
   },
   'bundles': {

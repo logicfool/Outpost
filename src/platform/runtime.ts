@@ -3,6 +3,8 @@ import {
   sessionCheckpointMatches,
   sessionHealth,
 } from '../core/sessionRenewal';
+import { logoutRiotSession } from '../core/logout';
+import { rememberBundles } from '../core/bundles';
 import { recordRequest } from '../core/diagnostics';
 import type { Session } from '../core/types';
 import {
@@ -36,7 +38,7 @@ import { PlayerScope } from '../core/playerScope';
 import type { IdentityEdit } from '../core/playerTypes';
 import type { Loadout } from '../core/types';
 import { Platform } from 'react-native';
-import { CatalogClient } from '../core/catalog';
+import { CatalogClient, buildCatalog, mergeCatalog } from '../core/catalog';
 import { HttpClient } from '../core/http';
 import { RiotClient, connectAccount } from '../core/riot';
 import { EMPTY_CATALOG, MAX_ACCOUNTS } from '../core/types';
@@ -51,6 +53,8 @@ export class Runtime {
   readonly http = new HttpClient(nativeFetcher);
   readonly publicClient = new CatalogClient(new HttpClient(nativeFetcher));
   catalog: Catalog = { ...EMPTY_CATALOG };
+  private signoutFlights = new Map<string, Promise<void>>();
+  private signingOut = new Set<string>();
   private clients = new Map<string, RiotClient>();
   private scopes = new Map<string, PlayerScope>();
   private rejectedSessions = new Set<string>();
@@ -82,7 +86,7 @@ export class Runtime {
       if (
         cached &&
         (!allowNetwork ||
-          (!force && cached.schemaVersion === 6 && cached.fetchedAt + ttl > this.now()))
+          (!force && cached.schemaVersion === 7 && cached.fetchedAt + ttl > this.now()))
       ) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
@@ -146,6 +150,8 @@ export class Runtime {
     if (Platform.OS === 'web')
       throw new AppError('NATIVE_REQUIRED', 'Real Riot sign-in is disabled on web.');
     const session = await connectAccount(this.http, input, region);
+    if (this.signingOut.has(session.account.puuid))
+      throw new AppError('SIGNING_OUT', 'This account is signing out.');
     if (expectedId && expectedId !== session.account.puuid)
       throw new AppError(
         'ACCOUNT_MISMATCH',
@@ -210,6 +216,7 @@ export class Runtime {
     this.clientFlights.delete(id);
   }
   async client(id: string): Promise<RiotClient> {
+    if (this.signingOut.has(id)) throw new AppError('SIGNING_OUT', 'This account is signing out.');
     if (this.linkingAccounts.has(id))
       throw new AppError(
         'SESSION_LINKING',
@@ -458,6 +465,13 @@ export class Runtime {
       const latest = await this.repository.snapshot(id);
       if (latest?.liveGame) next.liveGame = latest.liveGame;
       await this.repository.saveSnapshot(next);
+      if (next.store.status === 'ready') {
+        const enriched = rememberBundles(this.catalog, next.store.data.bundles);
+        if (enriched !== this.catalog) {
+          this.catalog = enriched;
+          await this.repository.saveCatalog(enriched);
+        }
+      }
       if (
         !failed &&
         next.store.status === 'ready' &&
@@ -571,6 +585,17 @@ export class Runtime {
     } finally {
       if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
     }
+  }
+  async refreshMedia(): Promise<Catalog> {
+    const partial = buildCatalog({ weapons: await this.publicClient.weaponSkins() });
+    this.catalog = {
+      ...mergeCatalog(this.catalog, partial),
+      fetchedAt: this.catalog.fetchedAt,
+      failedPaths: this.catalog.failedPaths,
+    };
+    for (const client of this.clients.values()) client.updateCatalog(this.catalog);
+    await this.repository.saveCatalog(this.catalog);
+    return this.catalog;
   }
   async loadoutEditor(id: string) {
     await this.loadCatalog();
@@ -948,6 +973,57 @@ export class Runtime {
     next = await this.reconcileOwnership(next, client);
     await this.repository.savePurchaseRecord(next);
     return next;
+  }
+  async signOut(id: string): Promise<void> {
+    const existing = this.signoutFlights.get(id);
+    if (existing) return existing;
+    const work = async () => {
+      await this.linkQueue.catch(() => {});
+      this.signingOut.add(id);
+      try {
+        await this.purchaseFlights.get(id)?.catch(() => {});
+        const pending = [
+          this.clientFlights.get(id),
+          this.flights.get(id),
+          this.liveFlights.get(id),
+          this.identityFlights.get(id),
+        ].filter(Boolean);
+        this.invalidate(id);
+        await Promise.allSettled(pending);
+        const session = await vault.read(id);
+        if (!session)
+          throw new AppError(
+            'LOGOUT_NO_COOKIE',
+            'No saved Riot session. Use Remove locally instead.',
+          );
+        const gateKey = `notice.${id}.logout.notBefore`;
+        const due = Number(await this.repository.notificationStamp(gateKey)) || 0;
+        if (due > this.now())
+          throw new AppError('LOCAL_COOLDOWN', 'Wait before signing out again.', due);
+        await this.repository.setNotificationStamp(gateKey, String(this.now() + 60000));
+        try {
+          await logoutRiotSession(session, nativeFetcher);
+        } catch (reason) {
+          const error = safeError(reason);
+          if (error.retryAt)
+            await this.repository.setNotificationStamp(
+              gateKey,
+              String(Math.max(this.now() + 60000, error.retryAt)),
+            );
+          throw error;
+        }
+        await this.remove(id);
+      } finally {
+        this.signingOut.delete(id);
+      }
+    };
+    const flight = work();
+    this.signoutFlights.set(id, flight);
+    try {
+      await flight;
+    } finally {
+      if (this.signoutFlights.get(id) === flight) this.signoutFlights.delete(id);
+    }
   }
   async remove(id: string): Promise<void> {
     await this.linkQueue.catch(() => {});

@@ -1,17 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  ActivityIndicator,
-  ScrollView,
-} from 'react-native';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, TextInput, FlatList, Pressable, RefreshControl } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
+import type { CatalogItem } from '../core/types';
 import type { LoadoutPreset, LoadoutEditor, WeaponChoice } from '../core/presets';
+import { weaponSkins, unlockedLevels, unlockedChromas, chooseSkin } from '../core/loadoutOptions';
 import { safeError } from '../core/validation';
 import { Button, ModalHeader, ModalPage, ItemArt, Empty, Tabs } from './components';
 import { useTheme } from './theme';
@@ -23,175 +16,224 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
     [name, setName] = useState(''),
     [id, setId] = useState<string>(),
     [slot, setSlot] = useState<string>(),
-    [busy, setBusy] = useState(false),
+    [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false),
     [error, setError] = useState<string>(),
     [confirm, setConfirm] = useState<{ preset: LoadoutPreset; remove?: boolean }>();
-  const reload = async () => {
-    setBusy(true);
-    try {
-      setList(await model.listPresets());
-    } catch (e) {
-      setError(safeError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const generation = useRef(0),
+    locked = useRef(false);
   useEffect(() => {
-    void reload();
+    const g = ++generation.current;
+    void model
+      .listPresets()
+      .then((v) => {
+        if (g === generation.current) setList(v);
+      })
+      .catch((e) => {
+        if (g === generation.current) setError(safeError(e).message);
+      });
+    return () => {
+      generation.current++;
+    };
   }, [model.active?.puuid]);
-  const begin = async (preset?: LoadoutPreset) => {
+  const run = async (work: () => Promise<void>) => {
+    if (locked.current) return;
+    locked.current = true;
     setBusy(true);
     setError(undefined);
+    const g = generation.current;
     try {
-      const data = await model.editLoadout();
-      setEditor(data);
-      setWeapons(preset?.weapons ?? data.current);
-      setName(preset?.name ?? 'New loadout');
-      setId(preset?.id);
+      await work();
     } catch (e) {
-      setError(safeError(e).message);
+      if (g === generation.current) setError(safeError(e).message);
     } finally {
-      setBusy(false);
+      if (g === generation.current) {
+        locked.current = false;
+        setBusy(false);
+      }
     }
   };
-  const save = async () => {
-    setBusy(true);
-    try {
+  const reload = async () => {
+    const g = generation.current,
+      v = await model.listPresets();
+    if (g === generation.current) setList(v);
+  };
+  const begin = (preset?: LoadoutPreset) =>
+    run(async () => {
+      const g = generation.current,
+        data = await model.editLoadout();
+      if (g !== generation.current) return;
+      setEditor(data);
+      const existing = new Map(preset?.weapons.map((w) => [w.weaponId, w]));
+      setWeapons(data.current.map((w) => existing.get(w.weaponId) ?? w));
+      setName(preset?.name ?? '');
+      setId(preset?.id);
+      setSlot(undefined);
+      setQuery('');
+    });
+  const save = () =>
+    run(async () => {
+      const g = generation.current;
       await model.savePreset(name, weapons, id);
+      if (g !== generation.current) return;
       setEditor(null);
       await reload();
-    } catch (e) {
-      setError(safeError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const execute = async () => {
-    if (!confirm) return;
-    setBusy(true);
-    setError(undefined);
-    try {
+    });
+  const execute = () =>
+    run(async () => {
+      if (!confirm) return;
+      const g = generation.current;
       if (confirm.remove) await model.deletePreset(confirm.preset.id);
       else await model.applyPreset(confirm.preset);
+      if (g !== generation.current) return;
+      setConfirm(undefined);
       setError(
         confirm.remove
           ? 'Preset deleted.'
           : model.active?.demo
-            ? 'Demo preset selected. No Riot account changed.'
-            : 'Riot confirmed every selected weapon skin.',
+            ? 'Demo loadout applied.'
+            : 'Loadout applied.',
       );
-      setConfirm(undefined);
       await reload();
-    } catch (e) {
-      setError(safeError(e).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
   const selected = weapons.find((w) => w.weaponId === slot),
-    skin = selected ? model.catalog.items[selected.skinId] : undefined;
-  const items = useMemo(() => {
-    if (!selected || !editor) return [];
-    const unique = new Map();
-    for (const item of Object.values(model.catalog.items))
-      if (
-        item.kind === 'skin' &&
-        item.id === item.canonicalId &&
-        (item.weaponId === selected.weaponId ||
-          (model.active?.demo && item.weapon === skin?.weapon)) &&
-        (item.canonicalId === selected.skinId ||
-          item.levels?.some((l) => editor.ownedLevels.includes(l.id)))
-      )
-        unique.set(item.id, item);
-    return [...unique.values()] as (typeof skin)[];
-  }, [slot, weapons, editor, model.catalog]);
+    skin = selected ? model.catalog.items[selected.skinId.toLowerCase()] : undefined;
+  const items = useMemo(
+    () =>
+      selected && editor
+        ? weaponSkins(model.catalog, editor, selected.weaponId).filter((i) =>
+            i.name.toLowerCase().includes(query.trim().toLowerCase()),
+          )
+        : [],
+    [selected?.weaponId, editor, model.catalog, query],
+  );
   const update = (values: Partial<WeaponChoice>) =>
     setWeapons((old) => old.map((w) => (w.weaponId === slot ? { ...w, ...values } : w)));
+  const header = (
+    <ModalHeader
+      title={slot ? (skin?.weapon ?? 'Choose skin') : editor ? 'Edit loadout' : 'Saved loadouts'}
+      closeLabel={slot ? 'Back to preset' : editor ? 'Cancel preset editing' : 'Back from loadouts'}
+      onClose={() => {
+        if (busy) return;
+        if (slot) {
+          setSlot(undefined);
+          setQuery('');
+        } else if (editor) setEditor(null);
+        else onBack();
+      }}
+    />
+  );
   return (
     <ModalPage>
-      <ModalHeader
-        title={slot ? 'Choose weapon skin' : editor ? 'Edit loadout' : 'Saved loadouts'}
-        closeLabel={
-          slot ? 'Back to preset' : editor ? 'Cancel preset editing' : 'Back from loadouts'
-        }
-        onClose={() => {
-          if (busy) return;
-          if (slot) setSlot(undefined);
-          else if (editor) setEditor(null);
-          else onBack();
-        }}
-      />
+      {header}
       {error && (
-        <Text accessibilityRole="alert" style={[S.body, { padding: 16, color: C.gold }]}>
+        <Text accessibilityRole="alert" style={[S.small, { padding: 16, color: C.gold }]}>
           {error}
         </Text>
       )}
       {slot && selected && editor ? (
-        <ScrollView contentContainerStyle={S.content}>
-          <Text style={S.h2}>{skin?.weapon ?? 'Weapon'}</Text>
-          <Text style={S.small}>
-            Only owned skins and unlocked upgrades are available. Buddies stay as currently
-            equipped.
-          </Text>
-          {skin && <ItemArt item={skin} size={110} />}
-          {skin?.levels && (
-            <>
-              <Text style={S.h3}>Level</Text>
-              <Tabs
-                value={selected.levelId}
-                onChange={(levelId) => update({ levelId })}
-                items={skin.levels
-                  .filter((l) => editor.ownedLevels.includes(l.id) || l.id === selected.levelId)
-                  .map((l, n) => ({
-                    id: l.id,
-                    label: `Level ${skin.levels!.findIndex((v) => v.id === l.id) + 1}`,
-                  }))}
+        <FlatList
+          key="skin-grid"
+          data={items}
+          numColumns={2}
+          keyExtractor={(i) => i.canonicalId}
+          contentContainerStyle={S.content}
+          columnWrapperStyle={{ gap: 12 }}
+          initialNumToRender={6}
+          windowSize={5}
+          ListHeaderComponent={
+            <View style={{ gap: 14, paddingBottom: 16 }}>
+              {skin && (
+                <>
+                  <ItemArt item={skin} size={100} />
+                  <Text style={S.h3}>{skin.name}</Text>
+                  <Text style={S.small}>Level</Text>
+                  <Tabs
+                    value={selected.levelId}
+                    onChange={(levelId) => update({ levelId })}
+                    items={unlockedLevels(skin, editor).map((l) => ({
+                      id: l.id,
+                      label: String((skin.levels ?? []).findIndex((v) => v.id === l.id) + 1),
+                    }))}
+                  />
+                  <Text style={S.small}>Colour</Text>
+                  <Tabs
+                    value={selected.chromaId}
+                    onChange={(chromaId) => update({ chromaId })}
+                    items={unlockedChromas(skin, editor).map((c) => ({
+                      id: c.id,
+                      label:
+                        /Variant\s+\d+\s+([^)]*)/i.exec(c.name)?.[1]?.trim() ||
+                        (c.id === skin.chromas?.[0]?.id
+                          ? 'Original'
+                          : c.name.replace(skin.name, '').trim()),
+                    }))}
+                  />
+                </>
+              )}
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                accessibilityLabel="Search owned skins"
+                placeholder="Search owned skins"
+                placeholderTextColor={C.subtle}
+                style={S.input}
               />
-            </>
+              <View style={S.between}>
+                <Text style={S.h3}>Your skins</Text>
+                <Text style={S.small}>{items.length}</Text>
+              </View>
+            </View>
+          }
+          ListEmptyComponent={
+            <Empty
+              title="No owned skins found"
+              detail="Pull down on Collection to refresh ownership."
+            />
+          }
+          renderItem={({ item }) => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Use ${item.name}`}
+              accessibilityState={{ selected: item.canonicalId === selected.skinId }}
+              onPress={() => {
+                if (item.canonicalId === selected.skinId) return;
+                const next = chooseSkin(item, editor);
+                if (next) update(next);
+              }}
+              style={[
+                S.card,
+                {
+                  flex: 1,
+                  maxWidth: '49%',
+                  gap: 8,
+                  padding: 12,
+                  borderColor: item.canonicalId === selected.skinId ? C.accent : C.border,
+                },
+              ]}
+            >
+              <ItemArt item={item} size={70} />
+              <Text style={S.h3} numberOfLines={2}>
+                {item.name}
+              </Text>
+              {item.canonicalId === selected.skinId && (
+                <Text style={[S.small, { color: C.accent }]}>Selected</Text>
+              )}
+            </Pressable>
           )}
-          {skin?.chromas && (
-            <>
-              <Text style={S.h3}>Colour</Text>
-              <Tabs
-                value={selected.chromaId}
-                onChange={(chromaId) => update({ chromaId })}
-                items={skin.chromas
-                  .filter(
-                    (c, n) =>
-                      n === 0 || editor.ownedChromas.includes(c.id) || c.id === selected.chromaId,
-                  )
-                  .map((c, n) => ({ id: c.id, label: c.name || `Variant ${n + 1}` }))}
-              />
-            </>
-          )}
-          {items.map(
-            (item) =>
-              item && (
-                <Pressable
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Use ${item.name}`}
-                  onPress={() => {
-                    const level = item.levels?.find((l) => editor.ownedLevels.includes(l.id));
-                    if (item.id === selected.skinId) return;
-                    if (level && item.chromas?.[0])
-                      update({
-                        skinId: item.canonicalId,
-                        levelId: level.id,
-                        chromaId: item.chromas[0].id,
-                      });
-                  }}
-                  style={S.card}
-                >
-                  <ItemArt item={item} size={65} />
-                  <Text style={S.h3}>{item.name}</Text>
-                </Pressable>
-              ),
-          )}
-          <Button title="Done with weapon" onPress={() => setSlot(undefined)} />
-        </ScrollView>
+          ListFooterComponent={
+            <Button
+              title="Done with weapon"
+              onPress={() => {
+                setSlot(undefined);
+                setQuery('');
+              }}
+            />
+          }
+        />
       ) : editor ? (
         <FlatList
+          key="slots"
           data={weapons}
           keyExtractor={(w) => w.weaponId}
           contentContainerStyle={S.content}
@@ -201,15 +243,13 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
               <TextInput
                 accessibilityLabel="Loadout name"
                 placeholder="Loadout name"
+                placeholderTextColor={C.subtle}
                 value={name}
                 maxLength={48}
                 onChangeText={setName}
                 style={S.input}
               />
-              <Text style={S.small}>
-                Create a named set of skins, levels and colours. Applying uses one verified loadout
-                update; buddies, identity and sprays stay unchanged.
-              </Text>
+              <Text style={S.small}>Tap a weapon to choose from your skins.</Text>
               <Button
                 title="Save loadout"
                 disabled={busy || !name.trim()}
@@ -218,18 +258,21 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
             </View>
           }
           renderItem={({ item: w }) => {
-            const item = model.catalog.items[w.skinId];
+            const item = model.catalog.items[w.skinId.toLowerCase()];
             return (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Edit ${item?.weapon ?? 'weapon'} skin`}
-                onPress={() => setSlot(w.weaponId)}
+                onPress={() => {
+                  setSlot(w.weaponId);
+                  setQuery('');
+                }}
                 style={[S.card, S.row]}
               >
                 {item && <ItemArt item={item} size={64} style={{ width: 90 }} />}
                 <View style={{ flex: 1 }}>
                   <Text style={S.small}>{item?.weapon ?? 'Weapon'}</Text>
-                  <Text style={S.h3}>{item?.name ?? 'Equipped skin'}</Text>
+                  <Text style={S.h3}>{item?.name ?? 'Choose skin'}</Text>
                 </View>
                 <Feather name="chevron-right" size={20} color={C.subtle} />
               </Pressable>
@@ -238,20 +281,21 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
         />
       ) : (
         <FlatList
+          key="presets"
           data={list}
           keyExtractor={(p) => p.id}
           contentContainerStyle={S.content}
           refreshControl={
             <RefreshControl
               refreshing={busy}
-              onRefresh={() => void reload()}
+              onRefresh={() => void run(reload)}
               tintColor={C.accent}
             />
           }
           ListHeaderComponent={
             <View style={{ gap: 14 }}>
               <Button
-                title="Create from equipped loadout"
+                title="Create loadout"
                 icon="plus"
                 disabled={busy}
                 onPress={() => void begin()}
@@ -263,8 +307,8 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
                   </Text>
                   <Text style={S.body}>
                     {confirm.remove
-                      ? 'This only removes the local preset.'
-                      : `${confirm.preset.weapons.length} weapon slots will change on ${model.active?.gameName}. Other equipment is preserved.`}
+                      ? 'Remove this saved preset?'
+                      : `Change ${confirm.preset.weapons.length} weapon slots on ${model.active?.gameName}? Buddies and sprays stay.`}
                   </Text>
                   <Button
                     title={
@@ -290,8 +334,8 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
           ListEmptyComponent={
             !busy ? (
               <Empty
-                title="Build your first loadout"
-                detail="Save your current set, customise it here, then equip it with one confirmation."
+                title="Create your first loadout"
+                detail="Pick your skins here, then apply them together."
                 icon="layers"
               />
             ) : null
@@ -302,7 +346,7 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
                 <Text style={S.h2}>{p.name}</Text>
                 <Text style={S.small}>{p.weapons.length} slots</Text>
               </View>
-              <View style={[S.row, { flexWrap: 'wrap' }]}>
+              <View style={S.row}>
                 <View style={{ flex: 1 }}>
                   <Button
                     secondary

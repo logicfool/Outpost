@@ -4,8 +4,11 @@ import { safeImage } from './validation';
 import { queueName } from './normalize';
 import { presencePriority } from './chatPresence';
 
+export const DEFAULT_CARD_ART =
+  'https://media.valorant-api.com/playercards/9fb348bc-41a0-91ad-8a3e-818035c4e561/displayicon.png';
+
 export function squareCardCandidates(card: CatalogItem | undefined, catalog?: Catalog): string[] {
-  if (!card) return [];
+  if (!card) return [DEFAULT_CARD_ART];
   const resolved = catalog?.items[card.id.toLowerCase()] ?? card;
   const id = (resolved.canonicalId || resolved.id).toLowerCase();
   const square = (url?: string) =>
@@ -25,6 +28,7 @@ export function squareCardCandidates(card: CatalogItem | undefined, catalog?: Ca
         square(card.image),
         square(card.smallArt),
         ...generated,
+        DEFAULT_CARD_ART,
       ].filter((v): v is string => !!v),
     ),
   ];

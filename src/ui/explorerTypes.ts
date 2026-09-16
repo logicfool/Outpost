@@ -1,6 +1,8 @@
 import type { PlayerRef } from '../core/playerTypes';
 import type { Ranked } from '../core/types';
 export type ExplorerRoute =
+  | { type: 'bundle'; id: string }
+  | { type: 'item'; item: import('../core/types').CatalogItem }
   | { type: 'player'; player: PlayerRef }
   | { type: 'match'; id: string; subject?: string }
   | { type: 'career'; rank: Ranked }

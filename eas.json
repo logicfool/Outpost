@@ -41,6 +41,14 @@
         "config": "login-smoke.yml",
         "image": "latest"
       }
+    },
+    "release-smoke": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true,
+        "config": "release-smoke.yml",
+        "image": "latest"
+      }
     }
   }
 }

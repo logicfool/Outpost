@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import { valorantActivity } from './presenceState';
+import { valorantActivity, presenceFields } from './presenceState';
 import type { Catalog } from './types';
 import type { Friend } from './chatTypes';
 import { catalogItem } from './catalog';
@@ -24,6 +24,7 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
       );
     } catch {}
   }
+  const { player, party } = presenceFields(data);
   const valOnline =
     !!valorant && data.isValid !== false && child(valorant, 'st')?.text !== 'offline';
   const activityData = valorantActivity(data);
@@ -40,8 +41,8 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
   );
   const game = valOnline ? 'VALORANT' : other ? gameNames[other.name] : undefined;
   const activity = valOnline ? activityData.activity : other ? 'Online' : undefined;
-  const rawSize = nullableNumber(data.partySize),
-    rawMax = nullableNumber(data.maxPartySize);
+  const rawSize = nullableNumber(party.partySize),
+    rawMax = nullableNumber(party.maxPartySize);
   const partySize =
     valOnline && rawSize !== null && Number.isInteger(rawSize) && rawSize >= 1 && rawSize <= 100
       ? rawSize
@@ -56,10 +57,10 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
       : show === 'away' || show === 'xa'
         ? 'away'
         : 'online';
-  const cardId = text(data.playerCardId),
-    titleId = text(data.playerTitleId),
+  const cardId = text(player.playerCardId),
+    titleId = text(player.playerTitleId),
     mapId = valOnline ? activityData.mapId : '';
-  const hideLevel = data.hideAccountLevel === true;
+  const hideLevel = player.hideAccountLevel === true;
   const stamp = Number(valorant && child(valorant, 's.t')?.text);
 
   const updatedAt = now;
@@ -79,8 +80,8 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
     ...(titleId ? { title: catalogItem(catalog, titleId, 'title') } : {}),
     ...(valOnline
       ? {
-          tier: nullableNumber(data.competitiveTier) ?? undefined,
-          level: hideLevel ? null : nullableNumber(data.accountLevel),
+          tier: nullableNumber(player.competitiveTier) ?? undefined,
+          level: hideLevel ? null : nullableNumber(player.accountLevel),
           hideLevel,
         }
       : {}),

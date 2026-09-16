@@ -1,0 +1,20 @@
+build:
+  name: Native iPhone login, video and owned-loadout regression
+  steps:
+    - eas/build
+    - eas/maestro_test:
+        inputs:
+          flow_path: maestro/release-smoke.yml
+    - run:
+        name: Collect this run's native sign-in evidence
+        if: ${ always() }
+        command: |
+          mkdir -p login-native-artifacts
+          cp -R "$HOME/.maestro/tests" login-native-artifacts/maestro 2>/dev/null || true
+          find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -name 'Outpost*' -type f -exec cp '{}' login-native-artifacts/ \; 2>/dev/null || true
+          xcrun simctl io booted screenshot login-native-artifacts/final-screen.png || true
+    - eas/upload_artifact:
+        if: ${ always() }
+        inputs:
+          type: build-artifact
+          path: login-native-artifacts

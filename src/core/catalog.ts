@@ -16,6 +16,7 @@ export const CATALOG_PATHS = [
   'contracts',
   'seasons',
   'currencies',
+  'themes',
 ] as const;
 export type CatalogPath = (typeof CATALOG_PATHS)[number];
 function dataList(value: unknown) {
@@ -44,9 +45,15 @@ export function buildCatalog(
     tiers: Object.create(null),
     contracts: Object.create(null),
     seasons: Object.create(null),
-    schemaVersion: 6,
+    schemaVersion: 7,
     fetchedAt: now,
   };
+  const themeNames = new Map(
+    dataList(responses.themes).map((v) => {
+      const t = object(v);
+      return [text(t.uuid), text(t.displayName)] as const;
+    }),
+  );
   const add = (id: string, item: CatalogItem) => {
     if (id && id !== '__proto__')
       catalog.items[id.toLowerCase()] = { ...item, id: id.toLowerCase() };
@@ -76,8 +83,13 @@ export function buildCatalog(
         canonicalId: text(skin.uuid),
         name: text(skin.displayName),
         kind: 'skin',
+        isDefault:
+          !!text(weapon.defaultSkinUuid) &&
+          text(weapon.defaultSkinUuid).toLowerCase() === text(skin.uuid).toLowerCase(),
         weapon: text(weapon.displayName),
         weaponId: text(weapon.uuid),
+        collectionKey: text(skin.assetPath).split('/').at(-2)?.toLowerCase(),
+        collectionName: themeNames.get(text(skin.themeUuid)),
         image:
           safeImage(skin.displayIcon) ??
           safeImage(levels[0]?.displayIcon) ??
@@ -151,8 +163,41 @@ export function buildCatalog(
         });
     }
   for (const raw of dataList(responses.bundles)) {
-    const e = object(raw);
-    catalog.bundles[text(e.uuid)] = { name: text(e.displayName), image: safeImage(e.displayIcon) };
+    const e = object(raw),
+      asset = text(e.assetPath).split('/').at(-1) ?? '';
+    const collectionKey = /^StorefrontItem_(.+?)(?:_?ThemeBundle|_?Bundle)_DataAsset$/i
+      .exec(asset)?.[1]
+      ?.replace(/_$/, '')
+      .toLowerCase();
+    let itemIds = collectionKey
+      ? [
+          ...new Set(
+            Object.values(catalog.items)
+              .filter((i) => i.kind === 'skin' && i.collectionKey === collectionKey)
+              .map((i) => i.canonicalId),
+          ),
+        ]
+      : [];
+    const display = text(e.displayName).trim();
+    if (
+      !itemIds.length &&
+      dataList(responses.bundles).filter((v) => text(object(v).displayName).trim() === display)
+        .length === 1
+    )
+      itemIds = [
+        ...new Set(
+          Object.values(catalog.items)
+            .filter((i) => i.kind === 'skin' && i.collectionName?.trim() === display)
+            .map((i) => i.canonicalId),
+        ),
+      ];
+    catalog.bundles[text(e.uuid)] = {
+      name: text(e.displayName),
+      image: safeImage(e.displayIcon),
+      collectionKey,
+      itemIds,
+      ...(itemIds.length ? { membershipSource: 'catalog-theme' } : {}),
+    };
   }
   for (const raw of dataList(responses.maps)) {
     const e = object(raw),
@@ -273,7 +318,14 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
     ...fresh,
     items: { ...previous.items, ...fresh.items },
     maps: { ...previous.maps, ...fresh.maps },
-    bundles: { ...previous.bundles, ...fresh.bundles },
+    bundles: Object.fromEntries(
+      Object.entries({ ...previous.bundles, ...fresh.bundles }).map(([id, bundle]) => [
+        id,
+        previous.bundles[id]?.membershipSource === 'store'
+          ? { ...bundle, itemIds: previous.bundles[id]!.itemIds, membershipSource: 'store' }
+          : bundle,
+      ]),
+    ),
     tiers: { ...previous.tiers, ...fresh.tiers },
     contracts: { ...previous.contracts, ...fresh.contracts },
     seasons: { ...previous.seasons, ...fresh.seasons },
@@ -294,6 +346,13 @@ export class CatalogClient {
         throw new Error('Version unavailable');
       return version;
     });
+  }
+  async weaponSkins(): Promise<unknown> {
+    return this.cache.get(
+      'video-refresh-weapons',
+      60000,
+      async () => (await this.http.json(`${PUBLIC_ORIGIN}/v1/weapons?language=en-US`)).data,
+    );
   }
   async load(previous?: Catalog): Promise<Catalog> {
     return this.cache.get('catalog', 30000, async () => {

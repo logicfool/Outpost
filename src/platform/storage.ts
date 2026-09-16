@@ -1,4 +1,5 @@
 import { validatePreset } from '../core/presets';
+import { preferences } from '../core/preferences';
 import { mergeSnapshot } from '../core/snapshot';
 import * as SQLite from 'expo-sqlite';
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
@@ -234,12 +235,20 @@ async function create(): Promise<Repository> {
       return listWishes(id);
     },
     async settings() {
-      const value = {
-        ...DEFAULT_SETTINGS,
-        ...((await readJson<Settings>('SELECT data FROM settings WHERE key = ?', 'preferences')) ??
-          {}),
-      };
-      return { ...value, theme: themePreference(value.theme) };
+      const raw = await readJson<Settings>(
+        'SELECT data FROM settings WHERE key = ?',
+        'preferences',
+      );
+      const value = preferences(raw);
+      if (raw?.defaultsVersion !== value.defaultsVersion)
+        await write(async () => {
+          await db.runAsync(
+            'INSERT INTO settings(key,data) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET data=excluded.data',
+            'preferences',
+            JSON.stringify(value),
+          );
+        });
+      return value;
     },
     async saveSettings(settings) {
       await write(async () => {

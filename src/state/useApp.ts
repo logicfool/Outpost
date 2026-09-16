@@ -61,6 +61,31 @@ export function useApp() {
       void social.connectChat();
     }
   }, [active?.puuid, settings.chatAlerts]);
+  const servicesStarted = useRef(false);
+  useEffect(() => {
+    if (booting || !active || active.demo || Platform.OS === 'web') return;
+    void configureBackground(settings.backgroundSync).catch(() => {});
+    if (
+      servicesStarted.current ||
+      !(settings.reminders || settings.chatAlerts || settings.wishlistAlerts)
+    )
+      return;
+    servicesStarted.current = true;
+    void (async () => {
+      const runtime = await getRuntime(),
+        stamp = await runtime.repository.notificationStamp('notification.permission.prompted.v1');
+      if (stamp) return;
+      await runtime.repository.setNotificationStamp('notification.permission.prompted.v1', 'true');
+      await enableNotifications();
+    })().catch(() => setMessage('Allow notifications in device Settings to receive alerts.'));
+  }, [
+    booting,
+    active?.puuid,
+    settings.backgroundSync,
+    settings.reminders,
+    settings.chatAlerts,
+    settings.wishlistAlerts,
+  ]);
   const actions = useActions(
     active,
     catalog,
@@ -278,6 +303,17 @@ export function useApp() {
     },
     [switchAccount],
   );
+  const signOut = useCallback(
+    async (id: string) => {
+      if (activeRef.current?.puuid === id) await social.prepareChatRemoval();
+      const runtime = await getRuntime();
+      await runtime.signOut(id);
+      const list = await runtime.repository.accounts();
+      setAccounts(list);
+      if (activeRef.current?.puuid === id) switchAccount(list[0] ?? null);
+    },
+    [switchAccount, social.prepareChatRemoval],
+  );
   const toggleWish = useCallback(async (id: string) => {
     const account = activeRef.current;
     if (!account) return;
@@ -346,6 +382,29 @@ export function useApp() {
         await (await getRuntime()).repository.saveSettings(next);
       } catch {
         setMessage('The theme could not be saved. Please retry.');
+      }
+    },
+    [settings],
+  );
+  const ensureCatalog = useCallback(async () => {
+    const account = activeRef.current;
+    if (account?.demo) return;
+    const runtime = await getRuntime(),
+      next = await runtime.loadCatalog();
+    if (activeRef.current?.puuid === account?.puuid) setCatalog(next);
+  }, []);
+  const refreshMedia = useCallback(async () => {
+    const fresh = await (await getRuntime()).refreshMedia();
+    setCatalog(fresh);
+  }, []);
+  const setAutoplayVideos = useCallback(
+    async (enabled: boolean) => {
+      const next = { ...settings, autoplayVideos: enabled };
+      setSettings(next);
+      try {
+        await (await getRuntime()).repository.saveSettings(next);
+      } catch {
+        setMessage('Video preference could not be saved.');
       }
     },
     [settings],
@@ -550,14 +609,18 @@ export function useApp() {
     busy,
     message,
     dismissMessage: () => setMessage(null),
+    ensureCatalog,
     setTheme,
     setAutoChatHistory,
+    setAutoplayVideos,
+    refreshMedia,
     refresh,
     switchAccount,
     enterDemo: () => switchAccount(DEMO_ACCOUNT),
     leaveDemo: () => switchAccount(accounts[0] ?? null),
     link,
     remove,
+    signOut,
     toggleWish,
     saveSettings,
     clearCache,

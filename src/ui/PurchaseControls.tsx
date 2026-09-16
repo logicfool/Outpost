@@ -93,7 +93,7 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
   const daily =
     model.snapshot?.store.status === 'ready' &&
     model.snapshot.store.data.daily.some((o) => o.item.canonicalId === item.canonicalId);
-  if (!daily || item.kind !== 'skin') return null;
+  if (!daily || item.kind !== 'skin' || !model.settings.allowPurchases) return null;
   const review = () =>
     run(async () => {
       const next = await model.purchaseQuote(item.id);

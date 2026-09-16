@@ -9,6 +9,7 @@ try {
   if (typeof localStorage !== 'undefined') {
     settings.theme = themePreference(localStorage.getItem('outpost.theme'));
     settings.autoChatHistory = localStorage.getItem('outpost.autoChatHistory') !== 'false';
+    settings.autoplayVideos = localStorage.getItem('outpost.autoplayVideos') !== 'false';
   }
 } catch {}
 const unavailable = async (): Promise<never> => {
@@ -39,6 +40,7 @@ const repository: Repository = {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('outpost.theme', settings.theme!);
         localStorage.setItem('outpost.autoChatHistory', String(settings.autoChatHistory !== false));
+        localStorage.setItem('outpost.autoplayVideos', String(settings.autoplayVideos !== false));
       }
     } catch {}
   },

@@ -1,3 +1,5 @@
+import { BundlePanel } from './BundlePanel';
+import { ItemModal } from './screens';
 import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatPanel } from './ChatPanel';
 import { ChatSettings } from './ChatSettings';
@@ -799,6 +801,10 @@ export function ExplorerModal({
     props = { model, onNavigate, onBack };
   return (
     <Modal visible={!!route} animationType="slide" onRequestClose={onBack}>
+      {route?.type === 'bundle' && <BundlePanel {...props} id={route.id} />}
+      {route?.type === 'item' && (
+        <ItemModal key={route.item.id} model={model} item={route.item} onClose={onBack} embedded />
+      )}
       {route?.type === 'player' && (
         <PlayerPanel key={`player:${route.player.subject}`} {...props} player={route.player} />
       )}
