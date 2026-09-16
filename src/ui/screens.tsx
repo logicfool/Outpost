@@ -178,7 +178,7 @@ function Wallet({ model }: { model: AppModel }) {
   const styles = useThemedStyles(makeStyles);
 
   return (
-    <Resource section={model.snapshot?.wallet} title="Balances">
+    <Resource section={model.snapshot?.wallet} title="Balances" loading={model.busy}>
       {(balances) => (
         <View style={styles.wallet}>
           {walletOverview(balances).map((m) => (
@@ -560,7 +560,7 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
             </Text>
           )}
           {!store && tab !== 'history' && (
-            <Resource section={model.snapshot?.store} title="Store">
+            <Resource section={model.snapshot?.store} title="Store" loading={model.busy}>
               {() => null}
             </Resource>
           )}
@@ -2081,7 +2081,7 @@ export function AccountScreen({ model, onLink }: Props) {
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.5</Text>
+          <Text style={S.small}>Outpost 0.6.6</Text>
         </View>
       </Page>
       <Modal

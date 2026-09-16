@@ -1,4 +1,5 @@
 import { Image } from './CachedImage';
+import { isUnloadedSection } from '../core/refreshPolicy';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -444,18 +445,48 @@ export function Resource<T>({
   section: value,
   title,
   children,
+  loading = false,
 }: {
   section: DataSection<T> | undefined;
   title: string;
   children(data: T): React.ReactNode;
+  loading?: boolean;
 }) {
   const { C, S, isDark } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  if (!value)
+  if (!value || (loading && value.status === 'error'))
     return (
-      <View style={styles.loading}>
+      <View
+        testID={`loading-${title.toLowerCase()}`}
+        style={[styles.loading, { gap: 10 }]}
+        accessibilityLiveRegion="polite"
+      >
         <ActivityIndicator color={C.accent} />
+        <Text style={S.small}>Loading {title.toLowerCase()}...</Text>
+      </View>
+    );
+  if (isUnloadedSection(value))
+    return (
+      <View
+        testID={`waiting-${title.toLowerCase()}`}
+        style={[S.card, S.row]}
+        accessibilityLiveRegion="polite"
+      >
+        <Feather name="clock" color={C.subtle} size={20} />
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={S.h3}>{title}</Text>
+          <View style={[S.row, { flexWrap: 'wrap' }]}>
+            <Text style={S.small}>
+              {value.status === 'error' && value.retryAt
+                ? 'Retrying automatically in'
+                : 'Preparing first load...'}
+            </Text>
+            {value.status === 'error' && value.retryAt ? (
+              <Timer small expiresAt={value.retryAt} />
+            ) : null}
+          </View>
+        </View>
       </View>
     );
   if (value.status === 'error')

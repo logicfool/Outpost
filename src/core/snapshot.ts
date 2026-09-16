@@ -18,7 +18,10 @@ export function mergeSnapshot(previous: Snapshot | null, next: Snapshot): Snapsh
   for (const key of keys) {
     const old = previous[key],
       incoming = next[key];
-    if (incoming.status === 'error' && ['NOT_LOADED', 'LIVE_NOT_CHECKED'].includes(incoming.code)) {
+    if (
+      incoming.status === 'error' &&
+      ['NOT_LOADED', 'INITIAL_SYNC_WAIT', 'LIVE_NOT_CHECKED'].includes(incoming.code)
+    ) {
       Object.assign(merged, { [key]: old });
       continue;
     }

@@ -1,7 +1,12 @@
 import { useActions } from './useActions';
-import { storeResetAt, type RefreshReason } from '../core/refreshPolicy';
+import {
+  storeResetAt,
+  failedSnapshot,
+  waitingSnapshot,
+  type RefreshReason,
+} from '../core/refreshPolicy';
 import { mergeSnapshot } from '../core/snapshot';
-import { clearDiagnostics } from '../core/diagnostics';
+import { clearDiagnostics, recordRequest } from '../core/diagnostics';
 import { useSocial } from './useSocial';
 import { priorityArtwork } from '../core/artwork';
 import { warmArtwork, clearArtworkCache } from '../platform/artwork';
@@ -55,6 +60,8 @@ export function useApp() {
     demoWishes = useRef<string[]>([]),
     demoLoadout = useRef<Loadout | null>(null);
   activeRef.current = active;
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
   const social = useSocial(active, catalog);
   useEffect(() => {
     if (settings.chatAlerts && active && !active.demo && Platform.OS !== 'web') {
@@ -148,7 +155,11 @@ export function useApp() {
     const account = activeRef.current;
     if (!account) return;
     const stamp = epoch.current;
-    if (reason === 'manual') {
+    if (
+      reason === 'manual' ||
+      snapshotRef.current?.accountId !== account.puuid ||
+      snapshotRef.current?.store.status !== 'ready'
+    ) {
       setBusy(true);
       setMessage(null);
     }
@@ -162,23 +173,72 @@ export function useApp() {
       }
       const runtime = await getRuntime(),
         next = await runtime.sync(account.puuid, reason);
-      const [entries, updatedAccounts] = await Promise.all([
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid) return;
+
+      setSnapshot((previous) => mergeSnapshot(previous, next));
+      setCatalog(runtime.catalog);
+      setBusy(false);
+      const [historyResult, accountsResult] = await Promise.allSettled([
         runtime.repository.history(account.puuid),
         runtime.repository.accounts(),
       ]);
       if (epoch.current === stamp && activeRef.current?.puuid === account.puuid) {
-        setSnapshot((previous) => mergeSnapshot(previous, next));
-        setHistory(entries);
-        setCatalog(runtime.catalog);
-        setAccounts(updatedAccounts);
-        const updated = updatedAccounts.find((a) => a.puuid === account.puuid);
-        if (updated) {
-          activeRef.current = updated;
-          setActive(updated);
-        }
+        if (historyResult.status === 'fulfilled') setHistory(historyResult.value);
+        else
+          recordRequest({
+            at: Date.now(),
+            service: 'Account cache',
+            method: 'READ',
+            code: 'HISTORY_READ_FAILED',
+            durationMs: 0,
+          });
+        if (accountsResult.status === 'fulfilled') {
+          setAccounts(accountsResult.value);
+          const updated = accountsResult.value.find((a) => a.puuid === account.puuid);
+          if (updated) {
+            activeRef.current = updated;
+            setActive(updated);
+          }
+        } else
+          recordRequest({
+            at: Date.now(),
+            service: 'Account cache',
+            method: 'READ',
+            code: 'ACCOUNT_LIST_READ_FAILED',
+            durationMs: 0,
+          });
       }
-    } catch (error) {
-      if (epoch.current === stamp) setMessage(safeError(error).message);
+    } catch (reason) {
+      if (epoch.current === stamp && activeRef.current?.puuid === account.puuid) {
+        const error = safeError(reason);
+        recordRequest({
+          at: Date.now(),
+          service: 'Account refresh',
+          method: 'SYNC',
+          code: error.code,
+          durationMs: 0,
+        });
+        setMessage(error.message);
+
+        setSnapshot((previous) => {
+          if (previous?.store.status === 'ready') return previous;
+          if (error.code === 'LOCAL_COOLDOWN')
+            return waitingSnapshot(
+              account.puuid,
+              previous,
+              Math.max(Date.now() + 1000, previous?.nextAutoRefreshAt ?? 0, error.retryAt ?? 0),
+            );
+          const retryAt = Math.max(Date.now() + 300000, error.retryAt ?? 0);
+          return {
+            ...failedSnapshot(account.puuid, previous, {
+              code: error.code,
+              message: error.message,
+              retryAt,
+            }),
+            nextAutoRefreshAt: retryAt,
+          };
+        });
+      }
     } finally {
       if (epoch.current === stamp) setBusy(false);
     }
@@ -218,17 +278,35 @@ export function useApp() {
             list.map((a) => (a.puuid === savedAccount.puuid ? savedAccount : a)),
           );
         }
-        const [cached, wishes, entries, savedCatalog] = await Promise.all([
+        const [cached, wishes, entries, savedCatalog] = await Promise.allSettled([
           runtime.repository.snapshot(active.puuid),
           runtime.repository.wishlist(active.puuid),
           runtime.repository.history(active.puuid),
           runtime.repository.catalog(),
         ]);
-        if (epoch.current !== stamp) return;
-        setSnapshot(cached);
-        setWishlist(wishes);
-        setHistory(entries);
-        if (savedCatalog) setCatalog(savedCatalog);
+        if (epoch.current !== stamp || activeRef.current?.puuid !== active.puuid) return;
+        if (cached.status === 'fulfilled' && cached.value) {
+          const restored = cached.value;
+          setSnapshot((previous) =>
+            previous?.accountId === active.puuid ? mergeSnapshot(restored, previous) : restored,
+          );
+        }
+        if (wishes.status === 'fulfilled') setWishlist(wishes.value);
+        if (entries.status === 'fulfilled') setHistory(entries.value);
+        if (savedCatalog.status === 'fulfilled' && savedCatalog.value)
+          setCatalog(savedCatalog.value);
+        if (
+          [cached, wishes, entries, savedCatalog].some((result) => result.status === 'rejected')
+        ) {
+          recordRequest({
+            at: Date.now(),
+            service: 'Account cache',
+            method: 'READ',
+            code: 'PARTIAL_CACHE_RECOVERY',
+            durationMs: 0,
+          });
+        }
+
         await refreshAutomatic();
       } catch (error) {
         if (epoch.current === stamp) setMessage(safeError(error).message);
@@ -430,9 +508,8 @@ export function useApp() {
       setSnapshot(null);
       setHistory([]);
       setCatalog({ ...EMPTY_CATALOG });
-      setMessage(
-        'Cached snapshots, catalog, and observed history cleared. Accounts and wishlists were kept.',
-      );
+      setLinkRevision((value) => value + 1);
+      setMessage('Game cache cleared. Saved accounts and chats are kept.');
     } catch (error) {
       setMessage(safeError(error).message);
     }

@@ -9,7 +9,13 @@ import { orderResult } from './purchases';
 import { submitConfirmedOffer } from './purchaseRequest';
 import { ownedItemIds } from './ownership';
 import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
-import { DAY_MS, FULL_SNAPSHOT, keepCached, type SnapshotPlan } from './refreshPolicy';
+import {
+  DAY_MS,
+  FULL_SNAPSHOT,
+  keepCached,
+  shouldFetchSection,
+  type SnapshotPlan,
+} from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
 import { PlayerScope } from './playerScope';
@@ -604,7 +610,7 @@ export class RiotClient {
       old: Section<T> | undefined,
       loader: () => Promise<T>,
     ): Promise<Section<T>> =>
-      enabled
+      shouldFetchSection(enabled, old, plan.missingOnly)
         ? keepCached(old, await section(loader))
         : (old ?? {
             status: 'error',

@@ -18,6 +18,7 @@ export interface SnapshotPlan {
   account: boolean;
   collection: boolean;
   live: boolean;
+  missingOnly?: boolean;
 }
 export const FULL_SNAPSHOT: SnapshotPlan = {
   store: true,
@@ -40,7 +41,8 @@ export function nextAutomaticAt(
   gate: RefreshGateState | null,
   now = Date.now(),
 ): number {
-  return Math.max(storeResetAt(snapshot, now), gate?.notBefore ?? 0, gate?.autoNotBefore ?? 0);
+  const due = hasUnloadedSections(snapshot) ? now : storeResetAt(snapshot, now);
+  return Math.max(due, gate?.notBefore ?? 0, gate?.autoNotBefore ?? 0);
 }
 export function snapshotPlan(
   previous: Snapshot | null,
@@ -53,7 +55,19 @@ export function snapshotPlan(
     previous.collection.status !== 'ready' ||
     previous.collection.fetchedAt + DAY_MS <= now;
 
-  return { store: true, account: true, collection: manual || collectionDue, live: false };
+  const missingOnly =
+    !manual &&
+    !!previous &&
+    previous.store.status === 'ready' &&
+    storeResetAt(previous, now) > now &&
+    hasUnloadedSections(previous);
+  return {
+    store: true,
+    account: true,
+    collection: manual || collectionDue,
+    live: false,
+    ...(missingOnly ? { missingOnly: true } : {}),
+  };
 }
 export function failureDelay(failures: number, floor = LIVE_POLL_MS): number {
   return Math.min(60 * 60 * 1000, floor * 2 ** Math.min(Math.max(0, failures - 1), 6));
@@ -62,7 +76,7 @@ export function emptySnapshot(id: string, now = Date.now()): Snapshot {
   const unavailable = {
     status: 'error' as const,
     code: 'NOT_LOADED',
-    message: 'Pull down to load this account.',
+    message: 'Waiting for the first account refresh.',
   };
   return {
     accountId: id,
@@ -88,4 +102,65 @@ export function keepCached<T>(old: Section<T> | undefined, next: Section<T>): Se
   return old?.status === 'ready' && next.status === 'error'
     ? { ...old, warning: { code: next.code, message: next.message, retryAt: next.retryAt } }
     : next;
+}
+
+export const ACCOUNT_SECTIONS = [
+  'store',
+  'wallet',
+  'rank',
+  'xp',
+  'progression',
+  'collection',
+  'loadout',
+  'matches',
+] as const;
+export function isUnloadedSection(section: Section<unknown> | undefined): boolean {
+  return (
+    !section ||
+    (section.status === 'error' && ['NOT_LOADED', 'INITIAL_SYNC_WAIT'].includes(section.code))
+  );
+}
+export function hasUnloadedSections(snapshot: Snapshot | null): boolean {
+  return !snapshot || ACCOUNT_SECTIONS.some((key) => isUnloadedSection(snapshot[key]));
+}
+export function shouldFetchSection(
+  enabled: boolean,
+  old: Section<unknown> | undefined,
+  missingOnly = false,
+): boolean {
+  return enabled && (!missingOnly || isUnloadedSection(old));
+}
+
+export function waitingSnapshot(
+  id: string,
+  previous: Snapshot | null,
+  retryAt: number,
+  now = Date.now(),
+): Snapshot {
+  const next = { ...(previous ?? emptySnapshot(id, now)), nextAutoRefreshAt: retryAt };
+  for (const key of ACCOUNT_SECTIONS) {
+    if (isUnloadedSection(next[key]))
+      Object.assign(next, {
+        [key]: {
+          status: 'error',
+          code: 'INITIAL_SYNC_WAIT',
+          message: 'The first load will retry automatically.',
+          retryAt,
+        },
+      });
+  }
+  return next;
+}
+
+export function failedSnapshot(
+  id: string,
+  previous: Snapshot | null,
+  issue: { code: string; message: string; retryAt?: number },
+  now = Date.now(),
+): Snapshot {
+  const next = { ...(previous ?? emptySnapshot(id, now)), refreshIssue: issue };
+  for (const key of ACCOUNT_SECTIONS) {
+    if (isUnloadedSection(next[key])) Object.assign(next, { [key]: { status: 'error', ...issue } });
+  }
+  return next;
 }

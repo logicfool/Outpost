@@ -341,3 +341,134 @@ test('cached automatic launch restores catalog metadata without contacting a pub
   assert.equal(f.calls.metadata, 0);
   assert.equal(f.calls.init, 0);
 });
+
+const {
+  emptySnapshot,
+  waitingSnapshot,
+  failedSnapshot,
+  hasUnloadedSections,
+  shouldFetchSection,
+} = require('../.test-build/refreshPolicy.js');
+test('first account cooldown exposes when it retries, then loads once without another sign-in', async () => {
+  const f = fixture();
+  const until = f.now + 300000;
+  f.gates.set(ID + ':sync', {
+    attemptedAt: f.now,
+    notBefore: f.now + 60000,
+    autoNotBefore: until,
+    failures: 0,
+  });
+  const pending = await f.runtime.sync(ID);
+  assert.equal(pending.store.code, 'INITIAL_SYNC_WAIT');
+  assert.equal(pending.wallet.retryAt, until);
+  assert.equal(pending.nextAutoRefreshAt, until);
+  assert.equal(f.calls.snapshots, 0);
+  f.advance(300001);
+  const ready = await f.create().sync(ID);
+  assert.equal(ready.store.status, 'ready');
+  assert.equal(ready.wallet.status, 'ready');
+  assert.equal(f.calls.snapshots, 1);
+  for (let i = 0; i < 20; i++) await f.runtime.sync(ID);
+  assert.equal(f.calls.snapshots, 1);
+});
+test('a persisted NOT_LOADED snapshot does not count as a completed daily refresh', async () => {
+  const f = fixture();
+  f.snapshots.set(ID, emptySnapshot(ID, f.now));
+  const value = await f.runtime.sync(ID);
+  assert.equal(value.store.status, 'ready');
+  assert.equal(f.calls.snapshots, 1);
+});
+test('a fresh store cannot block initial loading of a missing wallet until tomorrow', async () => {
+  const f = fixture(),
+    saved = f.gameSnapshot();
+  saved.wallet = { status: 'error', code: 'NOT_LOADED', message: 'Old placeholder' };
+  f.snapshots.set(ID, saved);
+  assert.equal(nextAutomaticAt(saved, null, f.now), f.now);
+  await f.runtime.sync(ID);
+  assert.equal(f.calls.snapshots, 1);
+  assert.equal(f.plans[0].missingOnly, true);
+  assert.equal(shouldFetchSection(true, saved.store, true), false);
+  assert.equal(shouldFetchSection(true, saved.wallet, true), true);
+});
+test('partial snapshot recovery never overrides a stored Riot Retry-After', async () => {
+  const f = fixture(),
+    s = f.gameSnapshot();
+  s.wallet = { status: 'error', code: 'NOT_LOADED', message: 'Missing' };
+  f.snapshots.set(ID, s);
+  f.gates.set(ID + ':sync', {
+    attemptedAt: f.now,
+    notBefore: f.now + 10 * 60000,
+    autoNotBefore: f.now + 10 * 60000,
+    failures: 1,
+  });
+  const result = await f.runtime.sync(ID);
+  assert.equal(result.wallet.retryAt, f.now + 10 * 60000);
+  assert.equal(f.calls.init, 0);
+  await assert.rejects(f.runtime.sync(ID, 'manual'), code('LOCAL_COOLDOWN'));
+  f.advance(60000);
+  await f.create().sync(ID);
+  assert.equal(f.calls.snapshots, 0);
+});
+test('a failure before account requests shows the actual reason instead of NOT_LOADED', async () => {
+  const f = fixture();
+  f.failSnapshot(new AppError('SESSION_EXPIRED', 'Reconnect this account.'));
+  const result = await f.runtime.sync(ID);
+  assert.equal(result.store.code, 'SESSION_EXPIRED');
+  assert.equal(result.wallet.code, 'SESSION_EXPIRED');
+  assert.equal(result.refreshIssue.code, 'SESSION_EXPIRED');
+  assert.ok(result.nextAutoRefreshAt >= f.now + 300000);
+  const again = await f.create().sync(ID);
+  assert.equal(again.store.code, 'SESSION_EXPIRED');
+  assert.equal(f.calls.snapshots, 1);
+});
+test('failed initial transport retains data and can recover after its bounded retry', async () => {
+  const f = fixture();
+  f.failSnapshot(new AppError('NETWORK', 'No connection'));
+  const failed = await f.runtime.sync(ID);
+  assert.equal(failed.store.code, 'NETWORK');
+  f.advance(300001);
+  f.failSnapshot(undefined);
+  const ready = await f.runtime.sync(ID);
+  assert.equal(ready.store.status, 'ready');
+  assert.equal(ready.refreshIssue, undefined);
+  assert.equal(f.calls.snapshots, 2);
+});
+test('no initial-recovery request is introduced for an already attempted field error in a fresh rotation', async () => {
+  const f = fixture(),
+    s = f.gameSnapshot();
+  s.rank = { status: 'error', code: 'ACCESS_DENIED', message: 'Unavailable' };
+  assert.equal(hasUnloadedSections(s), false);
+  f.snapshots.set(ID, s);
+  await f.runtime.sync(ID);
+  assert.equal(f.calls.snapshots, 0);
+});
+test('a waiting placeholder cannot erase a separately completed wallet or live observation', () => {
+  const f = fixture(),
+    ready = f.gameSnapshot(),
+    wait = waitingSnapshot(ID, null, f.now + 60000, f.now);
+  const result = mergeSnapshot(ready, wait);
+  assert.deepEqual(result.store, ready.store);
+  assert.deepEqual(result.wallet, ready.wallet);
+  assert.deepEqual(result.liveGame, ready.liveGame);
+});
+
+test('optional wishlist notification setup cannot hide successfully loaded store and wallet', async () => {
+  const f = fixture();
+  f.runtime.repository.settings = async () => ({ reminders: true, wishlistAlerts: true });
+  f.runtime.repository.wishlist = async () => {
+    throw new AppError('LOCAL_DATA', 'Wishlist unavailable');
+  };
+  const result = await f.runtime.sync(ID);
+  assert.equal(result.store.status, 'ready');
+  assert.equal(result.wallet.status, 'ready');
+  assert.equal(f.calls.snapshots, 1);
+});
+test('optional notification preferences failure does not turn successful store into initial error', async () => {
+  const f = fixture();
+  f.runtime.repository.settings = async () => {
+    throw new AppError('LOCAL_DATA', 'Preferences unavailable');
+  };
+  const result = await f.runtime.sync(ID);
+  assert.equal(result.store.status, 'ready');
+  assert.equal(result.refreshIssue, undefined);
+});

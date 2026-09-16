@@ -23,7 +23,9 @@ import {
   DAY_MS,
   LIVE_POLL_MS,
   MANUAL_COOLDOWN_MS,
-  emptySnapshot,
+  waitingSnapshot,
+  failedSnapshot,
+  hasUnloadedSections,
   failureDelay,
   nextAutomaticAt,
   snapshotPlan,
@@ -382,16 +384,33 @@ export class Runtime {
       }
       const now = this.now(),
         nextAt = nextAutomaticAt(previous, gate, now);
-      if (reason === 'auto' && previous && nextAt > now)
-        return { ...previous, nextAutoRefreshAt: nextAt };
+      const report = (code: string) =>
+        recordRequest({
+          at: this.now(),
+          service: 'Account refresh',
+          method: 'SYNC',
+          code,
+          durationMs: Math.max(0, this.now() - now),
+        });
+      if (reason === 'auto' && previous && nextAt > now) {
+        report(
+          hasUnloadedSections(previous)
+            ? 'INITIAL_LOAD_COOLDOWN'
+            : previous.store.status === 'ready' && !previous.refreshIssue
+              ? 'CACHED_UNTIL_RESET'
+              : 'REFRESH_RETRY_WAIT',
+        );
+        return waitingSnapshot(id, previous, nextAt, now);
+      }
       if ((gate?.notBefore ?? 0) > now || (reason === 'auto' && (gate?.autoNotBefore ?? 0) > now)) {
+        report('REQUEST_COOLDOWN');
         if (reason === 'manual')
           throw new AppError(
             'LOCAL_COOLDOWN',
-            'Please wait before refreshing again. Cached data is still available.',
+            'Please wait before refreshing again.',
             gate!.notBefore,
           );
-        return { ...(previous ?? emptySnapshot(id, now)), nextAutoRefreshAt: nextAt };
+        return waitingSnapshot(id, previous, nextAt, now);
       }
 
       const reservation: RefreshGateState = {
@@ -401,6 +420,13 @@ export class Runtime {
         failures: gate?.failures ?? 0,
       };
       await this.repository.saveRefreshGate(id, 'sync', reservation);
+      report(
+        hasUnloadedSections(previous)
+          ? 'INITIAL_LOAD_STARTED'
+          : reason === 'manual'
+            ? 'MANUAL_REFRESH_STARTED'
+            : 'ROTATION_REFRESH_STARTED',
+      );
       let next: Snapshot;
       try {
         await this.loadCatalog(reason === 'manual');
@@ -409,10 +435,13 @@ export class Runtime {
       } catch (reason) {
         const e = safeError(reason);
         if (generation !== (this.generations.get(id) ?? 0)) throw e;
-        next = {
-          ...(previous ?? emptySnapshot(id, now)),
-          refreshIssue: { code: e.code, message: e.message, retryAt: e.retryAt },
-        };
+        report('LOAD_FAILED_' + e.code);
+        next = failedSnapshot(
+          id,
+          previous,
+          { code: e.code, message: e.message, retryAt: e.retryAt },
+          now,
+        );
       }
       if (generation !== (this.generations.get(id) ?? 0))
         throw new AppError(
@@ -472,19 +501,21 @@ export class Runtime {
           await this.repository.saveCatalog(enriched);
         }
       }
-      if (
-        !failed &&
-        next.store.status === 'ready' &&
-        ((await this.repository.settings()).reminders ||
-          (await this.repository.settings()).wishlistAlerts)
-      ) {
-        await updateStoreNotifications(
-          account,
-          next.store.data,
-          await this.repository.wishlist(id),
-          this.repository,
-        ).catch(() => {});
+      if (!failed && next.store.status === 'ready') {
+        try {
+          const preferences = await this.repository.settings();
+          if (preferences.reminders || preferences.wishlistAlerts)
+            await updateStoreNotifications(
+              account,
+              next.store.data,
+              await this.repository.wishlist(id),
+              this.repository,
+            );
+        } catch {
+          report('NOTIFICATION_SETUP_FAILED');
+        }
       }
+      report(failed ? 'LOAD_RETRY_SCHEDULED' : 'ACCOUNT_DATA_READY');
       return (await this.repository.snapshot(id)) ?? next;
     };
     const work = run();
