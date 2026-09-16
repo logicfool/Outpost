@@ -49,6 +49,14 @@
         "config": "release-smoke.yml",
         "image": "latest"
       }
+    },
+    "android-verified": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "withoutCredentials": true,
+        "config": "android-login-smoke.yml"
+      }
     }
   }
 }

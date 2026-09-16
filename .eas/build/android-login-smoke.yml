@@ -1,0 +1,34 @@
+build:
+  name: Android APK with cookie-reset regression
+  steps:
+    - eas/build
+    - run:
+        name: Check Android emulator availability
+        command: |
+          mkdir -p android-login-artifacts
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            set-env OUTPOST_ANDROID_NATIVE_TEST 1
+            printf 'available\n' > android-login-artifacts/emulator-status.txt
+          else
+            set-env OUTPOST_ANDROID_NATIVE_TEST 0
+            printf 'NOT RUN - runner has no accessible KVM; native device acceptance required\n' > android-login-artifacts/emulator-status.txt
+          fi
+    - eas/maestro_test:
+        if: ${ eas.env.OUTPOST_ANDROID_NATIVE_TEST == '1' }
+        inputs:
+          flow_path: maestro/android-cookie-reset.yml
+    - run:
+        name: Collect Android-only test evidence
+        if: ${ always() }
+        command: |
+          mkdir -p android-login-artifacts
+          cp -R "$HOME/.maestro/tests" android-login-artifacts/maestro 2>/dev/null || true
+          if adb get-state >/dev/null 2>&1; then
+            adb logcat -d -s ReactNativeJS AndroidRuntime > android-login-artifacts/app-logcat.txt || true
+            adb shell dumpsys webviewupdate > android-login-artifacts/webview-provider.txt || true
+          fi
+    - eas/upload_artifact:
+        if: ${ always() }
+        inputs:
+          type: build-artifact
+          path: android-login-artifacts

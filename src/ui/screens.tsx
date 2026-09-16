@@ -2081,7 +2081,7 @@ export function AccountScreen({ model, onLink }: Props) {
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.6.4</Text>
+          <Text style={S.small}>Outpost 0.6.5</Text>
         </View>
       </Page>
       <Modal

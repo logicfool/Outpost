@@ -1,0 +1,32 @@
+appId: app.outpost.valorant
+---
+# Fresh state is cleared only on EAS's disposable emulator, never on a user's phone.
+# No credentials are entered, no account is linked, and no VP is spent.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Connect Riot account"
+    timeout: 45000
+- repeat:
+    times: 3
+    commands:
+      - tapOn: "Connect Riot account"
+      - tapOn: "Continue to Riot sign-in"
+      - extendedWaitUntil:
+          visible: '.*(auth|authenticate|login)\.riotgames\.com.*'
+          timeout: 30000
+      - assertNotVisible: "COOKIE_RESET"
+      - takeScreenshot: android-riot-browser-loaded
+      - tapOn: "Close sign-in"
+      - assertVisible: "Connect Riot account"
+- stopApp
+- launchApp
+- tapOn: "Connect Riot account"
+- tapOn: "Continue to Riot sign-in"
+- extendedWaitUntil:
+    visible: '.*(auth|authenticate|login)\.riotgames\.com.*'
+    timeout: 30000
+- assertNotVisible: "COOKIE_RESET"
+- takeScreenshot: android-login-after-restart
+- tapOn: "Close sign-in"
+- assertVisible: "Connect Riot account"
