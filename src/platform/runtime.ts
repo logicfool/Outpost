@@ -321,6 +321,7 @@ export class Runtime {
                 await this.persistSession(session);
                 report('COOKIE_ROTATION_CHECKPOINTED');
               },
+              Platform.OS === 'android' ? 'expo-android' : 'fetch-standard',
             );
             if (generation !== (this.generations.get(id) ?? 0))
               throw new AppError('SESSION_REMOVED', 'This account changed during renewal.');

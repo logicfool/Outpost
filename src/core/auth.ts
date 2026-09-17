@@ -1,4 +1,5 @@
 import type { Account, LoginAttempt, LoginTokens, Region, Session, Shard } from './types';
+import { validateManualAuthorizationEnvelope, type RenewalTransport } from './authResponseEnvelope';
 import { AppError, number, object, text, token, uuid } from './validation';
 import {
   SESSION_COOKIE_NAMES,
@@ -225,22 +226,29 @@ export async function reauthenticateWithCookies(
   attempt: LoginAttempt,
   fetcher: (url: string, init: RequestInit) => Promise<Response>,
   saveCookies?: (cookies: Record<string, string>) => Promise<void>,
+  transport: RenewalTransport = 'fetch-standard',
 ): Promise<LoginTokens> {
   if (!safeCookieValue(cookies.ssid))
     throw new AppError('REAUTH_UNAVAILABLE', 'This account has no reusable Riot session cookie.');
   const cookie = Object.entries(cleanSessionCookies(cookies))
     .map(([k, v]) => `${k}=${v}`)
     .join('; ');
+  const request = {
+    url: authorizationUrl(attempt),
+    method: 'GET',
+    credentials: 'omit',
+    redirect: 'manual',
+  } as const;
   const controller = new AbortController(),
     timeout = setTimeout(() => controller.abort(), 15000);
   try {
     let response: Response;
     try {
-      response = await fetcher(authorizationUrl(attempt), {
-        method: 'GET',
+      response = await fetcher(request.url, {
+        method: request.method,
         headers: { Accept: 'text/html,*/*', Cookie: cookie },
-        credentials: 'omit',
-        redirect: 'manual',
+        credentials: request.credentials,
+        redirect: request.redirect,
         signal: controller.signal,
       });
     } catch {
@@ -249,8 +257,7 @@ export async function reauthenticateWithCookies(
         'Riot silent reauthentication could not be reached.',
       );
     }
-    if (response.redirected || (response.url && new URL(response.url).origin !== AUTH_ORIGIN))
-      throw new AppError('AUTH_REDIRECT', 'An unexpected authentication redirect was blocked.');
+    validateManualAuthorizationEnvelope(request, response, transport);
     const nextCookies = rotatedCookies(cookies, response.headers);
 
     if (saveCookies && JSON.stringify(nextCookies) !== JSON.stringify(cleanSessionCookies(cookies)))
