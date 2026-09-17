@@ -1,3 +1,4 @@
+import { Skeleton } from './Skeleton';
 import React, { useEffect, useState, useRef } from 'react';
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -17,7 +18,8 @@ export function BuddiesPanel({ model, onBack }: { model: AppModel; onBack(): voi
   const [busy, setBusy] = useState(false),
     [error, setError] = useState<string>(),
     alive = useRef(true),
-    locked = useRef(false);
+    locked = useRef(false),
+    applying = useRef(false);
   const reload = async () => {
     const value = await model.editLoadout();
     if (alive.current) setEditor(value);
@@ -47,14 +49,19 @@ export function BuddiesPanel({ model, onBack }: { model: AppModel; onBack(): voi
     item = selected && model.catalog.items[selected.skinId];
   const apply = () =>
     run(async () => {
-      if (!slot || pick === undefined) return;
-      await model.applyBuddy(slot, pick, editor?.version);
-      if (alive.current) {
-        setConfirm(false);
-        setSlot(undefined);
-        setPick(undefined);
+      applying.current = true;
+      try {
+        if (!slot || pick === undefined) return;
+        await model.applyBuddy(slot, pick, editor?.version);
+        if (alive.current) {
+          setConfirm(false);
+          setSlot(undefined);
+          setPick(undefined);
+        }
+        await reload();
+      } finally {
+        applying.current = false;
       }
-      await reload();
     });
   return (
     <ModalPage>
@@ -62,7 +69,7 @@ export function BuddiesPanel({ model, onBack }: { model: AppModel; onBack(): voi
         title={slot ? `${item?.weapon ?? 'Weapon'} buddy` : 'Weapon buddies'}
         closeLabel="Back from buddy manager"
         onClose={() => {
-          if (busy) return;
+          if (applying.current) return;
           if (slot) {
             setSlot(undefined);
             setConfirm(false);
@@ -129,7 +136,13 @@ export function BuddiesPanel({ model, onBack }: { model: AppModel; onBack(): voi
             />
           }
           ListEmptyComponent={
-            <Text style={S.body}>{busy ? 'Loading loadout...' : 'No weapon slots available.'}</Text>
+            busy || (!editor && !error) ? (
+              <Skeleton kind="loadout" count={4} label="Loading weapon buddies" />
+            ) : (
+              <Text style={S.body}>
+                {error ? 'Pull down to try again.' : 'No weapon slots available.'}
+              </Text>
+            )
           }
           renderItem={({ item: w }) => {
             const skin = model.catalog.items[w.skinId],

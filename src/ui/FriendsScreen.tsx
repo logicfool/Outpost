@@ -1,3 +1,4 @@
+import { Skeleton } from './Skeleton';
 import { useFriendPortraits } from '../state/useFriendPortraits';
 import { useNavInset } from './NavInsets';
 import React, {
@@ -270,15 +271,17 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
         </View>
       }
       ListEmptyComponent={
-        <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
-          {busy
-            ? 'Loading friends…'
-            : search
+        busy || model.historyLoading ? (
+          <Skeleton kind="row" count={4} label="Loading friends" style={{ paddingTop: 16 }} />
+        ) : (
+          <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
+            {search
               ? 'No matching friends.'
               : connected
                 ? 'No friends returned by Riot.'
                 : 'Connect to load your friends.'}
-        </Text>
+          </Text>
+        )
       }
     />
   );

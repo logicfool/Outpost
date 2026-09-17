@@ -1,4 +1,5 @@
 import { NavSurface } from './src/ui/NavSurface';
+import { SkeletonProvider } from './src/ui/Skeleton';
 import { AccountsModal, type AccountRoute } from './src/ui/AccountsModal';
 import { NavInsetContext } from './src/ui/NavInsets';
 import { listenNotificationTaps } from './src/platform/notifications';
@@ -73,7 +74,9 @@ function Main() {
   const model = useApp();
   return (
     <ThemeProvider preference={model.settings.theme}>
-      <AppContent model={model} />
+      <SkeletonProvider>
+        <AppContent model={model} />
+      </SkeletonProvider>
     </ThemeProvider>
   );
 }

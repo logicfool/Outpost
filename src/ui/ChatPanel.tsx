@@ -1,3 +1,4 @@
+import { Skeleton } from './Skeleton';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
@@ -83,7 +84,8 @@ export function ChatPanel({
     [error, setError] = useState<string>(),
     [sending, setSending] = useState(false),
     [more, setMore] = useState(false),
-    [confirm, setConfirm] = useState(false);
+    [confirm, setConfirm] = useState(false),
+    [opening, setOpening] = useState(true);
   const list = useRef<FlatList<ChatMessage>>(null),
     mounted = useRef(true),
     follow = useRef(true),
@@ -92,7 +94,15 @@ export function ChatPanel({
   useEffect(() => {
     mounted.current = true;
     model.markChatRead(subject);
-    void model.loadChatMessages(subject);
+    setOpening(true);
+    void model
+      .loadChatMessages(subject)
+      .catch((reason) => {
+        if (mounted.current) setError(safeError(reason).message);
+      })
+      .finally(() => {
+        if (mounted.current) setOpening(false);
+      });
     return () => {
       mounted.current = false;
       model.markChatRead();
@@ -245,15 +255,19 @@ export function ChatPanel({
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={{ padding: 16 }}>
-              <Empty
-                title="No messages saved yet"
-                detail={
-                  model.settings.autoChatHistory !== false
-                    ? 'Available Riot history syncs automatically when connected.'
-                    : 'Automatic sync is off. You can enable it in Settings.'
-                }
-                icon="message-circle"
-              />
+              {opening || archive?.status === 'loading' ? (
+                <Skeleton kind="chat" label="Loading conversation" />
+              ) : (
+                <Empty
+                  title="No messages saved yet"
+                  detail={
+                    model.settings.autoChatHistory !== false
+                      ? 'Available Riot history syncs automatically when connected.'
+                      : 'Automatic sync is off. You can enable it in Settings.'
+                  }
+                  icon="message-circle"
+                />
+              )}
             </View>
           }
           ListFooterComponent={

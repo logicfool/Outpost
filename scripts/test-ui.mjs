@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.7.2');
+const out = path.join(root, 'docs', 'validation-0.7.3');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -58,7 +58,21 @@ page.on('crash', () => {
 });
 page.on('pageerror', (e) => errors.push({ message: e.message, stack: e.stack }));
 page.on('requestfailed', (r) => failures.push({ url: r.url(), reason: r.failure()?.errorText }));
-const click = (name) => page.getByRole('button', { name, exact: true }).click();
+const revealHistory = async () => {
+  await page.waitForTimeout(350);
+  const dialog = page.getByRole('dialog');
+  const area = (await dialog.count()) ? dialog.last() : page;
+  const skeleton = area.locator('[data-testid^="match-skeleton-"]').first();
+  if (await skeleton.count()) await skeleton.scrollIntoViewIfNeeded();
+  else {
+    const artwork = area.locator('[data-testid^="match-artwork-skeleton-"]').first();
+    if (await artwork.count()) await artwork.scrollIntoViewIfNeeded();
+  }
+};
+const click = async (name) => {
+  if (/^Open .+ match$/.test(name)) await revealHistory();
+  await page.getByRole('button', { name, exact: true }).click();
+};
 const tab = (name) => page.getByRole('tab', { name, exact: true }).click();
 const shot = async (name) => {
   await page.waitForTimeout(250);
@@ -106,6 +120,7 @@ try {
     await page.getByRole('button', { name: 'View Lumen profile', exact: true }).waitFor();
     await shot('scoreboard');
     await click('View Lumen profile');
+    await revealHistory();
     await page.getByRole('button', { name: 'Open Ascent match', exact: true }).waitFor();
     await click('Open Ascent match');
     await page.getByText('Player’s team', { exact: true }).waitFor();

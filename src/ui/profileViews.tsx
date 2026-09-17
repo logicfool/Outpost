@@ -1,3 +1,5 @@
+import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
+import { ArtworkBoundary } from './ArtworkBoundary';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Image } from './CachedImage';
 import { ownLiveProgress, progressLabel } from '../core/liveProgress';
@@ -55,13 +57,24 @@ export function PlayerCover({
         }
       >
         {image ? (
-          <Image
-            accessibilityLabel={card?.name ?? 'Equipped player card'}
-            source={{ uri: image }}
-            contentFit="cover"
-            priority="high"
-            style={{ width: '100%', height: '100%' }}
-          />
+          <ArtworkBoundary
+            identity={`cover-${player.subject}-${image}`}
+            urls={[image]}
+            placeholder={
+              <SkeletonGroup label="Loading player card artwork">
+                <Bone height="auto" radius={0} style={{ aspectRatio: 3.1 }} />
+              </SkeletonGroup>
+            }
+          >
+            <Image
+              key={image}
+              accessibilityLabel={card?.name ?? 'Equipped player card'}
+              source={{ uri: image }}
+              contentFit="cover"
+              priority="high"
+              style={{ width: '100%', aspectRatio: 3.1 }}
+            />
+          </ArtworkBoundary>
         ) : (
           <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 16 }}>
             <Text style={S.small}>Player card not available</Text>
@@ -161,59 +174,63 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
           )}
         </Pressable>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="View live game details"
-        onPress={onOpen}
-        style={[S.card, { overflow: 'hidden', minHeight: 78, padding: 12 }]}
-      >
-        {game?.mapImage && (
-          <Image
-            source={{ uri: game.mapImage }}
-            style={{ position: 'absolute', inset: 0, opacity: 0.22 }}
-            resizeMode="cover"
-          />
-        )}
-        <View style={S.row}>
-          <Feather
-            name={error ? 'alert-circle' : idle ? 'moon' : 'radio'}
-            size={24}
-            color={error ? C.gold : idle ? C.subtle : C.mint}
-          />
-          <View style={{ flex: 1, gap: 3 }}>
-            <Text style={S.h3}>
-              {section?.status === 'error'
-                ? 'Status unavailable'
-                : !section
-                  ? 'Checking current game…'
-                  : game?.state === 'in_game'
-                    ? (progressLabel(progress) ?? 'In progress')
-                    : game?.state === 'agent_select'
-                      ? 'Agent selection'
-                      : 'Not in a match'}
-            </Text>
-            <Text style={S.small}>
-              {game?.map ??
-                (error
-                  ? error.message
-                  : idle
-                    ? 'Updates while this screen is open'
-                    : 'Open to view roster and connection details')}
-            </Text>
+      {!game && polling.busy ? (
+        <Skeleton kind="row" label="Loading current game" />
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="View live game details"
+          onPress={onOpen}
+          style={[S.card, { overflow: 'hidden', minHeight: 78, padding: 12 }]}
+        >
+          {game?.mapImage && (
+            <Image
+              source={{ uri: game.mapImage }}
+              style={{ position: 'absolute', inset: 0, opacity: 0.22 }}
+              resizeMode="cover"
+            />
+          )}
+          <View style={S.row}>
+            <Feather
+              name={error ? 'alert-circle' : idle ? 'moon' : 'radio'}
+              size={24}
+              color={error ? C.gold : idle ? C.subtle : C.mint}
+            />
+            <View style={{ flex: 1, gap: 3 }}>
+              <Text style={S.h3}>
+                {section?.status === 'error'
+                  ? 'Status unavailable'
+                  : !section
+                    ? 'Checking current game…'
+                    : game?.state === 'in_game'
+                      ? (progressLabel(progress) ?? 'In progress')
+                      : game?.state === 'agent_select'
+                        ? 'Agent selection'
+                        : 'Not in a match'}
+              </Text>
+              <Text style={S.small}>
+                {game?.map ??
+                  (error
+                    ? error.message
+                    : idle
+                      ? 'Updates while this screen is open'
+                      : 'Open to view roster and connection details')}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={C.subtle} />
           </View>
-          <Feather name="chevron-right" size={20} color={C.subtle} />
-        </View>
-        {game?.observedAt && (
-          <Text style={S.small}>
-            Checked{' '}
-            {new Date(game.observedAt).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })}
-          </Text>
-        )}
-      </Pressable>
+          {game?.observedAt && (
+            <Text style={S.small}>
+              Checked{' '}
+              {new Date(game.observedAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
+            </Text>
+          )}
+        </Pressable>
+      )}
       {error?.retryAt && (
         <Text style={S.small}>
           Retry allowed after {new Date(error.retryAt).toLocaleTimeString()}

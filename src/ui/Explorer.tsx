@@ -1,3 +1,5 @@
+import { IdentityPanel } from './IdentityPanel';
+import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { BuddiesPanel } from './BuddiesPanel';
 import { CollectionBrowser, EquippedPanel } from './CollectionHub';
 import { RoundPanel } from './RoundPanel';
@@ -126,15 +128,17 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     [version, setVersion] = useState(0);
   const [queue, setQueue] = useState('all'),
     [loading, setLoading] = useState(false),
+    [checking, setChecking] = useState(true),
     [finished, setFinished] = useState(false);
   const previews = useMatchPreviews(model, player.subject),
     details = previews.details;
   const generation = useRef(0);
   useEffect(() => {
     const stamp = ++generation.current;
-    setData(null);
+    setChecking(true);
     setError(null);
     setFinished(false);
+    setLoading(false);
     model
       .playerProfile(player)
       .then((value) => {
@@ -142,6 +146,9 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       })
       .catch((e) => {
         if (generation.current === stamp) setError(safeError(e).message);
+      })
+      .finally(() => {
+        if (generation.current === stamp) setChecking(false);
       });
     return () => {
       generation.current++;
@@ -194,10 +201,10 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
   const render = useCallback(
     ({ item }: { item: MatchSummary }) => (
       <View style={{ marginBottom: 12 }}>
-        <HistoryRow match={item} detail={details[item.id]} onOpen={open} />
+        <HistoryRow match={item} detail={details[item.id]} issue={previews.issue} onOpen={open} />
       </View>
     ),
-    [details, open],
+    [details, previews.issue, open],
   );
   return (
     <ModalPage>
@@ -205,7 +212,7 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       <FlatList
         refreshControl={
           <RefreshControl
-            refreshing={!data && !error}
+            refreshing={checking && !!data}
             onRefresh={() => setVersion((v) => v + 1)}
             tintColor={C.accent}
           />
@@ -222,11 +229,17 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
         contentContainerStyle={[S.content, { gap: 0 }]}
         ListHeaderComponent={
           <View style={{ gap: 16, paddingBottom: 16 }}>
-            <PlayerCover
-              player={data?.player ?? player}
-              ownId={model.active?.puuid}
-              catalog={model.catalog}
-            />
+            <>
+              {!data && !player.card && checking ? (
+                <Skeleton kind="profile" label="Loading player profile" />
+              ) : (
+                <PlayerCover
+                  player={data?.player ?? player}
+                  ownId={model.active?.puuid}
+                  catalog={model.catalog}
+                />
+              )}
+            </>
             {friend && (
               <Text style={[S.small, { color: C.mint }]}>
                 {friend.presence === 'in_game'
@@ -259,7 +272,15 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
               <Empty title="Some profile data is unavailable" detail={error} icon="alert-circle" />
             )}
 
-            <Resource title="Rank" section={data?.rank}>
+            <Resource
+              title="Rank"
+              section={
+                data?.rank ??
+                (error
+                  ? { status: 'error', code: 'PROFILE_UNAVAILABLE', message: error }
+                  : undefined)
+              }
+            >
               {(rank) => (
                 <RankSummary rank={rank} onCareer={() => onNavigate({ type: 'career', rank })} />
               )}
@@ -272,7 +293,15 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
                 items={queues.map((id) => ({ id, label: id === 'all' ? 'All' : queueName(id) }))}
               />
             ) : (
-              <Resource title="Match history" section={data?.matches}>
+              <Resource
+                title="Match history"
+                section={
+                  data?.matches ??
+                  (error
+                    ? { status: 'error', code: 'PROFILE_UNAVAILABLE', message: error }
+                    : undefined)
+                }
+              >
                 {() => null}
               </Resource>
             )}
@@ -283,12 +312,15 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
         }
         ListFooterComponent={
           !!matches.length && !finished && matches.length < 1000 && !model.active?.demo ? (
-            <Button
-              title={loading ? 'Loading…' : 'Load older matches'}
-              secondary
-              disabled={loading}
-              onPress={() => void more()}
-            />
+            <View style={{ gap: 12 }}>
+              {loading && <Skeleton kind="match" count={2} label="Loading older matches" />}
+              <Button
+                title="Load older matches"
+                secondary
+                disabled={loading}
+                onPress={() => void more()}
+              />
+            </View>
           ) : null
         }
       />
@@ -301,7 +333,8 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
 
   const polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
-  const [ranks, setRanks] = useState<Record<string, Ranked>>({});
+  const [ranks, setRanks] = useState<Record<string, Ranked>>({}),
+    [ranksLoading, setRanksLoading] = useState(true);
   const gameData = section?.status === 'ready' ? section.data : undefined;
   const progress = ownLiveProgress(
     gameData,
@@ -316,16 +349,21 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   useEffect(() => {
     let alive = true;
     setRanks({});
+    setRanksLoading(true);
     (async () => {
-      for (const player of gameData?.players ?? []) {
-        if (!alive) return;
-        if (player.hidden || player.tier != null) continue;
-        try {
-          const rank = await model.playerRank(player);
-          if (alive) setRanks((previous) => ({ ...previous, [player.subject]: rank }));
-        } catch {
-          return;
+      try {
+        for (const player of gameData?.players ?? []) {
+          if (!alive) return;
+          if (player.hidden || player.tier != null) continue;
+          try {
+            const rank = await model.playerRank(player);
+            if (alive) setRanks((previous) => ({ ...previous, [player.subject]: rank }));
+          } catch {
+            return;
+          }
         }
+      } finally {
+        if (alive) setRanksLoading(false);
       }
     })();
     return () => {
@@ -354,7 +392,13 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
             onPress={polling.refresh}
           />
         )}
-        <Resource title="Live game" section={section}>
+        <Resource
+          title="Live game"
+          section={section}
+          loading={polling.busy}
+          skeleton="row"
+          count={5}
+        >
           {(game) => (
             <>
               {game.mapImage && (
@@ -450,15 +494,22 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                                 ? `Level ${p.level}`
                                 : ''}
                           </Text>
-                          {!p.hidden && (
-                            <Text style={S.small}>
-                              {p.tierName ?? ranks[p.subject]?.name ?? 'Rank not returned'}
-                              {ranks[p.subject]?.rr != null ? ` · ${ranks[p.subject]!.rr} RR` : ''}
-                              {ranks[p.subject] && !ranks[p.subject]!.currentSeason
-                                ? ' · last reported'
-                                : ''}
-                            </Text>
-                          )}
+                          {!p.hidden &&
+                            (p.tier == null && !ranks[p.subject] && ranksLoading ? (
+                              <SkeletonGroup label="Loading player rank">
+                                <Bone width={96} height={12} />
+                              </SkeletonGroup>
+                            ) : (
+                              <Text style={S.small}>
+                                {p.tierName ?? ranks[p.subject]?.name ?? 'Rank not returned'}
+                                {ranks[p.subject]?.rr != null
+                                  ? ` · ${ranks[p.subject]!.rr} RR`
+                                  : ''}
+                                {ranks[p.subject] && !ranks[p.subject]!.currentSeason
+                                  ? ' · last reported'
+                                  : ''}
+                              </Text>
+                            ))}
                         </View>
                         {(p.tierImage ?? ranks[p.subject]?.image) && (
                           <Image
@@ -484,221 +535,6 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   );
 }
 
-function IdentityPanel({
-  model,
-  onBack,
-  initialTab = 'card',
-}: PanelProps & { initialTab?: 'card' | 'title' }) {
-  const { C, S, isDark } = useTheme();
-
-  const [base, setBase] = useState<Loadout | null>(null),
-    [tab, setTab] = useState<'card' | 'title'>(initialTab);
-  const [cardId, setCardId] = useState<string | undefined>(),
-    [titleId, setTitleId] = useState<string | undefined>();
-  const [query, setQuery] = useState(''),
-    [busy, setBusy] = useState(false),
-    [message, setMessage] = useState<string | null>(null);
-  const alive = useRef(true);
-  const applyBase = (data: Loadout) => {
-    setBase(data);
-    setCardId(data.card?.id);
-    setTitleId(data.title?.id);
-  };
-  useEffect(() => {
-    alive.current = true;
-    model
-      .freshLoadout()
-      .then((data) => {
-        if (alive.current) applyBase(data);
-      })
-      .catch((e) => {
-        if (alive.current) setMessage(safeError(e).message);
-      });
-    return () => {
-      alive.current = false;
-    };
-  }, [model.freshLoadout]);
-  const owned = model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : [];
-  const items = useMemo(
-    () => [
-      ...new Map(
-        [...owned, ...(base?.card ? [base.card] : []), ...(base?.title ? [base.title] : [])]
-          .filter((i) => i.kind === tab && i.name.toLowerCase().includes(query.toLowerCase()))
-          .map((i) => [i.id, model.catalog.items[i.id] ?? i]),
-      ).values(),
-    ],
-    [owned, base, tab, query, model.catalog],
-  );
-  const card = cardId ? (model.catalog.items[cardId] ?? base?.card) : base?.card;
-  const title = titleId ? (model.catalog.items[titleId] ?? base?.title) : base?.title;
-  const changed = !!base && (cardId !== base.card?.id || titleId !== base.title?.id);
-  const save = async () => {
-    if (!base || !changed || busy) return;
-    setBusy(true);
-    setMessage(null);
-    try {
-      const data = await model.saveIdentity({
-        cardId: cardId !== base.card?.id ? cardId : undefined,
-        titleId: titleId !== base.title?.id ? titleId : undefined,
-        expectedVersion: base.version,
-        expectedCardId: base.card?.id,
-        expectedTitleId: base.title?.id,
-      });
-      if (alive.current) {
-        applyBase(data);
-        setMessage(
-          model.active?.demo
-            ? 'Demo selection applied. No Riot account was changed.'
-            : 'Riot confirmed your new player card and title.',
-        );
-      }
-    } catch (e) {
-      if (alive.current) setMessage(safeError(e).message);
-    } finally {
-      if (alive.current) setBusy(false);
-    }
-  };
-  const reload = async () => {
-    setBusy(true);
-    try {
-      const data = await model.freshLoadout();
-      if (alive.current) {
-        applyBase(data);
-        setMessage(null);
-      }
-    } catch (e) {
-      if (alive.current) setMessage(safeError(e).message);
-    } finally {
-      if (alive.current) setBusy(false);
-    }
-  };
-  return (
-    <ModalPage>
-      <ModalHeader
-        title="Player card & title"
-        closeLabel="Back from identity editor"
-        onClose={() => {
-          if (!busy) onBack();
-        }}
-      />
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={S.content}
-        initialNumToRender={10}
-        ListHeaderComponent={
-          <View style={{ gap: 16 }}>
-            <PlayerCover
-              player={{
-                subject: model.active!.puuid,
-                name: model.active!.gameName,
-                tag: model.active!.tagLine,
-                card,
-                title,
-                level:
-                  model.snapshot?.xp.status === 'ready' ? model.snapshot.xp.data.level : undefined,
-              }}
-              catalog={model.catalog}
-            />
-            <Text style={S.body}>
-              Choose an owned card or title. Apply updates your VALORANT loadout.
-            </Text>
-            {card?.wallpaper && (
-              <View style={S.card}>
-                <Text style={S.small}>FULL PLAYER CARD ARTWORK</Text>
-                <Image
-                  source={{ uri: card.wallpaper }}
-                  style={{ width: '100%', height: 180 }}
-                  resizeMode="contain"
-                />
-              </View>
-            )}
-            {message && (
-              <Text accessibilityRole="alert" style={[S.body, { color: C.gold }]}>
-                {message}
-              </Text>
-            )}
-            <Button
-              title={busy ? 'Saving…' : model.active?.demo ? 'Apply to demo' : 'Apply to VALORANT'}
-              disabled={!changed || busy}
-              onPress={() => void save()}
-              icon="check"
-            />
-            <Button
-              title="Reload equipped identity"
-              secondary
-              disabled={busy}
-              onPress={() => void reload()}
-              icon="refresh-cw"
-            />
-            <Tabs
-              value={tab}
-              onChange={setTab}
-              items={[
-                { id: 'card', label: 'Owned player cards' },
-                { id: 'title', label: 'Owned titles' },
-              ]}
-            />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search your collection"
-              placeholderTextColor={C.subtle}
-              style={S.input}
-              accessibilityLabel="Search owned identity items"
-            />
-          </View>
-        }
-        ListEmptyComponent={
-          <Empty
-            title={
-              base
-                ? 'No matching owned items'
-                : message
-                  ? 'Equipped identity unavailable'
-                  : 'Loading equipped identity'
-            }
-            detail={
-              model.snapshot?.collection.status === 'error'
-                ? model.snapshot.collection.message
-                : undefined
-            }
-            icon="image"
-          />
-        }
-        renderItem={({ item }) => {
-          const selected = (tab === 'card' ? cardId : titleId) === item.id;
-          return (
-            <Pressable
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel={`Select ${item.name}`}
-              accessibilityState={{ selected }}
-              onPress={() => (tab === 'card' ? setCardId(item.id) : setTitleId(item.id))}
-              style={[S.card, { borderColor: selected ? C.accent : C.border, marginTop: 10 }]}
-            >
-              {tab === 'card' && (item.wideArt || item.wallpaper) ? (
-                <Image
-                  source={{ uri: item.wideArt ?? item.wallpaper }}
-                  style={{ width: '100%', height: 92, borderRadius: 12 }}
-                  resizeMode="cover"
-                />
-              ) : null}
-              <View style={S.between}>
-                <Text style={[S.h3, { flex: 1 }]}>{item.name}</Text>
-                <Feather
-                  name={selected ? 'check-circle' : 'circle'}
-                  size={20}
-                  color={selected ? C.accent : C.subtle}
-                />
-              </View>
-            </Pressable>
-          );
-        }}
-      />
-    </ModalPage>
-  );
-}
 function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
   const { C, S } = useTheme();
   const [filter, setFilter] = useState<'all' | 'online' | 'saved'>('online'),
@@ -829,27 +665,31 @@ function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
           </View>
         )}
         ListEmptyComponent={
-          <Empty
-            title={
-              filter === 'saved'
-                ? model.historyLoading
-                  ? 'Opening saved history…'
-                  : 'No saved conversations yet'
-                : connected
-                  ? 'No friends in this view'
-                  : busy
-                    ? 'Connecting to Riot…'
-                    : 'Connect to load friends'
-            }
-            detail={
-              filter === 'saved'
-                ? 'Messages you send, receive or sync are kept until you delete them or remove this account.'
-                : connected
-                  ? 'Try All friends or a different search.'
-                  : 'Saved conversations remain available without connecting.'
-            }
-            icon="users"
-          />
+          (filter === 'saved' ? model.historyLoading : busy) ? (
+            <Skeleton kind="row" count={4} label="Loading conversations" />
+          ) : (
+            <Empty
+              title={
+                filter === 'saved'
+                  ? model.historyLoading
+                    ? 'Opening saved history…'
+                    : 'No saved conversations yet'
+                  : connected
+                    ? 'No friends in this view'
+                    : busy
+                      ? 'Connecting to Riot…'
+                      : 'Connect to load friends'
+              }
+              detail={
+                filter === 'saved'
+                  ? 'Messages you send, receive or sync are kept until you delete them or remove this account.'
+                  : connected
+                    ? 'Try All friends or a different search.'
+                    : 'Saved conversations remain available without connecting.'
+              }
+              icon="users"
+            />
+          )
         }
       />
     </ModalPage>
@@ -904,9 +744,15 @@ export function ExplorerModal({
       {route?.type === 'buddies' && (
         <BuddiesPanel key={model.active?.puuid} model={model} onBack={onBack} />
       )}
-      {route?.type === 'presets' && <PresetsPanel model={model} onBack={onBack} />}
+      {route?.type === 'presets' && (
+        <PresetsPanel key={model.active?.puuid} model={model} onBack={onBack} />
+      )}
       {route?.type === 'identity' && (
-        <IdentityPanel key={route.initialTab} {...props} initialTab={route.initialTab} />
+        <IdentityPanel
+          key={`${model.active?.puuid}:${route.initialTab}`}
+          {...props}
+          initialTab={route.initialTab}
+        />
       )}
       {route?.type === 'collection' && (
         <CollectionBrowser

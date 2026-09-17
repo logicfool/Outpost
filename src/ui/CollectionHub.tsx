@@ -1,3 +1,5 @@
+import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
+import { ArtworkBoundary } from './ArtworkBoundary';
 import React, { memo, useDeferredValue, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -119,14 +121,27 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           <Feather name="search" size={21} color={C.ink} />
         </Pressable>
       </View>
+      {!art && !equipped && (!model.snapshot || model.busy) && (
+        <Skeleton kind="profile" label="Loading equipped banner" />
+      )}
       {art?.wideArt ? (
         <View style={{ gap: 7 }}>
-          <Image
-            accessibilityLabel={art.name}
-            source={{ uri: art.wideArt }}
-            style={{ width: '100%', aspectRatio: 3.2, borderRadius: 18 }}
-            contentFit="cover"
-          />
+          <ArtworkBoundary
+            identity={`collection-banner-${art.id}`}
+            urls={[art.wideArt]}
+            placeholder={
+              <SkeletonGroup label="Loading collection banner">
+                <Bone height="auto" radius={18} style={{ aspectRatio: 3.2 }} />
+              </SkeletonGroup>
+            }
+          >
+            <Image
+              accessibilityLabel={art.name}
+              source={{ uri: art.wideArt }}
+              style={{ width: '100%', aspectRatio: 3.2, borderRadius: 18 }}
+              contentFit="cover"
+            />
+          </ArtworkBoundary>
           <Text style={[S.small, { textAlign: 'center' }]} numberOfLines={1}>
             {art.name}
             {!equipped ? ' · last seen' : ''}

@@ -35,6 +35,8 @@ const load = (name) => {
     return { SafeAreaProvider: 'Provider', SafeAreaView: 'SafeArea' };
   if (name === '@expo/vector-icons') return { Feather: 'Icon', Ionicons: 'Icon' };
   if (name === 'expo-linear-gradient') return { LinearGradient: 'Gradient' };
+  if (name === './Skeleton') return { Skeleton: 'Skeleton', resourceSkeleton: () => 'store' };
+  if (name === '../state/useArtworkReadiness') return { ARTWORK_WAIT_MS: 8000 };
   if (name === './CachedImage') return { Image: 'Image' };
   if (name === './theme')
     return {
@@ -68,15 +70,9 @@ test('initial account refresh shows loading rather than unavailable or NOT_LOADE
     true,
   );
   const json = JSON.stringify(r.toJSON());
-  assert.match(
-    r.root
-      .findAllByType('Text')
-      .flatMap((n) => n.children)
-      .join(''),
-    /Loading store/,
-  );
+  assert.equal(r.root.findByType('Skeleton').props.label, 'Loading store');
   assert.doesNotMatch(json, /unavailable|NOT_LOADED/);
-  assert.equal(r.root.findAllByType('Spinner').length, 1);
+  assert.equal(r.root.findAllByType('Spinner').length, 0);
 });
 test('persisted initial cooldown shows a local automatic retry countdown, not a Riot failure', async (t) => {
   const r = await render(t, {

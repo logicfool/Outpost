@@ -4,6 +4,8 @@ import type { AppModel } from '../state/useApp';
 import type { Section } from '../core/types';
 import type { LiveEquipment } from '../core/matchTypes';
 import { safeError } from '../core/validation';
+import { keepCached } from '../core/refreshPolicy';
+import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { playerLabel } from '../core/playerNames';
 import { hydrateItem } from '../core/catalog';
 import { ItemArt, ModalHeader, ModalPage, Resource, Tabs } from './components';
@@ -23,7 +25,7 @@ export function LiveEquipmentPanel({
 }) {
   const { C, S } = useTheme(),
     [data, setData] = useState<Section<LiveEquipment>>(),
-    [busy, setBusy] = useState(false),
+    [busy, setBusy] = useState(true),
     [revision, setRevision] = useState(0),
     [selected, setSelected] = useState(subject ?? model.active?.puuid);
   const game =
@@ -38,17 +40,24 @@ export function LiveEquipmentPanel({
     model
       .liveEquipment(matchId)
       .then((result) => {
-        if (alive) setData(result);
+        if (alive)
+          setData((old) =>
+            old?.status === 'ready' && old.data.matchId === matchId
+              ? keepCached(old, result)
+              : result,
+          );
       })
       .catch((e) => {
         const error = safeError(e);
         if (alive)
-          setData({
-            status: 'error',
-            code: error.code,
-            message: error.message,
-            retryAt: error.retryAt,
-          });
+          setData((old) =>
+            keepCached(old, {
+              status: 'error',
+              code: error.code,
+              message: error.message,
+              retryAt: error.retryAt,
+            }),
+          );
       })
       .finally(() => {
         if (alive) setBusy(false);
@@ -98,10 +107,18 @@ export function LiveEquipmentPanel({
                   <Text style={S.h3}>{playerLabel(player, model.active?.puuid)}</Text>
                   <Text style={S.small}>{player.agent}</Text>
                 </View>
-                <Text style={S.small}>{equipment?.weapons.length ?? 0} slots</Text>
+                {!data ? (
+                  <SkeletonGroup label="Loading weapon slots">
+                    <Bone width={36} height={12} />
+                  </SkeletonGroup>
+                ) : (
+                  <Text style={S.small}>
+                    {equipment ? `${equipment.weapons.length} slots` : ''}
+                  </Text>
+                )}
               </View>
             )}
-            {data?.status === 'error' && (
+            {(data?.status === 'error' || (data?.status === 'ready' && data.warning)) && (
               <Resource title="Match skins" section={data}>
                 {() => null}
               </Resource>
@@ -141,10 +158,8 @@ export function LiveEquipmentPanel({
                 ? 'Riot did not expose skins for this player.'
                 : 'This live roster is no longer available.'}
             </Text>
-          ) : busy && !data ? (
-            <Resource title="Match skins" section={undefined} loading>
-              {() => null}
-            </Resource>
+          ) : !data ? (
+            <Skeleton kind="loadout" count={4} label="Loading match skins" />
           ) : null
         }
       />

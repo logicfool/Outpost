@@ -1,3 +1,4 @@
+import { Skeleton } from './Skeleton';
 import { BuddyPicker } from './BuddyPicker';
 import { MELEE_ID } from '../core/buddies';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -12,7 +13,9 @@ import { Button, ModalHeader, ModalPage, ItemArt, Empty, Tabs } from './componen
 import { useTheme } from './theme';
 export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): void }) {
   const { C, S } = useTheme();
-  const [part, setPart] = useState<'skin' | 'buddy'>('skin');
+  const [part, setPart] = useState<'skin' | 'buddy'>('skin'),
+    [opening, setOpening] = useState(false),
+    [listing, setListing] = useState(true);
   const [list, setList] = useState<LoadoutPreset[]>([]),
     [editor, setEditor] = useState<LoadoutEditor | null>(null),
     [weapons, setWeapons] = useState<WeaponChoice[]>([]),
@@ -24,7 +27,8 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
     [error, setError] = useState<string>(),
     [confirm, setConfirm] = useState<{ preset: LoadoutPreset; remove?: boolean }>();
   const generation = useRef(0),
-    locked = useRef(false);
+    locked = useRef(false),
+    openingToken = useRef(0);
   useEffect(() => {
     const g = ++generation.current;
     void model
@@ -34,6 +38,9 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
       })
       .catch((e) => {
         if (g === generation.current) setError(safeError(e).message);
+      })
+      .finally(() => {
+        if (g === generation.current) setListing(false);
       });
     return () => {
       generation.current++;
@@ -61,11 +68,15 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
       v = await model.listPresets();
     if (g === generation.current) setList(v);
   };
-  const begin = (preset?: LoadoutPreset) =>
-    run(async () => {
+  const begin = (preset?: LoadoutPreset) => {
+    if (locked.current) return;
+    const stamp = generation.current,
+      token = ++openingToken.current;
+    setOpening(true);
+    return run(async () => {
       const g = generation.current,
         data = await model.editLoadout();
-      if (g !== generation.current) return;
+      if (g !== generation.current || token !== openingToken.current) return;
       setEditor(data);
       const existing = new Map(preset?.weapons.map((w) => [w.weaponId, w]));
       setWeapons(data.current.map((w) => existing.get(w.weaponId) ?? w));
@@ -74,7 +85,10 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
       setSlot(undefined);
       setPart('skin');
       setQuery('');
+    }).finally(() => {
+      if (stamp === generation.current) setOpening(false);
     });
+  };
   const save = () =>
     run(async () => {
       const g = generation.current;
@@ -115,10 +129,26 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
     setWeapons((old) => old.map((w) => (w.weaponId === slot ? { ...w, ...values } : w)));
   const header = (
     <ModalHeader
-      title={slot ? (skin?.weapon ?? 'Choose skin') : editor ? 'Edit loadout' : 'Saved loadouts'}
-      closeLabel={slot ? 'Back to preset' : editor ? 'Cancel preset editing' : 'Back from loadouts'}
+      title={
+        slot
+          ? (skin?.weapon ?? 'Choose skin')
+          : editor || opening
+            ? 'Edit loadout'
+            : 'Saved loadouts'
+      }
+      closeLabel={
+        slot ? 'Back to preset' : editor || opening ? 'Cancel preset editing' : 'Back from loadouts'
+      }
       onClose={() => {
-        if (busy) return;
+        if (opening) {
+          openingToken.current++;
+          setOpening(false);
+          return;
+        }
+        if (busy) {
+          if (!editor && !confirm) onBack();
+          return;
+        }
         if (part === 'buddy') {
           setPart('skin');
           return;
@@ -139,7 +169,11 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
           {error}
         </Text>
       )}
-      {slot && selected && editor && part === 'buddy' ? (
+      {opening ? (
+        <View style={S.content}>
+          <Skeleton kind="loadout" count={4} label="Loading loadout editor" />
+        </View>
+      ) : slot && selected && editor && part === 'buddy' ? (
         <BuddyPicker
           disabled={busy}
           editor={editor}
@@ -370,7 +404,9 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
             </View>
           }
           ListEmptyComponent={
-            !busy ? (
+            listing ? (
+              <Skeleton kind="loadout" count={3} label="Loading saved loadouts" />
+            ) : !busy ? (
               <Empty
                 title="Create your first loadout"
                 detail="Pick your skins here, then apply them together."

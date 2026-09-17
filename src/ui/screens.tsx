@@ -1,3 +1,6 @@
+import { Skeleton, MATCH_ROW_MIN_HEIGHT } from './Skeleton';
+import { ArtworkBoundary } from './ArtworkBoundary';
+import type { PreviewIssue } from '../state/useMatchPreviews';
 import { CollectionHub } from './CollectionHub';
 import { RoundOverview, DuelMatrix } from './MatchVisuals';
 import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
@@ -861,6 +864,8 @@ function ProfileBanner({ model, onNavigate }: { model: AppModel; onNavigate: Nav
   const loadout =
     model.snapshot?.loadout.status === 'ready' ? model.snapshot.loadout.data : undefined;
   const xp = model.snapshot?.xp.status === 'ready' ? model.snapshot.xp.data : undefined;
+  if (!loadout && !model.observedIdentity && (!model.snapshot || model.busy))
+    return <Skeleton kind="profile" label="Loading your profile" />;
   return (
     <PlayerCover
       player={{
@@ -1124,76 +1129,111 @@ export function CareerModal({
 export function MatchCard({
   match,
   detail,
+  issue,
   onPress,
 }: {
   match: MatchSummary;
   detail?: MatchDetail;
+  issue?: PreviewIssue;
   onPress(): void;
 }) {
   const { C, S, isDark } = useTheme();
   const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
-  const tone = detail ? resultTone(detail.result, C) : C.border,
-    map = detail?.map ?? match.map,
-    image = detail?.mapImage ?? match.mapImage;
+  if (!detail)
+    return issue ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open unavailable match report"
+        onPress={onPress}
+        style={[
+          styles.matchCard,
+          { minHeight: MATCH_ROW_MIN_HEIGHT, padding: 16, justifyContent: 'center', gap: 6 },
+        ]}
+      >
+        <Text style={S.h3}>Match preview unavailable</Text>
+        <Text style={S.small}>
+          {issue.code === 'RATE_LIMIT' ? 'Riot asked us to wait.' : 'Tap to open the report.'} Retry
+          after{' '}
+          {new Date(issue.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </Text>
+      </Pressable>
+    ) : (
+      <Skeleton kind="match" label="Loading match" testID={`match-skeleton-${match.id}`} />
+    );
+  const tone = resultTone(detail.result, C),
+    map = detail.map,
+    image = detail.mapImage ?? match.mapImage;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${map} match`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.matchCard, { opacity: pressed ? 0.85 : 1 }]}
+    <ArtworkBoundary
+      identity={`match-${match.id}`}
+      urls={[image, detail.agentImage, match.tierImage]}
+      placeholder={
+        <Skeleton
+          kind="match"
+          label="Loading match artwork"
+          testID={`match-artwork-skeleton-${match.id}`}
+        />
+      }
     >
-      {image ? <Image source={{ uri: image }} style={fill} resizeMode="cover" /> : null}
-      <LinearGradient
-        colors={[`${C.surface}F7`, `${C.surface}EE`, `${C.surface}C0`]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={fill}
-      />
-      <View style={styles.matchBody}>
-        <AgentFrame image={detail?.agentImage} size={50} />
-        <View style={{ flex: 1, gap: 3 }}>
-          <Text style={S.h3} numberOfLines={1}>
-            {map}
-          </Text>
-          <Text style={S.small} numberOfLines={1}>
-            {queueName(match.queue)} · {ago(match.startedAt)}
-          </Text>
-          {detail ? (
-            <Text style={[S.small, { color: C.muted }]}>
-              K/D/A {detail.kills ?? '-'}/{detail.deaths ?? '-'}/{detail.assists ?? '-'}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${map} match`}
+        onPress={onPress}
+        style={({ pressed }) => [styles.matchCard, { opacity: pressed ? 0.85 : 1 }]}
+      >
+        {image ? <Image source={{ uri: image }} style={fill} resizeMode="cover" /> : null}
+        <LinearGradient
+          colors={[`${C.surface}F7`, `${C.surface}EE`, `${C.surface}C0`]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={fill}
+        />
+        <View style={styles.matchBody}>
+          <AgentFrame image={detail?.agentImage} size={50} />
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={S.h3} numberOfLines={1}>
+              {map}
             </Text>
-          ) : null}
-        </View>
-        <View style={{ alignItems: 'flex-end', gap: 3 }}>
-          {detail ? (
-            <Text style={[styles.resultText, { color: tone }]}>
-              {resultLabel(detail.result).toUpperCase()}
+            <Text style={S.small} numberOfLines={1}>
+              {queueName(match.queue)} · {ago(match.startedAt)}
             </Text>
-          ) : (
-            <Feather name="file-text" size={16} color={C.subtle} />
-          )}
-          {detail ? <Text style={styles.matchScore}>{detail.score}</Text> : null}
-          <View style={[S.row, { gap: 4 }]}>
-            {match.tierImage ? (
-              <Image
-                source={{ uri: match.tierImage }}
-                style={{ width: 16, height: 16 }}
-                resizeMode="contain"
-              />
-            ) : null}
-            {match.rrChange !== undefined && (
-              <Text style={[styles.rr, { color: match.rrChange >= 0 ? C.mint : C.accent }]}>
-                {match.rrChange > 0 ? '+' : ''}
-                {match.rrChange} RR
+            {detail ? (
+              <Text style={[S.small, { color: C.muted }]}>
+                K/D/A {detail.kills ?? '-'}/{detail.deaths ?? '-'}/{detail.assists ?? '-'}
               </Text>
+            ) : null}
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 3 }}>
+            {detail ? (
+              <Text style={[styles.resultText, { color: tone }]}>
+                {resultLabel(detail.result).toUpperCase()}
+              </Text>
+            ) : (
+              <Feather name="file-text" size={16} color={C.subtle} />
             )}
+            {detail ? <Text style={styles.matchScore}>{detail.score}</Text> : null}
+            <View style={[S.row, { gap: 4 }]}>
+              {match.tierImage ? (
+                <Image
+                  source={{ uri: match.tierImage }}
+                  style={{ width: 16, height: 16 }}
+                  resizeMode="contain"
+                />
+              ) : null}
+              {match.rrChange !== undefined && (
+                <Text style={[styles.rr, { color: match.rrChange >= 0 ? C.mint : C.accent }]}>
+                  {match.rrChange > 0 ? '+' : ''}
+                  {match.rrChange} RR
+                </Text>
+              )}
+            </View>
           </View>
         </View>
-      </View>
-      <View style={[styles.matchStripe, { backgroundColor: tone }]} />
-    </Pressable>
+        <View style={[styles.matchStripe, { backgroundColor: tone }]} />
+      </Pressable>
+    </ArtworkBoundary>
   );
 }
 const ROUND_ICONS: Record<
@@ -1332,7 +1372,7 @@ export function MatchReport({
         {error ? (
           <Empty title="Report unavailable" detail={error} icon="alert-circle" />
         ) : !detail ? (
-          <ActivityIndicator style={{ marginTop: 40 }} size="large" color={C.accent} />
+          <Skeleton kind="report" label="Loading match report" />
         ) : (
           <>
             <View style={[styles.reportHero, { minHeight: 132, padding: 16, gap: 5 }]}>
@@ -1453,20 +1493,23 @@ export function MatchReport({
 export const HistoryRow = memo(function HistoryRow({
   match,
   detail,
+  issue,
   onOpen,
 }: {
   match: MatchSummary;
   detail?: MatchDetail;
+  issue?: PreviewIssue;
   onOpen(id: string): void;
 }) {
-  return <MatchCard match={match} detail={detail} onPress={() => onOpen(match.id)} />;
+  return <MatchCard match={match} detail={detail} issue={issue} onPress={() => onOpen(match.id)} />;
 });
 const matchKey = (match: MatchSummary) => match.id;
 const HistoryGap = () => <View style={{ height: 12 }} />;
 export function MatchesScreen({ model, onNavigate }: Props) {
   const { C, S } = useTheme(),
     navInset = useNavInset();
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('all'),
+    [loadingOlder, setLoadingOlder] = useState(false);
   const previews = useMatchPreviews(model),
     details = previews.details;
   const matches =
@@ -1479,9 +1522,9 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   const open = useCallback((id: string) => onNavigate({ type: 'match', id }), [onNavigate]);
   const render = useCallback(
     ({ item }: { item: MatchSummary }) => (
-      <HistoryRow match={item} detail={details[item.id]} onOpen={open} />
+      <HistoryRow match={item} detail={details[item.id]} issue={previews.issue} onOpen={open} />
     ),
-    [details, open],
+    [details, previews.issue, open],
   );
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
   return (
@@ -1532,12 +1575,19 @@ export function MatchesScreen({ model, onNavigate }: Props) {
       ListFooterComponent={
         !model.active?.demo && !!matches?.length && matches.length < 1000 ? (
           <View style={{ paddingTop: 16 }}>
-            <Button
-              title="Load older matches"
-              secondary
-              disabled={model.busy}
-              onPress={() => void model.moreMatches()}
-            />
+            <View style={{ gap: 12 }}>
+              {loadingOlder && <Skeleton kind="match" count={2} label="Loading older matches" />}
+              <Button
+                title="Load older matches"
+                secondary
+                disabled={model.busy || loadingOlder}
+                onPress={() => {
+                  if (model.busy || loadingOlder) return;
+                  setLoadingOlder(true);
+                  void model.moreMatches().finally(() => setLoadingOlder(false));
+                }}
+              />
+            </View>
           </View>
         ) : null
       }
@@ -1804,7 +1854,7 @@ export function AccountScreen({ model, onLink }: Props) {
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.7.2</Text>
+          <Text style={S.small}>Outpost 0.7.3</Text>
         </View>
       </Page>
       <Modal
@@ -2220,6 +2270,7 @@ const makeStyles = (C: Palette) =>
       borderColor: C.border,
     },
     matchBody: {
+      minHeight: MATCH_ROW_MIN_HEIGHT - 2,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,

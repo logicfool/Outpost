@@ -1,3 +1,5 @@
+import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
+import { ArtworkBoundary } from './ArtworkBoundary';
 import React, { useMemo, useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, View, RefreshControl } from 'react-native';
 import type { AppModel } from '../state/useApp';
@@ -19,7 +21,7 @@ export function BundlePanel({
   onNavigate: Navigate;
 }) {
   const { C, S } = useTheme();
-  const [loading, setLoading] = useState(false),
+  const [loading, setLoading] = useState(true),
     [error, setError] = useState<string>();
   useEffect(() => {
     let alive = true;
@@ -77,11 +79,21 @@ export function BundlePanel({
           <View style={{ gap: 16 }}>
             {error && <Text style={[S.small, { color: C.gold }]}>{error}</Text>}
             {detail.image && (
-              <Image
-                source={{ uri: detail.image }}
-                style={{ width: '100%', aspectRatio: 2, borderRadius: 20 }}
-                contentFit="cover"
-              />
+              <ArtworkBoundary
+                identity={`bundle-art-${id}`}
+                urls={[detail.image]}
+                placeholder={
+                  <SkeletonGroup label="Loading bundle artwork">
+                    <Bone height="auto" radius={20} style={{ aspectRatio: 2 }} />
+                  </SkeletonGroup>
+                }
+              >
+                <Image
+                  source={{ uri: detail.image }}
+                  style={{ width: '100%', aspectRatio: 2, borderRadius: 20 }}
+                  contentFit="cover"
+                />
+              </ArtworkBoundary>
             )}
             <View style={S.between}>
               <Text style={S.h3}>
@@ -97,10 +109,16 @@ export function BundlePanel({
           </View>
         }
         ListEmptyComponent={
-          <Empty
-            title={loading ? 'Loading items...' : 'Contents not published'}
-            detail="This archive entry only includes bundle artwork."
-          />
+          loading ? (
+            <Skeleton kind="store" count={3} label="Loading bundle items" />
+          ) : error ? (
+            <Empty title="Bundle unavailable" detail="Pull down to try again." />
+          ) : (
+            <Empty
+              title="Contents not published"
+              detail="This archive entry only includes bundle artwork."
+            />
+          )
         }
         renderItem={({ item }) => (
           <Pressable

@@ -1,6 +1,8 @@
+import { Bone, Skeleton, SkeletonGroup, resourceSkeleton, type SkeletonKind } from './Skeleton';
+import { ARTWORK_WAIT_MS } from '../state/useArtworkReadiness';
 import { Image } from './CachedImage';
 import { isUnloadedSection } from '../core/refreshPolicy';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -218,18 +220,55 @@ export function ItemArt({
   size?: number;
   style?: ViewStyle;
 }) {
-  const { C, S, isDark } = useTheme();
-
   const urls = artworkCandidates(item),
-    key = urls.join('|');
-  const [index, setIndex] = useState(0),
-    [loading, setLoading] = useState(true),
     [retry, setRetry] = useState(0);
+
+  return (
+    <ItemArtwork
+      key={`${item.id}:${urls.join('|')}:${retry}`}
+      item={item}
+      urls={urls}
+      size={size}
+      style={style}
+      onRetry={() => setRetry((n) => n + 1)}
+    />
+  );
+}
+function ItemArtwork({
+  item,
+  urls,
+  size,
+  style,
+  onRetry,
+}: {
+  item: CatalogItem;
+  urls: string[];
+  size: number;
+  style?: ViewStyle;
+  onRetry(): void;
+}) {
+  const { C, S } = useTheme();
+  const [index, setIndex] = useState(0),
+    [loaded, setLoaded] = useState(false),
+    [expired, setExpired] = useState(false);
+  const active = useRef(true),
+    current = useRef(index);
+  current.current = index;
   useEffect(() => {
-    setIndex(0);
-    setLoading(true);
-  }, [key]);
-  const uri = urls[index];
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (loaded || !urls.length) return;
+
+    const timer = setTimeout(() => {
+      if (active.current) setExpired(true);
+    }, ARTWORK_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [loaded, urls.length]);
+  const uri = expired ? undefined : urls[index];
   return (
     <View
       style={[
@@ -239,15 +278,16 @@ export function ItemArt({
     >
       {uri ? (
         <Image
-          key={`${uri}:${retry}`}
+          key={uri}
           source={{ uri }}
           contentFit="contain"
           style={{ width: '100%', height: '100%' }}
           accessibilityLabel={item.name}
-          onLoad={() => setLoading(false)}
+          onLoad={() => {
+            if (active.current && current.current === index) setLoaded(true);
+          }}
           onError={() => {
-            setLoading(true);
-            setIndex((n) => n + 1);
+            if (active.current && current.current === index) setIndex((n) => n + 1);
           }}
         />
       ) : (
@@ -255,11 +295,7 @@ export function ItemArt({
           accessibilityRole="button"
           accessibilityLabel={`Retry artwork for ${item.name}`}
           disabled={!urls.length}
-          onPress={() => {
-            setIndex(0);
-            setLoading(true);
-            setRetry((n) => n + 1);
-          }}
+          onPress={onRetry}
           style={{ alignItems: 'center', gap: 4 }}
         >
           <Feather
@@ -270,8 +306,13 @@ export function ItemArt({
           {urls.length > 0 && <Text style={S.small}>Retry image</Text>}
         </Pressable>
       )}
-      {uri && loading && (
-        <ActivityIndicator size="small" color={C.subtle} style={{ position: 'absolute' }} />
+      {uri && !loaded && (
+        <SkeletonGroup
+          label={`Loading ${item.name} artwork`}
+          style={{ position: 'absolute', inset: 0 }}
+        >
+          <Bone height={size} radius={12} />
+        </SkeletonGroup>
       )}
     </View>
   );
@@ -446,25 +487,31 @@ export function Resource<T>({
   title,
   children,
   loading = false,
+  skeleton,
+  count,
 }: {
   section: DataSection<T> | undefined;
   title: string;
   children(data: T): React.ReactNode;
   loading?: boolean;
+  skeleton?: SkeletonKind;
+  count?: number;
 }) {
   const { C, S, isDark } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  if (!value || (loading && value.status === 'error'))
+  if (
+    !value ||
+    (loading && value.status === 'error') ||
+    (isUnloadedSection(value) && value.status === 'error' && !value.retryAt)
+  )
     return (
-      <View
+      <Skeleton
+        kind={skeleton ?? resourceSkeleton(title)}
+        count={count ?? (/history|store|collection|skins|weapons/i.test(title) ? 3 : 1)}
+        label={`Loading ${title.toLowerCase()}`}
         testID={`loading-${title.toLowerCase()}`}
-        style={[styles.loading, { gap: 10 }]}
-        accessibilityLiveRegion="polite"
-      >
-        <ActivityIndicator color={C.accent} />
-        <Text style={S.small}>Loading {title.toLowerCase()}...</Text>
-      </View>
+      />
     );
   if (isUnloadedSection(value))
     return (
