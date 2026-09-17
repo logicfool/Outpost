@@ -1,3 +1,4 @@
+import type { Friend } from '../core/chatTypes';
 import { useActions } from './useActions';
 import { useNotificationSetup } from './useNotificationSetup';
 import {
@@ -595,27 +596,32 @@ export function useApp() {
       setMessage(safeError(error).message);
     }
   }, []);
-  const matchDetail = useCallback(async (id: string, subject?: string): Promise<MatchDetail> => {
-    const account = activeRef.current;
-    if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
-    if (account.demo) return demoMatch(id, subject);
-    const stamp = epoch.current,
-      runtime = await getRuntime();
+  const matchDetail = useCallback(
+    async (id: string, subject?: string): Promise<MatchDetail> => {
+      const account = activeRef.current;
+      if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+      if (account.demo) return demoMatch(id, subject);
+      const stamp = epoch.current,
+        runtime = await getRuntime();
 
-    await runtime.loadCatalog().catch(() => {});
-    if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
-      throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
-    setCatalog(runtime.catalog);
-    const detail = await (await runtime.client(account.puuid)).matchDetail(id, subject);
-    const own = detail.players.find((p) => p.subject === account.puuid);
-    if (own?.card && epoch.current === stamp && activeRef.current?.puuid === account.puuid)
-      setObservedIdentity((previous) =>
-        previous?.accountId === account.puuid && previous.at >= detail.startedAt
-          ? previous
-          : { accountId: account.puuid, player: own, at: detail.startedAt, source: 'match' },
-      );
-    return detail;
-  }, []);
+      await runtime.loadCatalog().catch(() => {});
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+        throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+      setCatalog(runtime.catalog);
+      const detail = await (await runtime.client(account.puuid)).matchDetail(id, subject);
+      const own = detail.players.find((p) => p.subject === account.puuid);
+      if (own?.card && epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+        setObservedIdentity((previous) =>
+          previous?.accountId === account.puuid && previous.at >= detail.startedAt
+            ? previous
+            : { accountId: account.puuid, player: own, at: detail.startedAt, source: 'match' },
+        );
+      if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+        void social.cacheMatchFriends(detail.players, detail.startedAt).catch(() => {});
+      return detail;
+    },
+    [social.cacheMatchFriends],
+  );
   const moreMatches = useCallback(async (): Promise<void> => {
     const account = activeRef.current;
     if (!account || account.demo || snapshot?.matches.status !== 'ready') return;
@@ -679,23 +685,54 @@ export function useApp() {
       if (liveFlight.current?.work === work) liveFlight.current = null;
     }
   }, []);
-  const playerProfile = useCallback(async (player: PlayerRef): Promise<PlayerProfile> => {
-    const account = activeRef.current;
-    if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
-    if (player.hidden)
-      throw new AppError('PROFILE_PRIVATE', 'This player has hidden their identity.');
-    if (account.demo) {
-      const demo = makeDemo();
-      return {
-        player,
-        rank: demo.snapshot.rank,
-        matches: demo.snapshot.matches,
-        fetchedAt: Date.now(),
-        identitySource: 'match',
-      };
-    }
-    return (await (await getRuntime()).client(account.puuid)).playerProfile(player.subject);
-  }, []);
+  const playerProfile = useCallback(
+    async (player: PlayerRef): Promise<PlayerProfile> => {
+      const account = activeRef.current;
+      if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
+      if (player.hidden)
+        throw new AppError('PROFILE_PRIVATE', 'This player has hidden their identity.');
+      if (account.demo) {
+        const demo = makeDemo();
+        return {
+          player,
+          rank: demo.snapshot.rank,
+          matches: demo.snapshot.matches,
+          fetchedAt: Date.now(),
+          identitySource: 'match',
+        };
+      }
+      const stamp = epoch.current,
+        runtime = await getRuntime(),
+        client = await runtime.client(account.puuid);
+      client.scope.player(player.subject);
+      const data = await client.playerProfile(player.subject);
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      await social
+        .cacheFriendProfile(
+          player.subject,
+          data.identityObservedAt ? data.player : undefined,
+          data.identityObservedAt ?? 0,
+        )
+        .catch(() => {});
+      return data;
+    },
+    [social.cacheFriendProfile],
+  );
+  const refreshFriendPortrait = useCallback(
+    async (friend: Friend) => {
+      const account = activeRef.current;
+      if (!account || account.demo || friend.hidden) return;
+      const stamp = epoch.current,
+        runtime = await getRuntime(),
+        client = await runtime.client(account.puuid);
+      client.scope.player(friend.subject);
+      const value = await runtime.friendIdentity(account.puuid, friend.subject);
+      if (!value || stamp !== epoch.current || activeRef.current?.puuid !== account.puuid) return;
+      await social.cacheFriendProfile(friend.subject, value.player, value.observedAt);
+    },
+    [social.cacheFriendProfile],
+  );
   const playerMatches = useCallback(async (subject: string, start: number) => {
     const account = activeRef.current;
     if (!account || account.demo) return [];
@@ -830,6 +867,7 @@ export function useApp() {
     playerProfile,
     playerMatches,
     playerRank,
+    refreshFriendPortrait,
     liveEquipment,
     freshLoadout,
     saveIdentity,

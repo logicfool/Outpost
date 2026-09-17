@@ -55,7 +55,7 @@ export function buildCatalog(
     contracts: Object.create(null),
     seasons: Object.create(null),
     weapons: Object.create(null),
-    schemaVersion: 8,
+    schemaVersion: 9,
     fetchedAt: now,
   };
   const themeNames = new Map(
@@ -172,6 +172,14 @@ export function buildCatalog(
         wallpaper: safeImage(entry.largeArt) ?? safeImage(entry.fullPortrait),
         wideArt: safeImage(entry.wideArt),
       };
+      if (kind === 'buddy')
+        item.levels = array(entry.levels)
+          .map(object)
+          .map((level, index) => ({
+            id: text(level.uuid).toLowerCase(),
+            name: text(level.displayName, `Level ${index + 1}`),
+            image: safeImage(level.displayIcon) ?? item.image,
+          }));
       add(item.id, item);
       for (const level of array(entry.levels).map(object))
         add(text(level.uuid), {

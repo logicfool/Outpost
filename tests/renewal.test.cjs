@@ -158,3 +158,52 @@ test('silent renewal honors an HTTP-date Retry-After rather than falling back to
     (error) => error.code === 'RATE_LIMIT' && error.retryAt === Date.parse(date),
   );
 });
+
+test('cookie rotation is checkpointed even when auth service fails afterwards', async () => {
+  let saved;
+  await assert.rejects(
+    reauthenticateWithCookies(
+      { ssid: 'old' },
+      attempt(),
+      async () =>
+        new Response(null, {
+          status: 503,
+          headers: { 'set-cookie': 'ssid=new; Secure; HttpOnly' },
+        }),
+      async (c) => {
+        saved = c;
+      },
+    ),
+    code('SERVICE_UNAVAILABLE'),
+  );
+  assert.equal(saved.ssid, 'new');
+});
+test('authentication 403 does not falsely report that the saved session was deleted', async () => {
+  await assert.rejects(
+    reauthenticateWithCookies(
+      { ssid: 'saved' },
+      attempt(),
+      async () => new Response(null, { status: 403 }),
+    ),
+    code('AUTH_UNAVAILABLE'),
+  );
+});
+test('untrusted followed redirect cannot checkpoint cookies', async () => {
+  let writes = 0;
+  await assert.rejects(
+    reauthenticateWithCookies(
+      { ssid: 'old' },
+      attempt(),
+      async () => {
+        const r = new Response(null, { status: 302, headers: { 'set-cookie': 'ssid=wrong' } });
+        Object.defineProperty(r, 'redirected', { value: true });
+        return r;
+      },
+      async () => {
+        writes++;
+      },
+    ),
+    code('AUTH_REDIRECT'),
+  );
+  assert.equal(writes, 0);
+});

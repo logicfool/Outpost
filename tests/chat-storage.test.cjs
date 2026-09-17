@@ -161,3 +161,26 @@ test('UUID case is normalized before message indexing', async (t) => {
   await s.save(message(1, { subject: peer.toUpperCase() }));
   assert.equal((await s.messages(peer)).messages[0].subject, peer);
 });
+
+test('sparse roster reconnect preserves the saved player card on disk', async (t) => {
+  const s = await fixture(t),
+    card = { id: ID, canonicalId: ID, kind: 'card', name: 'Cached banner' };
+  await s.saveFriends([
+    {
+      subject: OTHER,
+      jid: OTHER + '@ap1.pvp.net',
+      name: 'Old',
+      tag: 'TEST',
+      presence: 'online',
+      card,
+      cardObservedAt: 100,
+    },
+  ]);
+  await s.saveFriends([
+    { subject: OTHER, jid: OTHER + '@ap1.pvp.net', name: 'New', tag: 'TEST', presence: 'offline' },
+  ]);
+  const f = (await s.conversations())[0].friend;
+  assert.equal(f.name, 'New');
+  assert.equal(f.card.id, ID);
+  assert.equal(f.cardObservedAt, 100);
+});

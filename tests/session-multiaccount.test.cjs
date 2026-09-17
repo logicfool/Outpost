@@ -13,12 +13,13 @@ const compiled = ts.transpileModule(
   fs.readFileSync(path.join(__dirname, '../src/platform/runtime.ts'), 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
-async function fixture() {
+async function fixture(os = 'ios') {
   let now = Date.now(),
     networkError,
     reauthError,
     wrong = false,
-    metadataError = false;
+    metadataError = false,
+    verification401 = false;
   const values = new Map(),
     accounts = new Map(),
     events = [];
@@ -68,7 +69,7 @@ async function fixture() {
   function create() {
     const m = { exports: {} };
     const load = (name) => {
-      if (name === 'react-native') return { Platform: { OS: 'ios' } };
+      if (name === 'react-native') return { Platform: { OS: os } };
       if (name === './network') return { nativeFetcher: fetch };
       if (name === './chatStorage')
         return { activateChatStorage() {}, removeChatStorage: async () => {} };
@@ -97,6 +98,7 @@ async function fixture() {
       const access = new Headers(init.headers).get('Authorization').slice(7),
         id = JSON.parse(Buffer.from(access.split('.')[1], 'base64url')).sub;
       events.push([url.includes('userinfo') ? 'userinfo' : 'entitlement', id]);
+      if (verification401 && url.includes('userinfo')) return response({}, 401);
       if (networkError && url.includes('entitlements.')) throw networkError;
       return response(
         url.includes('userinfo')
@@ -118,6 +120,7 @@ async function fixture() {
     reauthFail: (e) => (reauthError = e),
     wrong: () => (wrong = true),
     metadataFail: (v) => (metadataError = v),
+    verification401: (v) => (verification401 = v),
   };
 }
 test('two expired accounts renew with only their own cookies and remain separate after restart', async () => {
@@ -205,4 +208,63 @@ test('manual token accounts remain explicitly nonrenewable and do not borrow ano
   await assert.rejects(h.create().client(OTHER), code('SESSION_EXPIRED'));
   assert.equal(h.renewals.has(OTHER), false);
   assert.ok((await h.vault.read(ID)).reauth.cookies.ssid);
+});
+
+for (const os of ['android', 'ios'])
+  test(`${os}: rejected access-token checkpoint survives update-style runtime restart`, async () => {
+    const h = await fixture(os),
+      r = h.create(),
+      c = await r.client(OTHER);
+    c.http = new HttpClient(async () => response({}, 401));
+    await assert.rejects(c.store(), code('SESSION_EXPIRED'));
+    assert.equal((await h.vault.read(OTHER)).accessRejected, true);
+    const after = await h.create().client(OTHER);
+    assert.equal(after.isActive(), true);
+    assert.equal(h.renewals.get(OTHER), 2);
+    assert.ok((await h.vault.read(OTHER)).reauth.cookies.ssid);
+    assert.equal(h.accounts.size, 2);
+  });
+for (const os of ['android', 'ios'])
+  test(`${os}: expired pending exchange cannot get stuck retrying the rejected access token`, async () => {
+    const h = await fixture(os);
+    h.verification401(true);
+    await assert.rejects(h.create().client(OTHER), code('SESSION_EXPIRED'));
+    const saved = await h.vault.read(OTHER);
+    assert.equal(saved.accessRejected, true);
+    assert.equal(saved.renewalPending, undefined);
+    h.verification401(false);
+    h.advance(61000);
+    assert.equal((await h.create().client(OTHER)).isActive(), true);
+    assert.equal(h.renewals.get(OTHER), 2);
+  });
+
+test('new renewal waits for an in-flight rejected-token checkpoint', async () => {
+  const h = await fixture('android'),
+    r = h.create(),
+    c = await r.client(OTHER),
+    write = h.vault.write.bind(h.vault);
+  let release, started;
+  const begun = new Promise((resolve) => (started = resolve)),
+    hold = new Promise((resolve) => (release = resolve));
+  h.vault.write = async (s) => {
+    if (s.accessRejected && !s.renewalFailure) {
+      started();
+      await hold;
+    }
+    return write(s);
+  };
+  c.http = new HttpClient(async () => response({}, 401));
+  const rejected = assert.rejects(c.store(), code('SESSION_EXPIRED'));
+  await begun;
+  let renewed = false;
+  const pending = r.client(OTHER).then((v) => {
+    renewed = true;
+    return v;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(renewed, false);
+  release();
+  await rejected;
+  assert.equal((await pending).isActive(), true);
+  assert.equal((await h.vault.read(OTHER)).accessRejected, undefined);
 });

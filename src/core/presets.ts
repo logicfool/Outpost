@@ -1,3 +1,11 @@
+import {
+  applyBuddyChoices,
+  equippedBuddy,
+  sameBuddy,
+  validateBuddy,
+  type BuddyChoice,
+  type OwnedBuddy,
+} from './buddies';
 import { unlockedLevels, unlockedChromas } from './loadoutOptions';
 import type { Catalog } from './types';
 import { AppError, object, requiredArray, text, uuid } from './validation';
@@ -6,6 +14,7 @@ export interface WeaponChoice {
   skinId: string;
   levelId: string;
   chromaId: string;
+  buddy?: BuddyChoice | null;
 }
 export interface LoadoutPreset {
   id: string;
@@ -18,6 +27,8 @@ export interface LoadoutEditor {
   current: WeaponChoice[];
   ownedLevels: string[];
   ownedChromas: string[];
+  ownedBuddies?: OwnedBuddy[];
+  buddyError?: string;
   version?: number;
 }
 export function weaponChoices(raw: unknown): WeaponChoice[] {
@@ -28,6 +39,7 @@ export function weaponChoices(raw: unknown): WeaponChoice[] {
       skinId: uuid(g.SkinID),
       levelId: uuid(g.SkinLevelID),
       chromaId: uuid(g.ChromaID),
+      ...(equippedBuddy(g) ? { buddy: equippedBuddy(g) } : {}),
     };
   });
 }
@@ -52,6 +64,7 @@ export function validatePreset(p: LoadoutPreset, accountId: string): LoadoutPres
       skinId: uuid(g.skinId),
       levelId: uuid(g.levelId),
       chromaId: uuid(g.chromaId),
+      ...(g.buddy === null ? { buddy: null } : g.buddy ? { buddy: validateBuddy(g.buddy) } : {}),
     };
     if (ids.has(slot.weaponId))
       throw new AppError('PRESET_INVALID', 'A weapon appears twice in this preset.');
@@ -67,6 +80,7 @@ export function preparePreset(
   levels: Set<string>,
   chromas: Set<string>,
   catalog: Catalog,
+  buddies: OwnedBuddy[] = [],
 ) {
   preset = validatePreset(preset, accountId);
   const r = object(raw),
@@ -86,7 +100,12 @@ export function preparePreset(
           (i) => i.kind === 'skin' && i.canonicalId.toLowerCase() === desired.skinId.toLowerCase(),
         );
     if (!old) throw new AppError('PRESET_WEAPON', 'A saved weapon is not in the current loadout.');
-    if (JSON.stringify(old) === JSON.stringify(desired)) continue;
+    if (
+      old.skinId === desired.skinId &&
+      old.levelId === desired.levelId &&
+      old.chromaId === desired.chromaId
+    )
+      continue;
     if (
       !skin ||
       skin.kind !== 'skin' ||
@@ -124,9 +143,10 @@ export function preparePreset(
       ? { ...g, SkinID: next.skinId, SkinLevelID: next.levelId, ChromaID: next.chromaId }
       : g;
   });
+  const changedGuns = applyBuddyChoices(Guns, replacements, buddies);
 
   return {
-    Guns,
+    Guns: changedGuns,
     Identity: r.Identity,
     Incognito: r.Incognito,
     ...(r.ActiveExpressions !== undefined ? { ActiveExpressions: r.ActiveExpressions } : {}),
@@ -142,7 +162,16 @@ export function verifyPreset(raw: unknown, wanted: WeaponChoice[]) {
           c.weaponId === g.weaponId &&
           c.skinId === g.skinId &&
           c.levelId === g.levelId &&
-          c.chromaId === g.chromaId,
+          c.chromaId === g.chromaId &&
+          (g.buddy === undefined ||
+            sameBuddy(
+              g.buddy,
+              equippedBuddy(
+                requiredArray(object(raw).Guns, 'weapons').find(
+                  (v) => text(object(v).ID).toLowerCase() === g.weaponId,
+                ),
+              ),
+            )),
       )
     )
       throw new AppError(

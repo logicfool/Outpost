@@ -1,3 +1,4 @@
+import { MELEE_ID, type BuddyChoice, type OwnedBuddy } from '../core/buddies';
 import { useCallback, useRef } from 'react';
 import type { Account, Catalog, Snapshot, Loadout } from '../core/types';
 import type { LoadoutPreset, LoadoutEditor } from '../core/presets';
@@ -7,6 +8,7 @@ import { quotePurchase } from '../core/purchases';
 import { AppError } from '../core/validation';
 import { randomId } from '../platform/secure';
 import { getRuntime } from '../platform/runtime';
+const demoBuddyChoices = new Map<string, BuddyChoice | null>();
 const demoPresets = new Map<string, LoadoutPreset>();
 export function useActions(
   account: Account | null,
@@ -66,6 +68,23 @@ export function useActions(
             skinId: i.canonicalId,
             levelId: i.levels?.[0]?.id ?? i.id,
             chromaId: i.chromas?.[0]?.id ?? i.id,
+            ...(demoBuddyChoices.has(
+              i.weaponId ?? `00000000-0000-4000-8070-${String(n + 1).padStart(12, '0')}`,
+            )
+              ? {
+                  buddy: demoBuddyChoices.get(
+                    i.weaponId ?? `00000000-0000-4000-8070-${String(n + 1).padStart(12, '0')}`,
+                  ),
+                }
+              : {}),
+          })),
+        ownedBuddies: Object.values(current.current.catalog.items)
+          .filter((i) => i.kind === 'buddy' && i.id === i.canonicalId)
+          .map((item, n) => ({
+            buddyId: item.canonicalId,
+            levelId: item.levels?.[0]?.id ?? item.id,
+            instanceId: `00000000-0000-4000-8080-${String(n + 1).padStart(12, '0')}`,
+            item,
           })),
         ownedLevels: items.flatMap((i) => (i.levels ?? []).map((l) => l.id)),
         ownedChromas: items.flatMap((i) => (i.chromas ?? []).map((c) => c.id)),
@@ -104,6 +123,26 @@ export function useActions(
     assertCurrent(a.puuid);
     current.current.updated(data);
   }, []);
+  const applyBuddy = useCallback(
+    async (weaponId: string, buddy: BuddyChoice | null, version?: number) => {
+      const a = selected();
+      if (a.demo) {
+        demoBuddyChoices.set(weaponId, buddy);
+        return;
+      }
+      const lease = current.current.selection?.();
+      const guard = () => {
+        assertCurrent(a.puuid);
+        const latest = current.current.selection?.();
+        if (lease && (latest?.accountId !== lease.accountId || latest?.revision !== lease.revision))
+          throw new AppError('ACCOUNT_CHANGED', 'The selected account changed before applying.');
+      };
+      const data = await (await getRuntime()).saveBuddy(a.puuid, weaponId, buddy, version, guard);
+      assertCurrent(a.puuid);
+      current.current.updated(data);
+    },
+    [],
+  );
   const purchaseQuote = useCallback(async (itemId: string): Promise<PurchaseQuote> => {
     const a = selected();
     if (a.demo) {
@@ -156,6 +195,7 @@ export function useActions(
     return record;
   }, []);
   return {
+    applyBuddy,
     listPresets,
     editLoadout,
     savePreset,

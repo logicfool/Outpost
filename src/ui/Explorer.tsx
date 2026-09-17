@@ -1,3 +1,4 @@
+import { BuddiesPanel } from './BuddiesPanel';
 import { CollectionBrowser, EquippedPanel } from './CollectionHub';
 import { RoundPanel } from './RoundPanel';
 import { LiveEquipmentPanel } from './LiveEquipmentPanel';
@@ -899,6 +900,9 @@ export function ExplorerModal({
           subject={route.subject}
           onBack={onBack}
         />
+      )}
+      {route?.type === 'buddies' && (
+        <BuddiesPanel key={model.active?.puuid} model={model} onBack={onBack} />
       )}
       {route?.type === 'presets' && <PresetsPanel model={model} onBack={onBack} />}
       {route?.type === 'identity' && (

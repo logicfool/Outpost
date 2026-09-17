@@ -16,6 +16,7 @@ export interface PlayerProfile {
   matches: Section<MatchSummary[]>;
   fetchedAt: number;
   identitySource: 'match' | 'friend' | 'account';
+  identityObservedAt?: number;
 }
 export interface IdentityEdit {
   cardId?: string;

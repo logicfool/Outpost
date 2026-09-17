@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', 'validation-0.7.0');
+const out = path.join(root, 'docs', 'validation-0.7.1');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -525,6 +525,66 @@ try {
     await click('Delete Day set');
     await click('Confirm delete preset');
     await page.getByText('Create your first loadout', { exact: true }).waitFor();
+    await click('Back from loadouts');
+  });
+  await check('owned buddy can be equipped and removed without changing a skin', async () => {
+    await tab('Collection');
+    await click('Weapon buddies');
+    await click('Manage Vandal buddy');
+    const choice = page.getByRole('button', { name: /^Use .* copy \d+/ }).first();
+    await choice.waitFor();
+    await choice.click();
+    await click('Done with buddy');
+    await click('Confirm buddy change');
+    const slot = page.getByRole('button', { name: 'Manage Vandal buddy', exact: true });
+    await slot.waitFor();
+    assert.equal(await slot.getByText('No buddy', { exact: true }).count(), 0);
+    await shot('buddy-equipped');
+    await slot.click();
+    await click('No buddy');
+    await click('Done with buddy');
+    await click('Confirm buddy change');
+    await page
+      .getByRole('button', { name: 'Manage Vandal buddy', exact: true })
+      .getByText('No buddy', { exact: true })
+      .waitFor();
+    await shot('buddy-removed');
+    await click('Back from buddy manager');
+  });
+  await check('buddy choice survives saving and reopening a named preset', async () => {
+    await tab('Collection');
+    await click('Saved loadouts');
+    await click('Create loadout');
+    await page.getByRole('textbox', { name: 'Loadout name', exact: true }).fill('Buddy preset');
+    await click('Edit Vandal skin');
+    await click('Manage buddy');
+    const choice = page.getByRole('button', { name: /^Use .* copy \d+/ }).first();
+    await choice.click();
+    await shot('buddy-picker');
+    await click('Done with buddy');
+    await click('Done with weapon');
+    await click('Save loadout');
+    await click('Edit Buddy preset');
+    await click('Edit Vandal skin');
+    await click('Manage buddy');
+    assert.equal(
+      await page
+        .getByRole('button', { name: /^Use .* copy \d+/ })
+        .filter({ has: page.getByText('Selected', { exact: true }) })
+        .count(),
+      1,
+    );
+    await click('No buddy');
+    await click('Done with buddy');
+    await click('Done with weapon');
+    await click('Save loadout');
+    await click('Edit Buddy preset');
+    await click('Edit Vandal skin');
+    await page.getByText('Buddy will be removed', { exact: true }).waitFor();
+    await click('Back to preset');
+    await click('Cancel preset editing');
+    await click('Delete Buddy preset');
+    await click('Confirm delete preset');
     await click('Back from loadouts');
   });
   await check('notification defaults are enabled and VP purchase stays off', async () => {

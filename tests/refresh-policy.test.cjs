@@ -487,7 +487,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   };
   const fresh = {
     ...old,
-    schemaVersion: 8,
+    schemaVersion: 9,
     maps: {
       ascent: {
         name: 'Ascent',
@@ -512,7 +512,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   await load.call(f.runtime);
   await load.call(f.runtime);
   assert.equal(publicCalls, 1);
-  assert.equal(f.runtime.catalog.schemaVersion, 8);
+  assert.equal(f.runtime.catalog.schemaVersion, 9);
   assert.equal(f.calls.snapshots, 0);
 });
 test('a weapons-only media refresh cannot mark old map metadata as migrated', async () => {
@@ -531,4 +531,38 @@ test('a weapons-only media refresh cannot mark old map metadata as migrated', as
   await f.runtime.refreshMedia();
   assert.equal(f.runtime.catalog.schemaVersion, 7);
   assert.equal(f.runtime.catalog.maps.ascent.minimap, undefined);
+});
+
+test('recoverable session setup failure is retried after cooldown even with a healthy daily store', async () => {
+  const f = fixture(),
+    s = f.gameSnapshot();
+  s.refreshIssue = { code: 'RENEWAL_WAIT', message: 'Waiting', retryAt: f.now + 60000 };
+  f.snapshots.set(ID, s);
+  f.gates.set(ID + ':sync', {
+    attemptedAt: f.now,
+    notBefore: f.now + 60000,
+    autoNotBefore: f.now + 60000,
+    failures: 1,
+  });
+  await f.runtime.sync(ID);
+  assert.equal(f.calls.snapshots, 0);
+  f.advance(60001);
+  await f.runtime.sync(ID);
+  assert.equal(f.calls.snapshots, 1);
+  assert.equal(f.plans[0].missingOnly, true);
+});
+test('healthy cached account data stays cached during credential recovery', () => {
+  const f = fixture(),
+    s = f.gameSnapshot();
+  s.wallet = { ...s.wallet, warning: { code: 'SESSION_EXPIRED', message: 'Expired' } };
+  const p = snapshotPlan(s, 'auto', f.now);
+  assert.equal(p.missingOnly, true);
+  assert.equal(shouldFetchSection(true, s.store, p.missingOnly), false);
+  assert.equal(shouldFetchSection(true, s.wallet, p.missingOnly), true);
+});
+test('interactive sign-in requirement is not a one-minute automatic login loop', () => {
+  const f = fixture(),
+    s = f.gameSnapshot();
+  s.refreshIssue = { code: 'REAUTH_REQUIRED', message: 'Challenge' };
+  assert.equal(nextAutomaticAt(s, null, f.now), s.store.data.dailyExpiresAt + 2000);
 });

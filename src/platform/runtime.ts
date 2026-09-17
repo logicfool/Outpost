@@ -1,5 +1,8 @@
+import { FriendLookupGate } from '../core/friendLookup';
+import { needsSessionRecovery } from '../core/sessionRecovery';
 import {
   stageSessionRenewal,
+  checkpointCookies,
   sessionCheckpointMatches,
   sessionHealth,
 } from '../core/sessionRenewal';
@@ -88,7 +91,7 @@ export class Runtime {
       if (
         cached &&
         (!allowNetwork ||
-          (!force && cached.schemaVersion === 8 && cached.fetchedAt + ttl > this.now()))
+          (!force && cached.schemaVersion === 9 && cached.fetchedAt + ttl > this.now()))
       ) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
@@ -116,6 +119,22 @@ export class Runtime {
         'SESSION_SAVE',
         'Secure session verification failed. Reconnect this account without removing it.',
       );
+  }
+  private portraits?: FriendLookupGate;
+  async friendIdentity(id: string, subject: string) {
+    const generation = this.generations.get(id) ?? 0;
+    const client = await this.client(id);
+    client.scope.player(subject);
+    return (this.portraits ??= new FriendLookupGate(this.repository, this.now)).run(
+      id,
+      subject,
+      async () => {
+        const value = await client.friendIdentity(subject);
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError('SESSION_REMOVED', 'The account changed.');
+        return value;
+      },
+    );
   }
   async savedAccount(id: string): Promise<Account | null> {
     const generation = this.generations.get(id) ?? 0;
@@ -226,6 +245,8 @@ export class Runtime {
       );
     const existing = this.clients.get(id);
     if (existing?.isActive()) return existing;
+
+    await existing?.settleRejection();
     const rejected = this.rejectedSessions.has(id) || existing?.needsReauth() === true;
     if (rejected) this.rejectedSessions.add(id);
     if (existing) {
@@ -261,7 +282,9 @@ export class Runtime {
           );
         }
         const pendingUsable =
-          session.renewalPending && session.account.expiresAt > this.now() + 30000;
+          session.renewalPending &&
+          !session.accessRejected &&
+          session.account.expiresAt > this.now() + 30000;
         if (!pendingUsable && !session.reauth?.cookies?.ssid)
           throw new AppError(
             'SESSION_EXPIRED',
@@ -288,6 +311,16 @@ export class Runtime {
               session.reauth!.cookies,
               { state: randomHex(), nonce: randomHex(), createdAt: Date.now() },
               nativeFetcher,
+              async (cookies) => {
+                if (generation !== (this.generations.get(id) ?? 0))
+                  throw new AppError(
+                    'SESSION_REMOVED',
+                    'The account changed during cookie renewal.',
+                  );
+                session = checkpointCookies(session!, cookies, this.now());
+                await this.persistSession(session);
+                report('COOKIE_ROTATION_CHECKPOINTED');
+              },
             );
             if (generation !== (this.generations.get(id) ?? 0))
               throw new AppError('SESSION_REMOVED', 'This account changed during renewal.');
@@ -331,6 +364,7 @@ export class Runtime {
             const retryAt = Math.max(this.now() + 60000, error.retryAt ?? 0);
             await this.persistSession({
               ...session,
+              ...(error.status === 401 ? { accessRejected: true, renewalPending: false } : {}),
               renewalFailure: { code: error.code, retryAt },
             }).catch(() => {});
             report(error.code);
@@ -349,7 +383,32 @@ export class Runtime {
         this.scopes.get(id) ??
         new PlayerScope(id, session.account.gameName, session.account.tagLine);
       this.scopes.set(id, scope);
-      const client = new RiotClient(session, this.http, this.publicClient, this.catalog, scope);
+      const client = new RiotClient(
+        session,
+        this.http,
+        this.publicClient,
+        this.catalog,
+        scope,
+        async () => {
+          if (generation !== (this.generations.get(id) ?? 0)) return;
+          this.rejectedSessions.add(id);
+          const saved = await vault.read(id);
+          if (
+            !saved ||
+            saved.accessToken !== session!.accessToken ||
+            generation !== (this.generations.get(id) ?? 0)
+          )
+            return;
+          await this.persistSession({ ...saved, accessRejected: true });
+          recordRequest({
+            at: this.now(),
+            service: 'Session renewal',
+            method: 'STATE',
+            code: 'REJECTED_TOKEN_SAVED',
+            durationMs: 0,
+          });
+        },
+      );
       this.clients.set(id, client);
       return client;
     })();
@@ -464,7 +523,8 @@ export class Runtime {
       );
       const resetStillPending =
         next.store.status === 'ready' && storeResetAt(next, this.now()) <= this.now() + 2000;
-      const failed = !!storeError || !!next.refreshIssue || resetStillPending;
+      const failed =
+        !!storeError || !!next.refreshIssue || needsSessionRecovery(next) || resetStillPending;
       const failures = failed ? (gate?.failures ?? 0) + 1 : 0;
       const completedGate: RefreshGateState = {
         attemptedAt: now,
@@ -694,6 +754,43 @@ export class Runtime {
         await this.repository.saveSnapshot({
           ...saved,
           loadout: { status: 'ready', data, fetchedAt: Date.now() },
+        });
+      return data;
+    };
+    const work = run();
+    this.identityFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
+    }
+  }
+  async saveBuddy(
+    id: string,
+    weaponId: string,
+    buddy: import('../core/buddies').BuddyChoice | null,
+    expectedVersion?: number,
+    guard?: () => void,
+  ): Promise<Loadout> {
+    if (this.identityFlights.has(id))
+      throw new AppError('LOADOUT_BUSY', 'Wait for the current equipment change.');
+    const generation = this.generations.get(id) ?? 0;
+    const run = async () => {
+      await this.loadCatalog();
+      const data = await (
+        await this.client(id)
+      ).saveBuddy(weaponId, buddy, expectedVersion, () => {
+        guard?.();
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError('ACCOUNT_CHANGED', 'The account changed before applying.');
+      });
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      const saved = await this.repository.snapshot(id);
+      if (saved)
+        await this.repository.saveSnapshot({
+          ...saved,
+          loadout: { status: 'ready', data, fetchedAt: this.now() },
         });
       return data;
     };

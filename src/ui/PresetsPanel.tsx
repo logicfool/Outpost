@@ -1,3 +1,5 @@
+import { BuddyPicker } from './BuddyPicker';
+import { MELEE_ID } from '../core/buddies';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, TextInput, FlatList, Pressable, RefreshControl } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -10,6 +12,7 @@ import { Button, ModalHeader, ModalPage, ItemArt, Empty, Tabs } from './componen
 import { useTheme } from './theme';
 export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): void }) {
   const { C, S } = useTheme();
+  const [part, setPart] = useState<'skin' | 'buddy'>('skin');
   const [list, setList] = useState<LoadoutPreset[]>([]),
     [editor, setEditor] = useState<LoadoutEditor | null>(null),
     [weapons, setWeapons] = useState<WeaponChoice[]>([]),
@@ -69,6 +72,7 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
       setName(preset?.name ?? '');
       setId(preset?.id);
       setSlot(undefined);
+      setPart('skin');
       setQuery('');
     });
   const save = () =>
@@ -115,6 +119,10 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
       closeLabel={slot ? 'Back to preset' : editor ? 'Cancel preset editing' : 'Back from loadouts'}
       onClose={() => {
         if (busy) return;
+        if (part === 'buddy') {
+          setPart('skin');
+          return;
+        }
         if (slot) {
           setSlot(undefined);
           setQuery('');
@@ -131,7 +139,22 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
           {error}
         </Text>
       )}
-      {slot && selected && editor ? (
+      {slot && selected && editor && part === 'buddy' ? (
+        <BuddyPicker
+          disabled={busy}
+          editor={editor}
+          weapons={weapons}
+          weaponId={slot}
+          selected={
+            selected.buddy === undefined
+              ? editor.current.find((w) => w.weaponId === slot)?.buddy
+              : selected.buddy
+          }
+          catalog={model.catalog}
+          onChange={(buddy) => update({ buddy })}
+          onDone={() => setPart('skin')}
+        />
+      ) : slot && selected && editor ? (
         <FlatList
           key="skin-grid"
           data={items}
@@ -170,6 +193,20 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
                     }))}
                   />
                 </>
+              )}
+              {slot !== MELEE_ID && skin?.weapon !== 'Melee' && skin?.weapon !== 'Blade' && (
+                <Button
+                  secondary
+                  title="Manage buddy"
+                  icon="award"
+                  onPress={() => setPart('buddy')}
+                />
+              )}
+              {selected.buddy === null && <Text style={S.small}>Buddy will be removed</Text>}
+              {selected.buddy && (
+                <Text style={S.small}>
+                  {model.catalog.items[selected.buddy.buddyId]?.name ?? 'Buddy selected'}
+                </Text>
               )}
               <TextInput
                 value={query}
@@ -265,6 +302,7 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
                 accessibilityLabel={`Edit ${item?.weapon ?? 'weapon'} skin`}
                 onPress={() => {
                   setSlot(w.weaponId);
+                  setPart('skin');
                   setQuery('');
                 }}
                 style={[S.card, S.row]}
@@ -308,7 +346,7 @@ export function PresetsPanel({ model, onBack }: { model: AppModel; onBack(): voi
                   <Text style={S.body}>
                     {confirm.remove
                       ? 'Remove this saved preset?'
-                      : `Change ${confirm.preset.weapons.length} weapon slots on ${model.active?.gameName}? Buddies and sprays stay.`}
+                      : `Change ${confirm.preset.weapons.length} weapon slots on ${model.active?.gameName}? Selected buddy changes are included. Sprays stay.`}
                   </Text>
                   <Button
                     title={

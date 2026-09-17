@@ -1,3 +1,4 @@
+import { storedFriend } from './friendIdentity';
 import type { ChatMessage, Conversation, Friend, MessageCursor } from './chatTypes';
 import { mergeMessage, validateMessage } from './messageHistory';
 import { AppError, uuid } from './validation';
@@ -88,28 +89,29 @@ export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
       });
     },
     saveFriends(friends) {
-      const rows = friends.slice(0, 1500).map((f) => ({
-        subject: uuid(f.subject),
-        data: JSON.stringify({
-          subject: f.subject,
-          jid: f.jid,
-          name: f.name,
-          tag: f.tag,
-          card: f.card,
-          title: f.title,
-          level: f.level,
-          hideLevel: f.hideLevel,
-          tier: f.tier,
-          presence: 'offline',
-        }),
-      }));
+      const rows = friends.slice(0, 1500).map((f) => ({ ...f, subject: uuid(f.subject) }));
       return write(async () => {
-        for (const row of rows)
+        const records = new Map(
+          (
+            await db.getAllAsync<{ peer: string; identity: string }>(
+              'SELECT peer,identity FROM conversations WHERE identity IS NOT NULL',
+            )
+          ).map((row) => [row.peer, row.identity]),
+        );
+        for (const row of rows) {
+          const previous = records.get(row.subject);
+          let old: Friend | undefined;
+          try {
+            if (previous) old = JSON.parse(previous);
+          } catch {}
+          const value = JSON.stringify(storedFriend(row, old));
+          if (value === previous) continue;
           await db.runAsync(
             'INSERT INTO conversations(peer,identity) VALUES(?,?) ON CONFLICT(peer) DO UPDATE SET identity=excluded.identity',
             row.subject,
-            row.data,
+            value,
           );
+        }
       });
     },
     async conversations() {

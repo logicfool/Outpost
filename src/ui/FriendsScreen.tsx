@@ -1,3 +1,4 @@
+import { useFriendPortraits } from '../state/useFriendPortraits';
 import { useNavInset } from './NavInsets';
 import React, {
   memo,
@@ -114,6 +115,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles);
   const navInset = useNavInset();
+  const portraits = useFriendPortraits(model);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30000);
@@ -177,6 +179,8 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
             : 'Your account';
   return (
     <SectionList
+      onViewableItemsChanged={portraits.onViewableItemsChanged}
+      viewabilityConfig={portraits.viewabilityConfig}
       sections={sections}
       keyExtractor={friendKey}
       renderItem={renderItem}

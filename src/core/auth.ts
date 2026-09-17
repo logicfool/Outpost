@@ -224,6 +224,7 @@ export async function reauthenticateWithCookies(
   cookies: Record<string, string>,
   attempt: LoginAttempt,
   fetcher: (url: string, init: RequestInit) => Promise<Response>,
+  saveCookies?: (cookies: Record<string, string>) => Promise<void>,
 ): Promise<LoginTokens> {
   if (!safeCookieValue(cookies.ssid))
     throw new AppError('REAUTH_UNAVAILABLE', 'This account has no reusable Riot session cookie.');
@@ -250,6 +251,17 @@ export async function reauthenticateWithCookies(
     }
     if (response.redirected || (response.url && new URL(response.url).origin !== AUTH_ORIGIN))
       throw new AppError('AUTH_REDIRECT', 'An unexpected authentication redirect was blocked.');
+    const nextCookies = rotatedCookies(cookies, response.headers);
+
+    if (saveCookies && JSON.stringify(nextCookies) !== JSON.stringify(cleanSessionCookies(cookies)))
+      await saveCookies(nextCookies);
+    if (response.status === 403)
+      throw new AppError(
+        'AUTH_UNAVAILABLE',
+        'Riot could not renew this session right now. The saved account is kept.',
+        undefined,
+        403,
+      );
     if (response.status === 429) {
       const raw = response.headers.get('retry-after') ?? '',
         seconds = Number(raw),
@@ -278,7 +290,7 @@ export async function reauthenticateWithCookies(
     if (![301, 302, 303, 307, 308].includes(response.status) || !location || !isCallback(location))
       throw new AppError('REAUTH_REQUIRED', 'Riot requires interactive sign-in again.');
     const tokens = parseCallback(location, attempt);
-    return { ...tokens, reauthCookies: rotatedCookies(cookies, response.headers) };
+    return { ...tokens, reauthCookies: nextCookies };
   } finally {
     clearTimeout(timeout);
   }

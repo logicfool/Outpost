@@ -79,7 +79,13 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
     mapId: mapId || undefined,
     map: catalog.maps[mapId]?.name,
     status: (child(node, 'status')?.text || (valOnline ? 'VALORANT' : 'Riot client')).slice(0, 200),
-    ...(cardId ? { card: catalogItem(catalog, cardId, 'card') } : {}),
+    ...(cardId
+      ? {
+          card: catalogItem(catalog, cardId, 'card'),
+          cardObservedAt: now,
+          cardSource: 'presence' as const,
+        }
+      : {}),
     ...(titleId ? { title: catalogItem(catalog, titleId, 'title') } : {}),
     ...(valOnline
       ? {

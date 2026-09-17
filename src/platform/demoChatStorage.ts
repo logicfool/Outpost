@@ -1,3 +1,4 @@
+import { storedFriend } from '../core/friendIdentity';
 import type { ChatStore } from '../core/chatStore';
 import type { ChatMessage, Friend } from '../core/chatTypes';
 import { mergeMessage, messageKey } from '../core/messageHistory';
@@ -29,7 +30,9 @@ export const demoChatStorage: ChatStore = {
     persist();
   },
   async saveFriends(friends) {
-    data.friends = friends;
+    const merged = new Map(data.friends.map((f) => [f.subject, f]));
+    for (const f of friends) merged.set(f.subject, storedFriend(f, merged.get(f.subject)));
+    data.friends = [...merged.values()];
     persist();
   },
   async conversations() {

@@ -17,6 +17,7 @@ export type ExplorerRoute =
   | { type: 'round'; detail: import('../core/types').MatchDetail; round: number; eventId?: string }
   | { type: 'live-loadout'; matchId: string; subject?: string }
   | { type: 'presets' }
+  | { type: 'buddies' }
   | { type: 'friends' }
   | { type: 'chat-settings'; subject?: string }
   | { type: 'chat'; subject: string };

@@ -31,6 +31,21 @@ export function stageSessionRenewal(
     ...(cookies.ssid ? { reauth: { cookies, capturedAt: now } } : {}),
   });
 }
+
+export function checkpointCookies(
+  previous: Session,
+  raw: Record<string, string>,
+  now = Date.now(),
+): Session {
+  const cookies = cleanSessionCookies(raw);
+  assertCookieSubject(cookies, previous.account.puuid);
+  const { reauth, ...rest } = previous;
+  return validateSession({
+    ...rest,
+    account: { ...previous.account, canReauth: !!cookies.ssid },
+    ...(cookies.ssid ? { reauth: { cookies, capturedAt: now } } : {}),
+  });
+}
 export function sessionCheckpointMatches(saved: Session | null, expected: Session): boolean {
   if (
     !saved ||

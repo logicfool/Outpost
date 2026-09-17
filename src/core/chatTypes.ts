@@ -10,6 +10,9 @@ export interface ChatBootstrap {
   expiresAt: number;
 }
 export interface Friend extends PlayerRef {
+  cardObservedAt?: number;
+  identityCheckedAt?: number;
+  cardSource?: 'presence' | 'match';
   jid: string;
   matchId?: string;
   progress?: import('./matchTypes').MatchProgress;

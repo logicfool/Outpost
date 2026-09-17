@@ -154,6 +154,11 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           onPress={() => onNavigate({ type: 'equipped' })}
         />
         <MenuRow
+          title="Weapon buddies"
+          icon="award"
+          onPress={() => onNavigate({ type: 'buddies' })}
+        />
+        <MenuRow
           title="Loadout presets"
           label="Saved loadouts"
           icon="layers"
@@ -420,6 +425,11 @@ export function EquippedPanel({
               title="Edit a loadout preset"
               icon="layers"
               onPress={() => onNavigate({ type: 'presets' })}
+            />
+            <MenuRow
+              title="Manage buddies"
+              icon="award"
+              onPress={() => onNavigate({ type: 'buddies' })}
               last
             />
           </View>

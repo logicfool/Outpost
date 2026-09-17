@@ -1,3 +1,4 @@
+import { withCachedFriends, observedFriend } from '../core/friendIdentity';
 import { AutoHistoryGate } from '../core/autoHistory';
 import { notifyChat } from '../platform/notifications';
 import { recordRequest } from '../core/diagnostics';
@@ -146,9 +147,16 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         state.status === 'error' &&
         wanted.current &&
         AppState.currentState === 'active' &&
-        ['CHAT_NETWORK', 'SESSION_EXPIRED', 'NETWORK', 'TIMEOUT', 'RATE_LIMIT'].includes(
-          state.errorCode ?? '',
-        ) &&
+        [
+          'CHAT_NETWORK',
+          'SESSION_EXPIRED',
+          'RENEWAL_WAIT',
+          'AUTH_UNAVAILABLE',
+          'SERVICE_UNAVAILABLE',
+          'NETWORK',
+          'TIMEOUT',
+          'RATE_LIMIT',
+        ].includes(state.errorCode ?? '') &&
         attempts.current < 6
       ) {
         clearTimeout(reconnectTimer.current);
@@ -508,6 +516,45 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     },
     [storeFor, stop, refreshLocal],
   );
+  const cacheMatchFriends = useCallback(
+    async (players: import('../core/playerTypes').PlayerRef[], observedAt: number) => {
+      const a = active.current;
+      if (!a) return;
+      const store = await storeFor(a),
+        saved = await store.conversations();
+      if (active.current?.puuid !== a.puuid) return;
+      const friends = withCachedFriends(
+        latest.current.state.friends,
+        saved.flatMap((c) => (c.friend ? [c.friend] : [])),
+      );
+      const changes = friends.flatMap((f) => {
+        const p = players.find((p) => p.subject === f.subject && !p.hidden && p.card);
+        return p ? [observedFriend(f, p, observedAt)] : [];
+      });
+      if (!changes.length) return;
+      await store.saveFriends(changes);
+      if (active.current?.puuid === a.puuid) await refreshLocal(a, store);
+    },
+    [storeFor, refreshLocal],
+  );
+  const cacheFriendProfile = useCallback(
+    async (subject: string, player?: import('../core/playerTypes').PlayerRef, observedAt = 0) => {
+      const a = active.current;
+      if (!a) return;
+      const store = await storeFor(a),
+        saved = await store.conversations();
+      if (active.current?.puuid !== a.puuid) return;
+      const old =
+        latest.current.state.friends.find((f) => f.subject === subject) ??
+        saved.find((c) => c.subject === subject)?.friend;
+      if (!old) return;
+      const prior = saved.find((c) => c.subject === subject)?.friend;
+      const merged = withCachedFriends([old], prior ? [prior] : [])[0]!;
+      await store.saveFriends([observedFriend(merged, player, observedAt)]);
+      if (active.current?.puuid === a.puuid) await refreshLocal(a, store);
+    },
+    [storeFor, refreshLocal],
+  );
   const live = value.id === account?.puuid ? value.state : EMPTY_CHAT;
   const saved = local.id === account?.puuid ? local : emptyLocal;
   const combinedMessages = useMemo(() => {
@@ -518,11 +565,26 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         : messages;
     return result;
   }, [saved.messages, live.messages]);
+  const cachedFriends = useMemo(
+    () =>
+      withCachedFriends(
+        live.friends,
+        saved.conversations.flatMap((c) => (c.friend ? [c.friend] : [])),
+      ),
+    [live.friends, saved.conversations],
+  );
   const combined: ChatState = useMemo(
-    () => ({ ...live, messages: combinedMessages, storageError: saved.error ?? live.storageError }),
-    [live, combinedMessages, saved.error],
+    () => ({
+      ...live,
+      friends: cachedFriends,
+      messages: combinedMessages,
+      storageError: saved.error ?? live.storageError,
+    }),
+    [live, cachedFriends, combinedMessages, saved.error],
   );
   return {
+    cacheMatchFriends,
+    cacheFriendProfile,
     chat: combined,
     savedConversations: saved.conversations,
     historyCursors: saved.cursors,

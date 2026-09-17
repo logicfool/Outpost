@@ -1,3 +1,4 @@
+import { NavSurface } from './src/ui/NavSurface';
 import { AccountsModal, type AccountRoute } from './src/ui/AccountsModal';
 import { NavInsetContext } from './src/ui/NavInsets';
 import { listenNotificationTaps } from './src/platform/notifications';
@@ -258,7 +259,7 @@ function AppContent({ model }: { model: AppModel }) {
                 </ScreenTransition>
               </LivePollingContext.Provider>
             </NavInsetContext.Provider>
-            <View
+            <NavSurface
               testID="floating-bottom-nav"
               style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
             >
@@ -287,7 +288,7 @@ function AppContent({ model }: { model: AppModel }) {
                   </Pressable>
                 );
               })}
-            </View>
+            </NavSurface>
           </>
         )}
         {model.message && (

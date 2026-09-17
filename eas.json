@@ -28,7 +28,8 @@
       "distribution": "internal",
       "ios": {
         "withoutCredentials": true,
-        "config": "unsigned-ios.yml"
+        "config": "unsigned-ios.yml",
+        "image": "latest"
       }
     },
     "production": {

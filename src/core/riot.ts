@@ -1,4 +1,13 @@
 import {
+  ownedBuddies,
+  applyBuddyChoices,
+  equippedBuddy,
+  sameBuddy,
+  type BuddyChoice,
+  type OwnedBuddy,
+} from './buddies';
+import { recordRequest } from './diagnostics';
+import {
   weaponChoices,
   preparePreset,
   verifyPreset,
@@ -150,8 +159,27 @@ export class RiotClient {
   private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
   private sessionRejected = false;
+  private rejectionFlight?: Promise<void>;
+  private rejectSession(): Promise<void> {
+    this.sessionRejected = true;
+    this.cache.clear();
+    return (this.rejectionFlight ??= Promise.resolve()
+      .then(() => this.onRejected?.())
+      .catch(() => {
+        recordRequest({
+          at: Date.now(),
+          service: 'Session renewal',
+          method: 'STATE',
+          code: 'REJECTION_SAVE_FAILED',
+          durationMs: 0,
+        });
+      }));
+  }
   needsReauth() {
     return this.sessionRejected;
+  }
+  async settleRejection(): Promise<void> {
+    await this.rejectionFlight;
   }
   constructor(
     private session: Session,
@@ -163,6 +191,7 @@ export class RiotClient {
       session.account.gameName,
       session.account.tagLine,
     ),
+    private onRejected?: () => Promise<void>,
   ) {
     validateSession(session);
   }
@@ -215,11 +244,8 @@ export class RiotClient {
           },
           policy,
         )
-        .catch((error) => {
-          if (safeError(error).status === 401) {
-            this.sessionRejected = true;
-            this.cache.clear();
-          }
+        .catch(async (error) => {
+          if (safeError(error).status === 401) await this.rejectSession();
           throw error;
         });
       if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
@@ -451,16 +477,46 @@ export class RiotClient {
         'https://clientconfig.rpg.riotgames.com/api/v1/config/player?app=Riot%20Client',
         { headers },
       ),
-    ]).catch((error) => {
-      if (safeError(error).status === 401) {
-        this.sessionRejected = true;
-        this.cache.clear();
-      }
+    ]).catch(async (error) => {
+      if (safeError(error).status === 401) await this.rejectSession();
       throw error;
     });
     if (!this.isActive())
       throw new AppError('SESSION_REMOVED', 'The account changed while opening chat.');
     return parseChatBootstrap(this.session, pas.data, config.data);
+  }
+  private async matchIdentity(
+    subject: string,
+    matchId: string,
+  ): Promise<import('./friendLookup').IdentityObservation> {
+    this.scope.player(subject);
+    if (!this.scope.allowsMatch(subject, matchId))
+      throw new AppError('MATCH_SCOPE', 'Open a match from the loaded history.');
+    const raw = await this.read(`/match-details/v1/matches/${uuid(matchId)}`, 24 * 60 * 60000);
+    const detail = normalizeMatchDetail(
+      raw.data,
+      subject,
+      this.catalog,
+      this.session.account.puuid,
+    );
+    const player = detail.players.find((p) => p.subject === subject);
+    return { player: player && !player.hidden ? player : undefined, observedAt: detail.startedAt };
+  }
+  async friendIdentity(subject: string): Promise<import('./friendLookup').IdentityObservation> {
+    subject = uuid(subject);
+    this.scope.player(subject);
+    const raw = await this.read(
+      `/match-history/v1/history/${subject}?startIndex=0&endIndex=1`,
+      60000,
+      'GET',
+      undefined,
+      subject,
+    );
+    const history = normalizeMatches(raw.data, undefined, this.catalog),
+      match = history[0];
+    if (!match) return { observedAt: 0 };
+    this.scope.allowMatch(subject, uuid(match.id));
+    return this.matchIdentity(subject, match.id);
   }
   async playerProfile(subject: string): Promise<PlayerProfile> {
     subject = uuid(subject);
@@ -470,12 +526,28 @@ export class RiotClient {
       section(() => this.matchHistory(0, 20, subject)),
     ]);
     if (this.disposed) throw new AppError('SESSION_REMOVED', 'The account was disconnected.');
+    let observed: import('./friendLookup').IdentityObservation | undefined;
+    if (matches.status === 'ready' && matches.data[0]) {
+      try {
+        observed = await this.matchIdentity(subject, matches.data[0].id);
+      } catch {}
+    }
+    if (this.disposed)
+      throw new AppError('SESSION_REMOVED', 'The account changed while loading this profile.');
+    const player = observed?.player
+      ? {
+          ...observed.player,
+          name: hasPlayerName(observed.player.name) ? observed.player.name : entry.player.name,
+          tag: observed.player.tag || entry.player.tag,
+        }
+      : entry.player;
     return {
-      player: entry.player,
+      player,
       rank,
       matches,
       fetchedAt: Date.now(),
-      identitySource: entry.source,
+      identitySource: observed?.player ? 'match' : entry.source,
+      identityObservedAt: observed?.observedAt,
     };
   }
   private async rawLoadout() {
@@ -543,16 +615,95 @@ export class RiotClient {
       (await this.read(`/store/v1/wallet/${this.session.account.puuid}`, fresh ? 0 : 60000)).data,
     );
   }
+  async saveBuddy(
+    weaponId: string,
+    buddy: BuddyChoice | null,
+    expectedVersion?: number,
+    beforeWrite?: () => void,
+  ): Promise<Loadout> {
+    weaponId = uuid(weaponId);
+    if (this.identityWrite)
+      throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current loadout change.');
+    const run = async () => {
+      const initial = await this.rawLoadout();
+      if (expectedVersion !== undefined && object(initial.raw).Version !== expectedVersion)
+        throw new AppError(
+          'LOADOUT_CONFLICT',
+          'Your loadout changed. Pull down and review it before applying.',
+        );
+      const owned = buddy ? await this.buddyInventory(true) : [];
+      const latest = await this.rawLoadout(),
+        r = object(latest.raw);
+      if (
+        r.Version !== object(initial.raw).Version ||
+        JSON.stringify(r.Guns) !== JSON.stringify(object(initial.raw).Guns)
+      )
+        throw new AppError('LOADOUT_CONFLICT', 'Your equipment changed in another client.');
+      if (
+        !Array.isArray(r.Guns) ||
+        !r.Guns.some((g) => text(object(g).ID).toLowerCase() === weaponId) ||
+        !r.Identity ||
+        typeof r.Incognito !== 'boolean' ||
+        (!Array.isArray(r.ActiveExpressions) && !Array.isArray(r.Sprays))
+      )
+        throw new AppError('SCHEMA', 'The current loadout is incomplete. Nothing was changed.');
+      const Guns = applyBuddyChoices(r.Guns.map(object), new Map([[weaponId, { buddy }]]), owned);
+      const body = {
+        Guns,
+        Identity: r.Identity,
+        Incognito: r.Incognito,
+        ...(r.ActiveExpressions !== undefined ? { ActiveExpressions: r.ActiveExpressions } : {}),
+        ...(r.Sprays !== undefined ? { Sprays: r.Sprays } : {}),
+      };
+      await this.read(latest.path, 0, 'PUT', body, this.session.account.puuid, 'pd', {
+        beforeDispatch: async () => {
+          beforeWrite?.();
+          if (!this.isActive())
+            throw new AppError('SESSION_EXPIRED', 'The session changed before applying.');
+        },
+      });
+      const verified = (await this.read(latest.path, 0)).data;
+      const gun = array(object(verified).Guns).find(
+        (g) => text(object(g).ID).toLowerCase() === weaponId,
+      );
+      if (!gun || !sameBuddy(equippedBuddy(gun), buddy))
+        throw new AppError(
+          'SAVE_UNCONFIRMED',
+          'The buddy change has not been confirmed. Pull down before trying again.',
+        );
+      this.cache.clear();
+      return normalizeLoadout(verified, this.catalog);
+    };
+    const work = run();
+    this.identityWrite = work;
+    try {
+      return await work;
+    } finally {
+      if (this.identityWrite === work) this.identityWrite = undefined;
+    }
+  }
+  async buddyInventory(fresh = true): Promise<OwnedBuddy[]> {
+    const raw = (
+      await this.read(
+        `/store/v1/entitlements/${this.session.account.puuid}/${ITEM_TYPES.buddy}`,
+        fresh ? 0 : 300000,
+      )
+    ).data;
+    return ownedBuddies(raw, this.catalog);
+  }
   async loadoutEditor(): Promise<LoadoutEditor> {
-    const [{ raw }, levels, chromas] = await Promise.all([
+    const [{ raw }, levels, chromas, buddies] = await Promise.all([
       this.rawLoadout(),
       this.ownedIds(ITEM_TYPES.skin),
       this.ownedIds(ITEM_TYPES.chroma),
+      section(() => this.buddyInventory(false)),
     ]);
     return {
       current: weaponChoices(raw),
       ownedLevels: [...levels],
       ownedChromas: [...chromas],
+      ownedBuddies: buddies.status === 'ready' ? buddies.data : [],
+      buddyError: buddies.status === 'error' ? buddies.message : undefined,
       version:
         typeof object(raw).Version === 'number' ? (object(raw).Version as number) : undefined,
     };
@@ -562,9 +713,10 @@ export class RiotClient {
       throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current equipment change to finish.');
     const run = async () => {
       const initial = await this.rawLoadout();
-      const [levels, chromas] = await Promise.all([
+      const [levels, chromas, buddies] = await Promise.all([
         this.ownedIds(ITEM_TYPES.skin),
         this.ownedIds(ITEM_TYPES.chroma),
+        preset.weapons.some((w) => w.buddy) ? this.buddyInventory(true) : Promise.resolve([]),
       ]);
       const latest = await this.rawLoadout();
       if (
@@ -582,6 +734,7 @@ export class RiotClient {
         levels,
         chromas,
         this.catalog,
+        buddies,
       );
       await this.read(latest.path, 0, 'PUT', body);
       const verified = (await this.read(latest.path, 0)).data;

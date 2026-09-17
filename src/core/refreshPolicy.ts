@@ -1,3 +1,4 @@
+import { needsSessionRecovery, sessionSectionNeedsRecovery } from './sessionRecovery';
 import type { LiveGame, Section, Snapshot } from './types';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,7 +44,10 @@ export function nextAutomaticAt(
   gate: RefreshGateState | null,
   now = Date.now(),
 ): number {
-  const due = hasUnloadedSections(snapshot) ? now : storeResetAt(snapshot, now);
+  const due =
+    hasUnloadedSections(snapshot) || needsSessionRecovery(snapshot)
+      ? now
+      : storeResetAt(snapshot, now);
   return Math.max(due, gate?.notBefore ?? 0, gate?.autoNotBefore ?? 0);
 }
 export function snapshotPlan(
@@ -62,7 +66,7 @@ export function snapshotPlan(
     !!previous &&
     previous.store.status === 'ready' &&
     storeResetAt(previous, now) > now &&
-    hasUnloadedSections(previous);
+    (hasUnloadedSections(previous) || needsSessionRecovery(previous));
   return {
     store: true,
     account: true,
@@ -130,7 +134,7 @@ export function shouldFetchSection(
   old: Section<unknown> | undefined,
   missingOnly = false,
 ): boolean {
-  return enabled && (!missingOnly || isUnloadedSection(old));
+  return enabled && (!missingOnly || isUnloadedSection(old) || sessionSectionNeedsRecovery(old));
 }
 
 export function waitingSnapshot(
