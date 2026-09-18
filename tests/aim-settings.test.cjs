@@ -203,3 +203,54 @@ test('an empty or out-of-range edit cannot initiate a settings write', () => {
   );
   assert.throws(() => validateAimEdit({ expectedRevision: 'x', sensitivity: { hipfire: null } }));
 });
+test('active crosshair apply writes requested values even when Riot omits default-valued fields', () => {
+  const doc = document();
+  doc.data.boolSettings = [];
+  doc.data.floatSettings = doc.data.floatSettings.filter(
+    (r) => !r.settingEnum.includes('Crosshair'),
+  );
+  const edit = change(doc);
+  edit.crosshair.profile.primary.bDisplayCenterDot = true;
+  edit.crosshair.profile.primary.centerDotSize = 3;
+  edit.crosshair.profile.primary.innerLines.lineLength = 2;
+  edit.crosshair.profile.primary.innerLines.lineLengthVertical = 2;
+  const out = prepareAimDocument(doc, ID, edit).data;
+  assert.equal(
+    out.boolSettings.find(
+      (r) => r.settingEnum === 'EAresBoolSettingName::CrosshairDisplayCenterDot',
+    ).value,
+    true,
+  );
+  assert.equal(
+    out.floatSettings.find((r) => r.settingEnum === 'EAresFloatSettingName::CrosshairCenterDotSize')
+      .value,
+    3,
+  );
+  assert.equal(
+    out.floatSettings.find(
+      (r) => r.settingEnum === 'EAresFloatSettingName::CrosshairInnerLinesLineLength',
+    ).value,
+    2,
+  );
+  assert.equal(
+    out.floatSettings.find(
+      (r) => r.settingEnum === 'EAresFloatSettingName::CrosshairADSInnerLinesLineLength',
+    ).value,
+    edit.crosshair.profile.aDS.innerLines.lineLength,
+  );
+});
+test('editing an inactive crosshair without selecting it leaves all active mirrors unchanged', () => {
+  const doc = document(),
+    lib = library(doc);
+  lib.profiles.push(crosshairToRiot(defaultCrosshair('Inactive')));
+  doc.data.stringSettings[0].value = JSON.stringify(lib);
+  const edit = {
+      expectedRevision: aimSnapshot(doc, ID).revision,
+      crosshair: { profile: defaultCrosshair('Edited inactive'), index: 1, select: false },
+    },
+    out = prepareAimDocument(doc, ID, edit);
+  assert.equal(library(out).currentProfile, 0);
+  assert.deepEqual(out.data.boolSettings, doc.data.boolSettings);
+  assert.deepEqual(out.data.floatSettings, doc.data.floatSettings);
+  assert.deepEqual(out.data.stringSettings.slice(1), doc.data.stringSettings.slice(1));
+});

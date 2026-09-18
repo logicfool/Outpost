@@ -330,14 +330,14 @@ function mirrorActive(data: Row, p: Crosshair): void {
       HasOutline: l.bHasOutline,
       DisplayCenterDot: l.bDisplayCenterDot,
     }))
-      write('boolSettings', prefix + suffix, value, true);
+      write('boolSettings', prefix + suffix, value);
     for (const [suffix, value] of Object.entries({
       OutlineThickness: l.outlineThickness,
       OutlineOpacity: l.outlineOpacity,
       CenterDotSize: l.centerDotSize,
       CenterDotOpacity: l.centerDotOpacity,
     }))
-      write('floatSettings', prefix + suffix, value, true);
+      write('floatSettings', prefix + suffix, value);
     for (const [part, line] of [
       ['InnerLines', l.innerLines],
       ['OuterLines', l.outerLines],
@@ -348,7 +348,6 @@ function mirrorActive(data: Row, p: Crosshair): void {
           typeof value === 'boolean' ? 'boolSettings' : 'floatSettings',
           prefix + part + suffix,
           value,
-          true,
         );
       }
     }
@@ -356,9 +355,9 @@ function mirrorActive(data: Row, p: Crosshair): void {
   write('stringSettings', 'CrosshairSniperCenterDotColor', color(p.sniper.color));
   write('stringSettings', 'CrosshairSniperCenterDotColorCustom', color(p.sniper.color));
   write('boolSettings', 'CrosshairSniperUseCustomColor', true);
-  write('floatSettings', 'CrosshairSniperCenterDotSize', p.sniper.centerDotSize, true);
-  write('floatSettings', 'CrosshairSniperCenterDotOpacity', p.sniper.centerDotOpacity, true);
-  write('boolSettings', 'CrosshairSniperDisplayCenterDot', p.sniper.bDisplayCenterDot, true);
+  write('floatSettings', 'CrosshairSniperCenterDotSize', p.sniper.centerDotSize);
+  write('floatSettings', 'CrosshairSniperCenterDotOpacity', p.sniper.centerDotOpacity);
+  write('boolSettings', 'CrosshairSniperDisplayCenterDot', p.sniper.bDisplayCenterDot);
 }
 export function prepareAimDocument(doc: AimDocument, id: string, input: AimEdit): AimDocument {
   const edit = validateAimEdit(input),
