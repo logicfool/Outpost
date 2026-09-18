@@ -16,9 +16,16 @@ function fixture(handler) {
       return handler(url, init);
     });
   return {
-    client: new RiotClient(s, http, {}, EMPTY_CATALOG, undefined, async () => {
-      rejected++;
-    }),
+    client: new RiotClient(
+      s,
+      http,
+      { version: async () => 'release-test' },
+      EMPTY_CATALOG,
+      undefined,
+      async () => {
+        rejected++;
+      },
+    ),
     calls,
     rejected: () => rejected,
     session: s,

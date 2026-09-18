@@ -1,3 +1,5 @@
+import { detailedDiagnosticEvent, clearDetailedDiagnostics } from './detailedDiagnostics';
+
 export interface RequestDiagnostic {
   at: number;
   service: string;
@@ -47,6 +49,7 @@ export function mimeLabel(value: string): string {
           : 'missing';
 }
 export function recordRequest(row: RequestDiagnostic): void {
+  detailedDiagnosticEvent('state', row);
   records.push(row);
   if (records.length > 40) records.shift();
 }
@@ -55,6 +58,7 @@ export function requestDiagnostics(): RequestDiagnostic[] {
 }
 export function clearDiagnostics(): void {
   records.length = 0;
+  clearDetailedDiagnostics();
 }
 
 export function recordLogin(stage: string, code: string) {

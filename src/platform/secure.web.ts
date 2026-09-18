@@ -16,3 +16,5 @@ export function randomHex(): string {
 export function randomId(): string {
   return crypto.randomUUID();
 }
+
+export const preferencesVault = vault;

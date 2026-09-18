@@ -467,6 +467,22 @@ export class RiotClient {
     }));
     return detail;
   }
+  private async aimHeaders() {
+    const version = await this.publicClient.version();
+    if (!this.isActive())
+      throw new AppError(
+        'AIM_AUTH_EXPIRY',
+        'The settings authorization expired. Pull down to renew it.',
+      );
+    return {
+      Authorization: `Bearer ${this.session.accessToken}`,
+      'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+      'X-Riot-ClientPlatform': PLATFORM,
+      'X-Riot-ClientVersion': version,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+  }
   async readAimDocument(): Promise<AimDocument> {
     if (!this.isActive())
       throw new AppError('SESSION_EXPIRED', 'Renew the account before loading aim settings.');
@@ -474,13 +490,10 @@ export class RiotClient {
       .json(
         aimOrigin(this.session.account.region) + '/playerPref/v3/getPreference/Ares.PlayerSettings',
         {
-          headers: {
-            Authorization: `Bearer ${this.session.accessToken}`,
-            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
-            Accept: 'application/json',
-          },
+          headers: await this.aimHeaders(),
         },
         {
+          aimSettings: true,
           maxResponseBytes: 512 * 1024,
           beforeDispatch: async () => {
             if (!this.isActive())
@@ -489,6 +502,7 @@ export class RiotClient {
         },
       )
       .catch(async (reason) => {
+        if (safeError(reason).code.startsWith('AIM_')) throw reason;
         if (safeError(reason).status === 401)
           throw new AppError(
             'AIM_AUTH',
@@ -519,15 +533,11 @@ export class RiotClient {
         aimOrigin(this.session.account.region) + '/playerPref/v3/savePreference',
         {
           method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${this.session.accessToken}`,
-            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
+          headers: await this.aimHeaders(),
           body: JSON.stringify(payload),
         },
         {
+          aimSettings: true,
           allowEmptyJson: true,
           maxResponseBytes: 512 * 1024,
           beforeDispatch: async () => {
@@ -538,6 +548,7 @@ export class RiotClient {
         },
       )
       .catch(async (reason) => {
+        if (safeError(reason).code.startsWith('AIM_')) throw reason;
         if (safeError(reason).status === 401)
           throw new AppError(
             'AIM_AUTH',

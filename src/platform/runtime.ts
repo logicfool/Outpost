@@ -1,3 +1,5 @@
+import { CredentialQueue } from '../core/credentialQueue';
+import { PreferenceSession } from '../core/preferenceSession';
 import { AimService, type AimConsent } from '../core/aimService';
 import type { AimEdit, AimState } from '../core/aimTypes';
 import { FriendLookupGate } from '../core/friendLookup';
@@ -54,7 +56,7 @@ import { AppError, safeError, uuid } from '../core/validation';
 import { reauthenticateWithCookies, sessionActive } from '../core/auth';
 import { openRepository } from './storage';
 import type { Repository } from './storage.types';
-import { vault, randomHex, randomId } from './secure';
+import { vault, preferencesVault, randomHex, randomId } from './secure';
 import { cancelAccountNotifications, updateStoreNotifications } from './notifications';
 export class Runtime {
   readonly http = new HttpClient(nativeFetcher);
@@ -83,13 +85,78 @@ export class Runtime {
     private now: () => number = Date.now,
   ) {}
   private aimService?: AimService;
+  private credentialQueue = new CredentialQueue();
+  private preferenceSession?: PreferenceSession;
   private aim() {
     return (this.aimService ??= new AimService(
       this.repository,
-      (id) => this.client(id),
+      (id) => this.preferenceClient(id),
       this.now,
       randomId,
     ));
+  }
+  private async preferenceClient(id: string): Promise<import('../core/aimService').AimApi> {
+    const guard = this.aimGuard(id);
+    guard();
+    await this.client(id);
+    guard();
+    const scoped = await this.credentialQueue.run(id, async () => {
+      guard();
+      const auth = (this.preferenceSession ??= new PreferenceSession(
+        vault,
+        preferencesVault,
+        {
+          read: (key) => this.repository.refreshGate(key, 'aimAuth'),
+          save: (key, value) => this.repository.saveRefreshGate(key, 'aimAuth', value),
+        },
+        this.http,
+        nativeFetcher,
+        () => ({ state: randomHex(), nonce: randomHex(), createdAt: Date.now() }),
+        Platform.OS === 'android' ? 'expo-android' : 'fetch-standard',
+        this.now,
+      ));
+      return auth.get(id, guard);
+    });
+    guard();
+    const client = new RiotClient(scoped, this.http, this.publicClient, this.catalog);
+    const request = async <T>(work: () => Promise<T>): Promise<T> => {
+      guard();
+      try {
+        const value = await work();
+        guard();
+        return value;
+      } catch (error) {
+        if (safeError(error).status === 401)
+          await this.credentialQueue
+            .run(id, async () => {
+              guard();
+              const saved = await preferencesVault.read(id);
+              guard();
+              if (saved?.accessToken === scoped.accessToken)
+                await preferencesVault.write({ ...saved, accessRejected: true });
+            })
+            .catch(() =>
+              recordRequest({
+                at: this.now(),
+                service: 'Aim authorization',
+                method: 'STATE',
+                code: 'AIM_REJECTION_CHECKPOINT_FAILED',
+                durationMs: 0,
+              }),
+            );
+        throw error;
+      }
+    };
+    return {
+      readAimDocument: () => request(() => client.readAimDocument()),
+      writeAimDocument: (data, selection) =>
+        request(() =>
+          client.writeAimDocument(data, () => {
+            guard();
+            selection();
+          }),
+        ),
+    };
   }
   private aimGuard(id: string, selection?: () => void) {
     const generation = this.generations.get(id) ?? 0;
@@ -239,6 +306,16 @@ export class Runtime {
       initializing = this.clientFlights.get(id);
     this.linkingAccounts.add(id);
     try {
+      await this.credentialQueue.drain(id);
+      await preferencesVault?.remove(id).catch(() =>
+        recordRequest({
+          at: this.now(),
+          service: 'Aim authorization',
+          method: 'LOCAL',
+          code: 'AIM_CACHE_CLEAR_FAILED',
+          durationMs: 0,
+        }),
+      );
       await this.aimService?.drain(id);
       await this.purchaseFlights.get(id)?.catch(() => {});
       await this.purchaseCheckFlights.get(id)?.work.catch(() => {});
@@ -301,7 +378,9 @@ export class Runtime {
     const pending = this.clientFlights.get(id);
     if (pending) return pending;
     const generation = this.generations.get(id) ?? 0;
-    const work = (async () => {
+    const work = this.credentialQueue.run(id, async () => {
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('SESSION_REMOVED', 'The account changed.');
       let session = await vault.read(id);
       if (!session)
         throw new AppError(
@@ -435,29 +514,30 @@ export class Runtime {
         this.publicClient,
         this.catalog,
         scope,
-        async () => {
-          if (generation !== (this.generations.get(id) ?? 0)) return;
-          this.rejectedSessions.add(id);
-          const saved = await vault.read(id);
-          if (
-            !saved ||
-            saved.accessToken !== session!.accessToken ||
-            generation !== (this.generations.get(id) ?? 0)
-          )
-            return;
-          await this.persistSession({ ...saved, accessRejected: true });
-          recordRequest({
-            at: this.now(),
-            service: 'Session renewal',
-            method: 'STATE',
-            code: 'REJECTED_TOKEN_SAVED',
-            durationMs: 0,
-          });
-        },
+        () =>
+          this.credentialQueue.run(id, async () => {
+            if (generation !== (this.generations.get(id) ?? 0)) return;
+            this.rejectedSessions.add(id);
+            const saved = await vault.read(id);
+            if (
+              !saved ||
+              saved.accessToken !== session!.accessToken ||
+              generation !== (this.generations.get(id) ?? 0)
+            )
+              return;
+            await this.persistSession({ ...saved, accessRejected: true });
+            recordRequest({
+              at: this.now(),
+              service: 'Session renewal',
+              method: 'STATE',
+              code: 'REJECTED_TOKEN_SAVED',
+              durationMs: 0,
+            });
+          }),
       );
       this.clients.set(id, client);
       return client;
-    })();
+    });
     this.clientFlights.set(id, work);
     try {
       return await work;
@@ -1254,6 +1334,7 @@ export class Runtime {
         ].filter(Boolean);
         this.invalidate(id);
         await Promise.allSettled(pending);
+        await this.credentialQueue.drain(id);
         const session = await vault.read(id);
         if (!session)
           throw new AppError(
@@ -1303,6 +1384,8 @@ export class Runtime {
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
     await this.aimService?.drain(id);
+    await this.credentialQueue.drain(id);
+    await preferencesVault?.remove(id);
     await cancelAccountNotifications(id);
     await removeChatStorage(id);
     await vault.remove(id);

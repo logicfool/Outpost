@@ -12,6 +12,22 @@ export const vault = new SessionVault(
   },
   () => Crypto.randomUUID(),
 );
+
+export const preferencesVault = new SessionVault(
+  {
+    get: (key) =>
+      SecureStore.getItemAsync(key.replace('outpost.session.', 'outpost.preferences.'), options),
+    set: (key, value) =>
+      SecureStore.setItemAsync(
+        key.replace('outpost.session.', 'outpost.preferences.'),
+        value,
+        options,
+      ),
+    remove: (key) =>
+      SecureStore.deleteItemAsync(key.replace('outpost.session.', 'outpost.preferences.'), options),
+  },
+  () => Crypto.randomUUID(),
+);
 export function randomHex(): string {
   return Array.from(Crypto.getRandomBytes(32), (byte) => byte.toString(16).padStart(2, '0')).join(
     '',

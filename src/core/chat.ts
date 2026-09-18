@@ -1,3 +1,4 @@
+import { detailedDiagnosticEvent } from './detailedDiagnostics';
 import type { Catalog } from './types';
 import type {
   ChatBootstrap,
@@ -82,6 +83,7 @@ export class RiotChat {
   private sendRaw(value: string) {
     const epoch = this.generation;
     if (!this.socket) return;
+    detailedDiagnosticEvent('xmpp-out', { stanza: value });
     void this.socket.write(value).catch(() => {
       if (epoch === this.generation)
         this.fail('The chat connection could not send data. Reconnect to retry.');
@@ -151,6 +153,7 @@ export class RiotChat {
   private receive(node: XmlNode) {
     const c = this.credentials;
     if (!c) return;
+    detailedDiagnosticEvent('xmpp-in', { stanza: node });
     const name = node.name,
       type = node.attrs.type,
       id = node.attrs.id;

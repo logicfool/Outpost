@@ -1829,7 +1829,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <PurchaseHistory model={model} />
         </View>
         <SectionHeader title="Data" />
-        <DiagnosticsPanel />
+        <DiagnosticsPanel model={model} />
         <Button
           title="Clear cached data"
           secondary

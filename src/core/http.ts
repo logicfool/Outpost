@@ -1,3 +1,5 @@
+import { detailedDiagnosticEvent } from './detailedDiagnostics';
+import { aimAccessError } from './aimAccess';
 import { mimeLabel, recordRequest, serviceLabel } from './diagnostics';
 import { AppError } from './validation';
 import { purchaseRejection, purchaseHttpError } from './purchaseErrors';
@@ -10,6 +12,7 @@ export interface JsonResponse {
   status?: number;
 }
 export interface RequestPolicy {
+  aimSettings?: boolean;
   beforeDispatch?(): Promise<void>;
   allowEmptyJson?: boolean;
   purchase?: boolean;
@@ -103,13 +106,21 @@ export class HttpClient {
             undefined,
             401,
           );
-        if (response.status === 403)
+        if (response.status === 403) {
+          if (policy.aimSettings) {
+            let denial = '';
+            try {
+              denial = await readBoundedText(response, 65536);
+            } catch {}
+            throw aimAccessError(response.headers, denial);
+          }
           throw new AppError(
             'ACCESS_DENIED',
             'Riot denied this request. Reconnect the account; access may be restricted.',
             undefined,
             403,
           );
+        }
         if (response.status === 429) {
           const header = response.headers.get('retry-after');
           const seconds =
@@ -191,6 +202,21 @@ export class HttpClient {
       };
     } catch (error) {
       code = error instanceof AppError ? error.code : 'UNKNOWN';
+      detailedDiagnosticEvent('http-processing-error', {
+        url,
+        method: init.method ?? 'GET',
+        status,
+        mime,
+        shape,
+        code,
+        retryAt: error instanceof AppError ? error.retryAt : undefined,
+        startedAt: started,
+        durationMs: Math.max(0, this.now() - started),
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message, stack: error.stack }
+            : String(error),
+      });
       throw error;
     } finally {
       recordRequest({

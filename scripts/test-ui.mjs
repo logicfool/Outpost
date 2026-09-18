@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.8.0');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.8.1');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -62,11 +62,18 @@ const revealHistory = async () => {
   await page.waitForTimeout(350);
   const dialog = page.getByRole('dialog');
   const area = (await dialog.count()) ? dialog.last() : page;
+  const settledScroll = async (locator) => {
+    try {
+      await locator.scrollIntoViewIfNeeded();
+    } catch (error) {
+      if (!String(error).includes('not attached to the DOM')) throw error;
+    }
+  };
   const skeleton = area.locator('[data-testid^="match-skeleton-"]').first();
-  if (await skeleton.count()) await skeleton.scrollIntoViewIfNeeded();
+  if (await skeleton.count()) await settledScroll(skeleton);
   else {
     const artwork = area.locator('[data-testid^="match-artwork-skeleton-"]').first();
-    if (await artwork.count()) await artwork.scrollIntoViewIfNeeded();
+    if (await artwork.count()) await settledScroll(artwork);
   }
 };
 const click = async (name) => {
@@ -355,11 +362,8 @@ try {
   await check('connection diagnostics are accessible from settings', async () => {
     await tab('Settings');
     await click('Connection diagnostics');
-    await page
-      .getByText('Local request metadata only. No tokens, IDs, names or message contents.', {
-        exact: true,
-      })
-      .waitFor();
+    await page.getByText(/Detailed capture is off/).waitFor();
+    await page.getByRole('button', { name: 'Export diagnostics (JSON)', exact: true }).waitFor();
     await click('Hide connection diagnostics');
   });
   await check('mobile layout has no horizontal overflow at 320 and 430 pixels', async () => {
