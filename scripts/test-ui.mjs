@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.8.1');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.0');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -259,11 +259,18 @@ try {
     await click('Open chats');
     if (await page.getByRole('button', { name: 'Connect Riot chat', exact: true }).isVisible())
       await click('Connect Riot chat');
-    await page.getByRole('tab', { name: 'Online · 2', exact: true }).waitFor();
+    await tab('Online');
+    await page
+      .getByRole('button', { name: /^Open conversation with / })
+      .first()
+      .waitFor();
     await shot('friends-online');
-    await tab('All friends · 5');
+    await tab('All friends');
     await shot('friends-all');
-    await page.getByRole('button', { name: 'Message', exact: true }).first().click();
+    await page
+      .getByRole('button', { name: /^Open conversation with / })
+      .first()
+      .click();
     await page
       .getByRole('textbox', { name: 'Message text', exact: true })
       .fill('Hello from the Outpost demo 🦊');
@@ -437,9 +444,9 @@ try {
     await click('Open chats');
     if (await page.getByRole('button', { name: 'Disconnect chat', exact: true }).isVisible())
       await click('Disconnect chat');
-    await tab('Saved · 1');
+    await tab('Recent');
     await page
-      .getByRole('button', { name: /^Message/ })
+      .getByRole('button', { name: /^Open conversation with / })
       .first()
       .click();
     await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
@@ -453,11 +460,16 @@ try {
     await click('Sync this conversation now');
     await page.getByText('History synced.', { exact: true }).waitFor();
     await click('Back from chat settings');
+    await click('Conversation settings');
     await click('Delete saved conversation');
     await click('Keep messages');
+    await click('Back from chat settings');
     await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
+    await click('Conversation settings');
     await click('Delete saved conversation');
     await click('Delete local messages');
+    await page.getByText('Local messages deleted.', { exact: true }).waitFor();
+    await click('Back from chat settings');
     await page.getByText('No messages saved yet', { exact: true }).waitFor();
     await click('Back from conversation');
     await click('Back from friends');
@@ -503,7 +515,7 @@ try {
     'refresh policy is explicit in Settings and store expiry is a local countdown',
     async () => {
       await tab('Settings');
-      await page.getByText('Every 60 seconds', { exact: true }).waitFor();
+      await page.getByText('Every 5 seconds in game', { exact: true }).waitFor();
       await page.getByText('When the daily timer resets', { exact: true }).waitFor();
       await page.getByText('Cached for 24 hours', { exact: true }).waitFor();
       await shot('refresh-policy');
@@ -709,7 +721,7 @@ try {
     await page.waitForFunction(
       () => {
         const v = document.querySelector('video');
-        return v && v.currentTime > 0.25 && !v.paused && v.muted;
+        return v && v.currentTime > 0.25 && !v.paused && !v.muted;
       },
       null,
       { timeout: 45000 },

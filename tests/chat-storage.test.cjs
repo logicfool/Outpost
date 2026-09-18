@@ -184,3 +184,18 @@ test('sparse roster reconnect preserves the saved player card on disk', async (t
   assert.equal(f.card.id, ID);
   assert.equal(f.cardObservedAt, 100);
 });
+test('conversation summaries retain the latest message text and order after reopening', async (t) => {
+  const s = await fixture(t);
+  await s.save(message(1, { subject: OTHER, at: 1000, body: 'Older' }));
+  await s.save(message(2, { subject: ID, at: 2000, body: 'Latest' }));
+  const rows = await s.conversations();
+  assert.deepEqual(
+    rows.map((r) => r.subject),
+    [ID, OTHER],
+  );
+  assert.equal(rows[0].lastMessage.body, 'Latest');
+  await s.save(message(3, { subject: OTHER, at: 3000, body: 'Now first' }));
+  assert.equal((await s.conversations())[0].lastMessage.body, 'Now first');
+  await s.markRead(OTHER, 4000);
+  assert.equal((await s.conversations())[0].unread, 0);
+});

@@ -3,15 +3,30 @@ import type { LiveGame, Section, Snapshot } from './types';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const LIVE_POLL_MS = 60_000;
+export const ACTIVE_GAME_POLL_MS = 5_000;
+export const PROFILE_POLL_MS = 60_000;
+export function livePollInterval(game?: LiveGame): number {
+  return game && ['in_game', 'agent_select'].includes(game.state)
+    ? ACTIVE_GAME_POLL_MS
+    : LIVE_POLL_MS;
+}
 export const MANUAL_COOLDOWN_MS = 60_000;
 export const RESET_GRACE_MS = 2_000;
 export type RefreshReason = 'auto' | 'manual';
-export type RefreshPurpose = 'aimAuth' | 'sync' | 'live' | 'equipment';
+export type RefreshPurpose =
+  `history:${string}` | 'profile' | 'history' | 'aimAuth' | 'sync' | 'live' | 'equipment';
 export interface RefreshGateState {
   attemptedAt: number;
   notBefore: number;
   autoNotBefore?: number;
   failures: number;
+  lastMatchId?: string;
+  lastState?: string;
+  postMatchId?: string;
+  postMatchAttempts?: number;
+  nextIndex?: number;
+  historyHeadId?: string;
+  historyExhausted?: boolean;
   sample?: Section<LiveGame>;
   equipment?: Section<import('./matchTypes').LiveEquipment>;
   matchId?: string;
@@ -169,4 +184,21 @@ export function failedSnapshot(
     if (isUnloadedSection(next[key])) Object.assign(next, { [key]: { status: 'error', ...issue } });
   }
   return next;
+}
+
+export function completedLiveTransition(
+  previous: Section<LiveGame> | undefined,
+  next: Section<LiveGame>,
+): string | undefined {
+  if (
+    previous?.status !== 'ready' ||
+    previous.data.state !== 'in_game' ||
+    !previous.data.matchId ||
+    next.status !== 'ready' ||
+    next.data.detailError
+  )
+    return;
+  return next.data.state !== 'in_game' || next.data.matchId !== previous.data.matchId
+    ? previous.data.matchId
+    : undefined;
 }

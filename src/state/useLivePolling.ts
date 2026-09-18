@@ -1,55 +1,103 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { AppState } from 'react-native';
-import { LIVE_POLL_MS } from '../core/refreshPolicy';
+import { AppState, Platform } from 'react-native';
+import { LIVE_POLL_MS, PROFILE_POLL_MS } from '../core/refreshPolicy';
 import type { AppModel } from './useApp';
 export const LivePollingContext = createContext(true);
 
 export function useLivePolling(model: AppModel) {
-  const enabled = useContext(LivePollingContext);
-  const [busy, setBusy] = useState(false),
+  const enabled = useContext(LivePollingContext),
+    [busy, setBusy] = useState(false),
+    [refreshing, setRefreshing] = useState(false),
     manual = useRef<() => void>(() => {});
   useEffect(() => {
     if (!enabled) return;
     let stopped = false,
-      running = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      clearTimeout(timer);
-      if (stopped || running || AppState.currentState !== 'active') return;
-      running = true;
+      focused = true,
+      queued = false;
+    const running = { live: false, profile: false };
+    const timers: Partial<Record<'live' | 'profile', ReturnType<typeof setTimeout>>> = {};
+    const visible = () => !stopped && focused && AppState.currentState === 'active';
+    const work = async (kind: 'live' | 'profile') => {
+      clearTimeout(timers[kind]);
+      if (!visible() || running[kind]) return;
+      if (kind === 'profile' && typeof model.refreshProfile !== 'function') return;
+      running[kind] = true;
       setBusy(true);
-      let next = Date.now() + LIVE_POLL_MS;
+      let next = Date.now() + (kind === 'live' ? LIVE_POLL_MS : PROFILE_POLL_MS);
       try {
-        const result = await model.refreshLive();
-        next =
-          result.status === 'ready'
-            ? (result.data.nextCheckAt ?? next)
-            : Math.max(next, result.retryAt ?? 0);
+        if (kind === 'live') {
+          const result = await model.refreshLive();
+          next =
+            result.status === 'ready'
+              ? (result.data.nextCheckAt ?? next)
+              : Math.max(next, result.retryAt ?? 0);
+        } else {
+          const result = await model.refreshProfile();
+          next = result?.profileNextCheckAt ?? next;
+        }
       } catch {
         next = Date.now() + 2 * LIVE_POLL_MS;
       } finally {
-        running = false;
+        running[kind] = false;
         if (!stopped) {
-          setBusy(false);
-          if (AppState.currentState === 'active')
-            timer = setTimeout(() => void tick(), Math.max(1000, next - Date.now()));
+          setBusy(running.live || running.profile);
+          if (visible())
+            timers[kind] = setTimeout(
+              () => void work(kind),
+              Math.min(2147480000, Math.max(1000, next - Date.now())),
+            );
         }
       }
     };
-    manual.current = () => {
-      void tick();
+    const resume = () => {
+      if (queued) return;
+      queued = true;
+      void Promise.resolve().then(() => {
+        queued = false;
+        if (visible()) {
+          void work('live');
+          void work('profile');
+        }
+      });
     };
-    void tick();
-    const listener = AppState.addEventListener('change', (state) => {
-      clearTimeout(timer);
-      if (state === 'active') void tick();
+    manual.current = () => {
+      if (!visible()) return;
+      setRefreshing(true);
+      void Promise.allSettled([work('live'), work('profile')]).finally(() => {
+        if (!stopped) setRefreshing(false);
+      });
+    };
+    resume();
+    const cancel = () => {
+      clearTimeout(timers.live);
+      clearTimeout(timers.profile);
+    };
+    const change = AppState.addEventListener('change', (state) => {
+      cancel();
+      if (state === 'active') resume();
     });
+    const blur =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('blur', () => {
+            focused = false;
+            cancel();
+          })
+        : undefined;
+    const focus =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('focus', () => {
+            focused = true;
+            resume();
+          })
+        : undefined;
     return () => {
       stopped = true;
-      clearTimeout(timer);
-      listener.remove();
+      cancel();
+      change.remove();
+      blur?.remove();
+      focus?.remove();
       manual.current = () => {};
     };
-  }, [enabled, model.active?.puuid, model.refreshLive]);
-  return { busy, refresh: useCallback(() => manual.current(), []) };
+  }, [enabled, model.active?.puuid, model.refreshLive, model.refreshProfile]);
+  return { busy, refreshing, refresh: useCallback(() => manual.current(), []) };
 }

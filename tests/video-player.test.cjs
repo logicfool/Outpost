@@ -20,20 +20,23 @@ const source = ts.transpileModule(
   },
 ).outputText;
 const tick = () => new Promise((r) => setImmediate(r));
-function harness(autoplay = true) {
+function harness(autoplay = true, sound = true, platform = 'ios') {
   let appState,
     renderer,
     plays = 0,
     loads = 0,
     refreshes = 0;
   const players = [];
+  const events = new Map();
   const app = {
     currentState: 'active',
-    addEventListener(_, fn) {
-      appState = fn;
+    addEventListener(event, fn) {
+      events.set(event, fn);
+      if (event === 'change') appState = fn;
       return {
         remove() {
-          appState = undefined;
+          events.delete(event);
+          if (event === 'change') appState = undefined;
         },
       };
     },
@@ -97,7 +100,7 @@ function harness(autoplay = true) {
           ? {
               AppState: app,
               ActivityIndicator: 'Spinner',
-              Platform: { OS: 'ios' },
+              Platform: { OS: platform },
               Text: 'Text',
               View: 'View',
             }
@@ -120,6 +123,7 @@ function harness(autoplay = true) {
   const props = {
     uri: 'https://valorant.dyn.riotcdn.net/x/videos/fixture.mp4',
     autoplay,
+    sound,
     refresh: async () => {
       refreshes++;
     },
@@ -146,7 +150,14 @@ function harness(autoplay = true) {
     },
     async state(value) {
       await act(async () => {
+        app.currentState = value;
         appState(value);
+        await tick();
+      });
+    },
+    async focus(value) {
+      await act(async () => {
+        events.get(value ? 'focus' : 'blur')?.();
         await tick();
       });
     },
@@ -180,12 +191,12 @@ function harness(autoplay = true) {
     },
   };
 }
-test('autoplay waits for asynchronous source readiness and starts muted', async (t) => {
+test('autoplay waits for asynchronous source readiness and starts with sound', async (t) => {
   const h = harness();
   await h.mount();
   t.after(() => h.close());
   assert.ok(h.plays > 0);
-  assert.equal(h.player.muted, true);
+  assert.equal(h.player.muted, false);
   assert.equal(h.loads, 1);
   assert.equal(h.player.lastSource.useCaching, true);
   assert.ok(!h.player.lastSource.headers.Authorization);
@@ -234,5 +245,36 @@ test('closing a preview does not call a player already released by the Expo hook
   const h = harness();
   await h.mount();
   await h.close();
+  assert.equal(h.player.playing, false);
+});
+for (const platform of ['ios', 'android'])
+  test(platform + ': sound opt-out is respected without preventing autoplay', async (t) => {
+    const h = harness(true, false, platform);
+    await h.mount();
+    t.after(() => h.close());
+    assert.equal(h.player.muted, true);
+    assert.ok(h.plays > 0);
+  });
+for (const platform of ['ios', 'android'])
+  test(platform + ': new previews start audible when video sound is enabled', async (t) => {
+    const h = harness(true, true, platform);
+    await h.mount();
+    t.after(() => h.close());
+    assert.equal(h.player.muted, false);
+    assert.equal(h.player.volume, 1);
+    assert.equal(h.player.audioMixingMode, 'mixWithOthers');
+  });
+test('Android system-dialog focus loss pauses audible playback without losing user intent', async (t) => {
+  const h = harness(true, true, 'android');
+  await h.mount();
+  t.after(() => h.close());
+  assert.equal(h.player.playing, true);
+  await h.focus(false);
+  assert.equal(h.player.playing, false);
+  await h.focus(true);
+  assert.equal(h.player.playing, true);
+  await h.press('Pause video');
+  await h.focus(false);
+  await h.focus(true);
   assert.equal(h.player.playing, false);
 });

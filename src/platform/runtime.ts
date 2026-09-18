@@ -1,3 +1,5 @@
+import { mergeSnapshot } from '../core/snapshot';
+import { livePollInterval, PROFILE_POLL_MS, completedLiveTransition } from '../core/refreshPolicy';
 import { CredentialQueue } from '../core/credentialQueue';
 import { PreferenceSession } from '../core/preferenceSession';
 import { AimService, type AimConsent } from '../core/aimService';
@@ -321,9 +323,16 @@ export class Runtime {
       await this.purchaseCheckFlights.get(id)?.work.catch(() => {});
       this.invalidate(id);
       await Promise.allSettled(
-        [initializing, this.flights.get(id), this.identityFlights.get(id)].filter(
-          (p): p is Promise<any> => !!p,
-        ),
+        [
+          initializing,
+          this.flights.get(id),
+          this.identityFlights.get(id),
+          this.profileFlights.get(id),
+          this.liveFlights.get(id),
+          ...[...this.archivedReportFlights]
+            .filter(([key]) => key.startsWith(id + ':'))
+            .map(([, work]) => work),
+        ].filter((p): p is Promise<any> => !!p),
       );
       let oldSession: Session | null = null;
       if (old) {
@@ -617,6 +626,8 @@ export class Runtime {
         await this.loadCatalog(reason === 'manual');
         const client = await this.client(id);
         next = await client.snapshot(previous, snapshotPlan(previous, reason, this.now()));
+        if (next.matches.status === 'ready' && !next.matches.warning)
+          await this.repository.saveArchivedMatches?.(id, id, next.matches.data);
       } catch (reason) {
         const e = safeError(reason);
         if (generation !== (this.generations.get(id) ?? 0)) throw e;
@@ -664,6 +675,26 @@ export class Runtime {
       };
       await this.repository.saveRefreshGate(id, 'sync', completedGate);
       next.nextAutoRefreshAt = nextAutomaticAt(next, completedGate, this.now());
+      const profileKeys = ['rank', 'xp', 'loadout', 'progression', 'matches'] as const;
+      if (
+        profileKeys.some((key) => {
+          const current = next[key],
+            prior = previous?.[key];
+          return (
+            current.status === 'ready' &&
+            (prior?.status !== 'ready' || current.fetchedAt !== prior.fetchedAt)
+          );
+        })
+      ) {
+        const profileGate = await this.repository.refreshGate(id, 'profile');
+        await this.repository.saveRefreshGate(id, 'profile', {
+          ...profileGate,
+          attemptedAt: now,
+          notBefore: Math.max(profileGate?.notBefore ?? 0, this.now() + PROFILE_POLL_MS, retryAt),
+          failures: profileGate?.failures ?? 0,
+        });
+      }
+
       if (storeError && !next.refreshIssue)
         next.refreshIssue = {
           code: storeError.code,
@@ -712,6 +743,294 @@ export class Runtime {
       if (this.flights.get(id) === work) this.flights.delete(id);
     }
   }
+  private profileFlights = new Map<string, Promise<Snapshot | null>>();
+  async profile(id: string): Promise<Snapshot | null> {
+    const flight = this.profileFlights.get(id);
+    if (flight) return flight;
+    const generation = this.generations.get(id) ?? 0;
+    const guard = () => {
+      if (
+        generation !== (this.generations.get(id) ?? 0) ||
+        this.signingOut.has(id) ||
+        this.linkingAccounts.has(id)
+      )
+        throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+    };
+    const run = async () => {
+      await this.flights.get(id);
+      guard();
+      const gate = await this.repository.refreshGate(id, 'profile');
+      guard();
+      const now = this.now();
+      if ((gate?.notBefore ?? 0) > now) return null;
+      const previous = await this.repository.snapshot(id);
+      guard();
+      if (!previous) return null;
+      const reservation = {
+        ...gate,
+        attemptedAt: now,
+        notBefore: now + PROFILE_POLL_MS,
+        failures: gate?.failures ?? 0,
+      };
+      await this.repository.saveRefreshGate(id, 'profile', reservation);
+      guard();
+      let next: Snapshot;
+      try {
+        next = await (
+          await this.client(id)
+        ).snapshot(previous, { store: false, account: true, collection: false, live: false });
+      } catch (reason) {
+        const e = safeError(reason);
+        next = {
+          ...previous,
+          profileIssue: { code: e.code, message: e.message, retryAt: e.retryAt },
+        };
+      }
+      guard();
+      if (next.matches.status === 'ready' && !next.matches.warning)
+        await this.repository.saveArchivedMatches(id, id, next.matches.data);
+      guard();
+      const errors = ['rank', 'xp', 'progression', 'loadout', 'matches']
+        .map((key) => next[key as keyof Snapshot] as Section<unknown>)
+        .map((s) => (s.status === 'error' ? s : s.warning))
+        .filter(Boolean);
+      const issue = errors[0] ?? next.profileIssue,
+        failures = issue ? (gate?.failures ?? 0) + 1 : 0;
+      const notBefore = Math.max(
+        this.now() + (issue ? failureDelay(failures, PROFILE_POLL_MS) : PROFILE_POLL_MS),
+        ...errors.map((e) => e?.retryAt ?? 0),
+        next.profileIssue?.retryAt ?? 0,
+      );
+      next.profileNextCheckAt = notBefore;
+      next.profileIssue = issue
+        ? { code: issue.code, message: issue.message, retryAt: notBefore }
+        : undefined;
+      const latest = await this.repository.snapshot(id);
+      guard();
+      const merged = mergeSnapshot(latest, next);
+      merged.store = latest?.store ?? previous.store;
+      merged.wallet = latest?.wallet ?? previous.wallet;
+      merged.collection = latest?.collection ?? previous.collection;
+      merged.liveGame = latest?.liveGame ?? previous.liveGame;
+      merged.nextAutoRefreshAt = latest?.nextAutoRefreshAt ?? previous.nextAutoRefreshAt;
+      merged.refreshIssue = latest?.refreshIssue;
+      await this.repository.saveSnapshot(merged);
+      guard();
+      const postMatchFound =
+        gate?.postMatchId &&
+        merged.matches.status === 'ready' &&
+        merged.matches.data.some((m) => m.id === gate.postMatchId);
+      await this.repository.saveRefreshGate(id, 'profile', {
+        ...reservation,
+        notBefore,
+        failures,
+        postMatchId: postMatchFound ? undefined : gate?.postMatchId,
+        postMatchAttempts: postMatchFound
+          ? undefined
+          : gate?.postMatchId
+            ? (gate.postMatchAttempts ?? 0) + 1
+            : undefined,
+        lastMatchId: merged.liveGame.status === 'ready' ? merged.liveGame.data.matchId : undefined,
+        lastState: merged.liveGame.status === 'ready' ? merged.liveGame.data.state : undefined,
+      });
+      if (postMatchFound)
+        recordRequest({
+          at: this.now(),
+          service: 'Profile refresh',
+          method: 'SYNC',
+          code: 'POST_MATCH_SYNCED',
+          durationMs: 0,
+        });
+      recordRequest({
+        at: this.now(),
+        service: 'Profile refresh',
+        method: 'SYNC',
+        code: issue ? 'PROFILE_RETRY' : 'PROFILE_UPDATED',
+        durationMs: this.now() - now,
+      });
+      return this.repository.snapshot(id);
+    };
+    const work = run();
+    this.profileFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.profileFlights.get(id) === work) this.profileFlights.delete(id);
+    }
+  }
+  private archivedReportFlights = new Map<string, Promise<import('../core/types').MatchDetail>>();
+  async matchReport(
+    id: string,
+    matchId: string,
+    subject = id,
+  ): Promise<import('../core/types').MatchDetail> {
+    id = uuid(id);
+    subject = uuid(subject);
+    matchId = uuid(matchId);
+    const key = `${id}:${subject}:${matchId}`;
+    const flight = this.archivedReportFlights.get(key);
+    if (flight) return flight;
+    const generation = this.generations.get(id) ?? 0;
+    const guard = () => {
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed while opening its archive.');
+    };
+    const run = async () => {
+      const saved = await this.repository.archivedReport(id, subject, matchId);
+      guard();
+      if (saved && (saved.completed || this.now() - saved.savedAt < 60000)) {
+        if (!saved.imported && (await this.repository.archivedMatchTrusted(id, subject, matchId))) {
+          const account = (await this.repository.accounts()).find((a) => a.puuid === id);
+          guard();
+          if (account) {
+            const scope =
+              this.scopes.get(id) ?? new PlayerScope(id, account.gameName, account.tagLine);
+            for (const p of saved.detail.players) scope.remember(p);
+            this.scopes.set(id, scope);
+          }
+        }
+        return saved.detail;
+      }
+      const client = await this.client(id);
+      guard();
+      if (await this.repository.archivedMatchTrusted(id, subject, matchId)) {
+        client.scope.player(subject);
+        client.scope.allowMatch(subject, matchId);
+      }
+      const detail = await client.matchDetail(matchId, subject, !!saved && !saved.completed);
+      guard();
+      if (detail.id !== matchId) throw new AppError('MATCH_SCOPE', 'Riot returned another match.');
+      await this.repository.saveArchivedReport(id, subject, {
+        subject,
+        savedAt: this.now(),
+        completed: detail.completed === true,
+        detail,
+      });
+      guard();
+      return detail;
+    };
+    const work = run();
+    this.archivedReportFlights.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (this.archivedReportFlights.get(key) === work) this.archivedReportFlights.delete(key);
+    }
+  }
+  private historyFlights = new Map<string, Promise<import('../core/types').MatchSummary[]>>();
+  async historyPage(
+    id: string,
+    subject: string,
+    start: number,
+    count = 40,
+  ): Promise<import('../core/types').MatchSummary[]> {
+    id = uuid(id);
+    subject = uuid(subject);
+    if (
+      !Number.isInteger(start) ||
+      start < 0 ||
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > 100
+    )
+      throw new AppError('PAGINATION', 'Invalid history page.');
+    const key = `${id}:${subject}`,
+      flight = this.historyFlights.get(key);
+    if (flight) {
+      await flight;
+      return this.repository.archivedMatches(id, subject, start, count);
+    }
+    const generation = this.generations.get(id) ?? 0;
+    const guard = () => {
+      if (
+        generation !== (this.generations.get(id) ?? 0) ||
+        this.signingOut.has(id) ||
+        this.linkingAccounts.has(id)
+      )
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed while loading history.');
+    };
+    const run = async () => {
+      guard();
+      const cached = await this.repository.archivedMatches(id, subject, start, count);
+      guard();
+      if (cached.length === count) return cached;
+      const purpose = `history:${subject}` as const,
+        gate = await this.repository.refreshGate(id, purpose);
+      guard();
+      const head = (await this.repository.archivedMatches(id, subject, 0, 1))[0]?.id;
+      const sameHead = gate?.historyHeadId === head;
+      if (sameHead && gate?.historyExhausted) return cached;
+      if ((gate?.notBefore ?? 0) > this.now()) {
+        if (cached.length) return cached;
+        throw new AppError(
+          'LOCAL_COOLDOWN',
+          'Wait before loading another history page.',
+          gate!.notBefore,
+        );
+      }
+      let cursor = sameHead ? (gate?.nextIndex ?? 0) : 0;
+      const reservation = {
+        attemptedAt: this.now(),
+        notBefore: this.now() + 60000,
+        failures: gate?.failures ?? 0,
+        nextIndex: cursor,
+        historyHeadId: head,
+      };
+      await this.repository.saveRefreshGate(id, purpose, reservation);
+      guard();
+      const client = await this.client(id);
+      guard();
+      let exhausted = false,
+        rows = cached;
+      try {
+        for (let page = 0; page < 2 && rows.length < count && cursor < 1000; page++) {
+          const incoming = await client.matchHistory(cursor, 50, subject);
+          guard();
+          await this.repository.saveArchivedMatches(id, subject, incoming);
+          guard();
+          cursor += incoming.length;
+          exhausted = incoming.length < 50 || cursor >= 1000;
+          rows = await this.repository.archivedMatches(id, subject, start, count);
+          guard();
+          if (exhausted) break;
+        }
+        const latestHead = (await this.repository.archivedMatches(id, subject, 0, 1))[0]?.id;
+        guard();
+        await this.repository.saveRefreshGate(id, purpose, {
+          ...reservation,
+          failures: 0,
+          nextIndex: cursor,
+          historyHeadId: latestHead,
+          historyExhausted: exhausted,
+        });
+        if (!rows.length && !exhausted)
+          throw new AppError(
+            'HISTORY_CONTINUE',
+            'Already saved pages were checked. Load older matches again after the cooldown to continue.',
+            reservation.notBefore,
+          );
+        return rows;
+      } catch (reason) {
+        guard();
+        const e = safeError(reason);
+        if (e.code !== 'HISTORY_CONTINUE')
+          await this.repository.saveRefreshGate(id, purpose, {
+            ...reservation,
+            nextIndex: cursor,
+            notBefore: Math.max(this.now() + 60000, e.retryAt ?? 0),
+            failures: (gate?.failures ?? 0) + 1,
+          });
+        throw e;
+      }
+    };
+    const work = run();
+    this.historyFlights.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (this.historyFlights.get(key) === work) this.historyFlights.delete(key);
+    }
+  }
 
   async live(id: string): Promise<Section<LiveGame>> {
     const flight = this.liveFlights.get(id);
@@ -731,7 +1050,8 @@ export class Runtime {
         );
       await this.repository.saveRefreshGate(id, 'live', {
         attemptedAt: now,
-        notBefore: now + LIVE_POLL_MS,
+        notBefore:
+          now + livePollInterval(gate?.sample?.status === 'ready' ? gate.sample.data : undefined),
         failures: gate?.failures ?? 0,
         sample: gate?.sample,
       });
@@ -754,7 +1074,10 @@ export class Runtime {
       const error = sample.status === 'error' ? sample : sample.data.detailError;
       const failures = error ? (gate?.failures ?? 0) + 1 : 0;
       const notBefore = Math.max(
-        this.now() + (error ? failureDelay(failures) : LIVE_POLL_MS),
+        this.now() +
+          (error
+            ? failureDelay(failures)
+            : livePollInterval(sample.status === 'ready' ? sample.data : undefined)),
         error?.retryAt ?? 0,
       );
       sample =
@@ -767,8 +1090,26 @@ export class Runtime {
         failures,
         sample,
       });
-      const previous = await this.repository.snapshot(id);
-      if (previous) await this.repository.saveSnapshot({ ...previous, liveGame: sample });
+      const ended = completedLiveTransition(gate?.sample, sample);
+      if (ended) {
+        const profileGate = await this.repository.refreshGate(id, 'profile');
+        await this.repository.saveRefreshGate(id, 'profile', {
+          attemptedAt: profileGate?.attemptedAt ?? 0,
+          notBefore: profileGate?.notBefore ?? 0,
+          failures: profileGate?.failures ?? 0,
+          ...profileGate,
+          postMatchId: ended,
+          postMatchAttempts: 0,
+        });
+        recordRequest({
+          at: this.now(),
+          service: 'Profile refresh',
+          method: 'SYNC',
+          code: 'POST_MATCH_QUEUED',
+          durationMs: 0,
+        });
+      }
+
       return sample;
     };
     const work = run();
@@ -1383,6 +1724,15 @@ export class Runtime {
 
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
+    await this.profileFlights.get(id)?.catch(() => {});
+    await Promise.allSettled(
+      [...this.historyFlights].filter(([key]) => key.startsWith(id + ':')).map(([, work]) => work),
+    );
+    await Promise.allSettled(
+      [...this.archivedReportFlights.entries()]
+        .filter(([key]) => key.startsWith(id + ':'))
+        .map(([, value]) => value),
+    );
     await this.aimService?.drain(id);
     await this.credentialQueue.drain(id);
     await preferencesVault?.remove(id);
@@ -1397,6 +1747,9 @@ export class Runtime {
       ...[...this.purchaseCheckFlights.values()].map((check) => check.work),
     ]);
     const pending = [
+      ...this.historyFlights.values(),
+      ...this.profileFlights.values(),
+      ...this.archivedReportFlights.values(),
       ...this.flights.values(),
       ...this.clientFlights.values(),
       ...this.identityFlights.values(),
@@ -1404,6 +1757,9 @@ export class Runtime {
       ...this.equipmentFlights.values(),
     ];
     for (const id of new Set([
+      ...[...this.historyFlights.keys()].map((key) => key.split(':')[0]!),
+      ...this.profileFlights.keys(),
+      ...[...this.archivedReportFlights.keys()].map((key) => key.split(':')[0]!),
       ...this.clients.keys(),
       ...this.clientFlights.keys(),
       ...this.flights.keys(),

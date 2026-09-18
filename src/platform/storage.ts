@@ -1,3 +1,12 @@
+import { backupRepository } from './backupRepository';
+import {
+  matchRepository,
+  MATCH_ARCHIVE_SCHEMA,
+  upsertMatchRows,
+  upsertMarketRows,
+} from './matchRepository';
+import { observedMarkets } from '../core/matchArchive';
+import { emptySnapshot } from '../core/refreshPolicy';
 import { validateAimPreset } from '../core/aimSettings';
 import type { AimState } from '../core/aimTypes';
 import { validatePreset } from '../core/presets';
@@ -29,7 +38,8 @@ async function create(): Promise<Repository> {
     CREATE TABLE IF NOT EXISTS purchases (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
     CREATE TABLE IF NOT EXISTS aim_state (account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS aim_presets (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
-    PRAGMA user_version = 4;`);
+    ${MATCH_ARCHIVE_SCHEMA}
+    PRAGMA user_version = 5;`);
   let writing: Promise<unknown> = Promise.resolve();
   const write = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = writing.catch(() => {}).then(fn);
@@ -55,7 +65,37 @@ async function create(): Promise<Repository> {
         uuid(id),
       )
     ).map((r) => r.item_id);
+  const migration = await db.getFirstAsync(
+    'SELECT key FROM settings WHERE key=?',
+    'archive.migrated.v1',
+  );
+  if (!migration)
+    await write(() =>
+      db.withTransactionAsync(async () => {
+        const snapshots = await db.getAllAsync<{ account_id: string; data: string }>(
+          'SELECT account_id,data FROM snapshots',
+        );
+        for (const row of snapshots) {
+          try {
+            const saved = JSON.parse(row.data) as Snapshot;
+            if (saved.accountId !== row.account_id || saved.demo) continue;
+            if (saved.matches.status === 'ready')
+              await upsertMatchRows(db, row.account_id, row.account_id, saved.matches.data);
+            if (saved.store.status === 'ready')
+              await upsertMarketRows(db, observedMarkets(row.account_id, saved.store.data));
+          } catch {}
+        }
+        await db.runAsync(
+          'INSERT INTO settings(key,data) VALUES(?,?)',
+          'archive.migrated.v1',
+          'true',
+        );
+      }),
+    );
+  const matches = matchRepository(db, write);
   return {
+    ...matches,
+    ...backupRepository(db, write),
     aimState(id) {
       return readJson<AimState>('SELECT data FROM aim_state WHERE account_id = ?', uuid(id));
     },
@@ -233,26 +273,80 @@ async function create(): Promise<Repository> {
       });
     },
     snapshot(id) {
-      return readJson<Snapshot>('SELECT data FROM snapshots WHERE account_id = ?', uuid(id));
+      return write(async () => {
+        const saved = await readJson<Snapshot>(
+          'SELECT data FROM snapshots WHERE account_id = ?',
+          uuid(id),
+        );
+        const local = await matches.archivedMatches(
+          id,
+          id,
+          0,
+          Math.max(40, saved?.matches.status === 'ready' ? saved.matches.data.length : 0),
+        );
+        const gate = await readJson<import('../core/refreshPolicy').RefreshGateState>(
+          'SELECT data FROM refresh_gates WHERE account_id = ? AND purpose = ?',
+          uuid(id),
+          'live',
+        );
+        const result = local.length
+          ? {
+              ...(saved ?? emptySnapshot(id)),
+              matches: {
+                status: 'ready' as const,
+                data: local,
+                fetchedAt: saved?.matches.status === 'ready' ? saved.matches.fetchedAt : 0,
+                ...(saved?.matches.status === 'ready' && saved.matches.warning
+                  ? { warning: saved.matches.warning }
+                  : {}),
+              },
+            }
+          : saved;
+        if (result && gate?.sample) {
+          const incoming = gate.sample,
+            old = result.liveGame;
+          if (
+            incoming.status === 'ready'
+              ? old.status !== 'ready' || incoming.fetchedAt >= old.fetchedAt
+              : true
+          )
+            result.liveGame = incoming;
+        }
+        return result;
+      });
     },
     async saveSnapshot(snapshot) {
       if (snapshot.demo)
         throw new AppError('DEMO_ISOLATION', 'Demo snapshots cannot overwrite real account data.');
       await write(async () => {
         await db.withTransactionAsync(async () => {
-          snapshot = mergeSnapshot(
-            await readJson<Snapshot>(
-              'SELECT data FROM snapshots WHERE account_id = ?',
-              snapshot.accountId,
-            ),
-            snapshot,
+          const previous = await readJson<Snapshot>(
+            'SELECT data FROM snapshots WHERE account_id = ?',
+            snapshot.accountId,
           );
+          snapshot = mergeSnapshot(previous, snapshot);
+          if (
+            snapshot.matches.status === 'ready' &&
+            JSON.stringify(previous?.matches) !== JSON.stringify(snapshot.matches)
+          )
+            await upsertMatchRows(
+              db,
+              snapshot.accountId,
+              snapshot.accountId,
+              snapshot.matches.data,
+              false,
+            );
           await db.runAsync(
             'INSERT INTO snapshots(account_id,data) VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET data=excluded.data',
             uuid(snapshot.accountId),
             JSON.stringify(snapshot),
           );
-          if (snapshot.store.status === 'ready') {
+          if (
+            snapshot.store.status === 'ready' &&
+            (previous?.store.status !== 'ready' ||
+              previous.store.fetchedAt !== snapshot.store.fetchedAt)
+          ) {
+            await upsertMarketRows(db, observedMarkets(snapshot.accountId, snapshot.store.data));
             const entry = historyEntry(snapshot.accountId, snapshot.store.data);
             await db.runAsync(
               'INSERT INTO history(account_id,rotation_id,observed_at,data) VALUES(?,?,?,?) ON CONFLICT(account_id,rotation_id) DO UPDATE SET data=excluded.data',
@@ -262,10 +356,6 @@ async function create(): Promise<Repository> {
               JSON.stringify(entry),
             );
           }
-          await db.runAsync(
-            'DELETE FROM history WHERE observed_at < ?',
-            Date.now() - 90 * 86400000,
-          );
         });
       });
     },
@@ -346,9 +436,7 @@ async function create(): Promise<Repository> {
     },
     async clearCache() {
       await write(async () => {
-        await db.execAsync(
-          "DELETE FROM snapshots; DELETE FROM history; DELETE FROM settings WHERE key = 'catalog';",
-        );
+        await db.execAsync("DELETE FROM snapshots; DELETE FROM settings WHERE key = 'catalog';");
       });
     },
   };

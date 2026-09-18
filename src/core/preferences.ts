@@ -24,5 +24,6 @@ export function preferences(raw: unknown): Settings {
   ] as const) {
     if (migrated && typeof value[key] === 'boolean') merged[key] = value[key];
   }
+  merged.videoSound = typeof value.videoSound === 'boolean' ? value.videoSound : true;
   return merged;
 }

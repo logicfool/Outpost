@@ -1,3 +1,6 @@
+import { validFriendTarget } from '../core/friendRequests';
+import type { FriendAction, FriendRequest } from '../core/chatTypes';
+import type { PlayerRef } from '../core/playerTypes';
 import { withCachedFriends, observedFriend } from '../core/friendIdentity';
 import { AutoHistoryGate } from '../core/autoHistory';
 import { notifyChat } from '../platform/notifications';
@@ -187,8 +190,19 @@ export function useSocial(account: Account | null, catalog: Catalog) {
             activity: index === 1 ? 'In menus' : undefined,
             map: index === 0 ? 'Lotus' : undefined,
           }));
+        const friendRequests: FriendRequest[] =
+          previous.friendRequests ??
+          players
+            .filter((p) => !p.self)
+            .slice(5, 8)
+            .map((p, index) => ({
+              ...p,
+              jid: `${p.subject}@demo.pvp.net`,
+              direction: index < 2 ? 'incoming' : 'outgoing',
+              updatedAt: Date.now(),
+            }));
         await store.saveFriends(friends);
-        publish({ ...previous, status: 'ready', error: undefined, friends });
+        publish({ ...previous, status: 'ready', error: undefined, friends, friendRequests });
         await refreshLocal(a, store);
         return;
       }
@@ -405,6 +419,58 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     },
     [loadChatMessages],
   );
+  const changeFriend = useCallback(async (action: FriendAction, player: PlayerRef) => {
+    const a = active.current,
+      stamp = epoch.current;
+    if (!a || latest.current.id !== a.puuid || latest.current.state.status !== 'ready')
+      throw new AppError('CHAT_OFFLINE', 'Connect friends before changing requests.');
+    const subject = validFriendTarget(player, a.puuid);
+    if (a.demo) {
+      const previous = latest.current.state,
+        request = previous.friendRequests?.find((r) => r.subject === subject);
+      if (previous.friends.some((f) => f.subject === subject))
+        throw new AppError('ALREADY_FRIENDS', 'You are already friends.');
+      if (action !== 'add' && request?.direction !== 'incoming')
+        throw new AppError('FRIEND_REQUEST_CHANGED', 'The request changed.');
+      if (action === 'add' && request)
+        throw new AppError('FRIEND_REQUEST_PENDING', 'A request already exists.');
+      const requests = (previous.friendRequests ?? []).filter((r) => r.subject !== subject);
+      const friends = [...previous.friends];
+      if (action === 'add')
+        requests.push({
+          ...player,
+          subject,
+          jid: `${subject}@demo.pvp.net`,
+          direction: 'outgoing',
+          updatedAt: Date.now(),
+        });
+      if (action === 'accept') {
+        const friend: Friend = { ...player, subject, jid: request!.jid, presence: 'offline' };
+        friends.push(friend);
+        await demoChatStorage.saveFriends([friend]);
+      }
+      if (stamp !== epoch.current || active.current?.puuid !== a.puuid)
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      const next = { id: a.puuid, state: { ...previous, friends, friendRequests: requests } };
+      latest.current = next;
+      setValue(next);
+      return;
+    }
+    const connection = session.current;
+    if (!connection) throw new AppError('CHAT_OFFLINE', 'Connect friends first.');
+    if (action === 'add') {
+      const client = await (await getRuntime()).client(a.puuid);
+      const known = client.scope.player(subject);
+      validFriendTarget(known.player, a.puuid);
+    }
+    if (
+      stamp !== epoch.current ||
+      active.current?.puuid !== a.puuid ||
+      connection !== session.current
+    )
+      throw new AppError('ACCOUNT_CHANGED', 'The selected account or chat connection changed.');
+    await connection.changeFriend(action, player);
+  }, []);
   const markChatRead = useCallback(
     (subject?: string) => {
       openSubject.current = subject;
@@ -583,6 +649,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     [live, cachedFriends, combinedMessages, saved.error],
   );
   return {
+    changeFriend,
     cacheMatchFriends,
     cacheFriendProfile,
     chat: combined,

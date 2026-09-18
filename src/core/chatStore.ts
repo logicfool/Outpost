@@ -122,8 +122,10 @@ export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
         last_at: number;
         count: number;
         unread: number;
+        last_message?: string;
       }>(`SELECT c.peer,c.identity,COALESCE(MAX(m.at),0) AS last_at,COUNT(m.id) AS count,
-        COALESCE(SUM(CASE WHEN m.direction='incoming' AND m.at>c.read_at AND m.origin!='riot-archive' THEN 1 ELSE 0 END),0) AS unread
+        COALESCE(SUM(CASE WHEN m.direction='incoming' AND m.at>c.read_at AND m.origin!='riot-archive' THEN 1 ELSE 0 END),0) AS unread,
+        (SELECT last.data FROM messages last WHERE last.peer=c.peer ORDER BY last.at DESC,last.id DESC,last.direction DESC LIMIT 1) AS last_message
         FROM conversations c LEFT JOIN messages m ON m.peer=c.peer GROUP BY c.peer ORDER BY last_at DESC,c.peer`);
       return rows.map((r) => ({
         subject: r.peer,
@@ -131,6 +133,7 @@ export async function createChatStore(db: ChatDatabase): Promise<ChatStore> {
         lastAt: r.last_at,
         count: r.count,
         unread: r.unread,
+        ...(r.last_message ? { lastMessage: validateMessage(JSON.parse(r.last_message)) } : {}),
       }));
     },
     async messages(subject, before) {

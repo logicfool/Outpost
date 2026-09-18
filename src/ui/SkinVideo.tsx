@@ -10,11 +10,15 @@ export function SkinVideo({
   uri,
   autoplay = true,
   active = true,
+  sound = true,
+  onSoundChange,
   refresh,
 }: {
   uri: string;
   autoplay?: boolean;
   active?: boolean;
+  sound?: boolean;
+  onSoundChange?(sound: boolean): void;
   refresh?(): Promise<void>;
 }) {
   const [retry, setRetry] = useState(0),
@@ -43,6 +47,8 @@ export function SkinVideo({
       uri={uri}
       autoplay={autoplay}
       active={active}
+      sound={sound}
+      onSoundChange={onSoundChange}
       retry={() => void reload()}
       refreshing={refreshing}
     />
@@ -52,12 +58,16 @@ function VideoSession({
   uri,
   autoplay,
   active,
+  sound,
+  onSoundChange,
   retry,
   refreshing,
 }: {
   uri: string;
   autoplay: boolean;
   active: boolean;
+  sound: boolean;
+  onSoundChange?(sound: boolean): void;
   retry(): void;
   refreshing: boolean;
 }) {
@@ -68,20 +78,27 @@ function VideoSession({
       useCaching: true,
       contentType: 'progressive' as const,
       ...(Platform.OS !== 'web'
-        ? { headers: { 'User-Agent': 'Outpost/0.6.4 (cosmetic preview)' } }
+        ? { headers: { 'User-Agent': 'Outpost/0.9.0 (cosmetic preview)' } }
         : {}),
     }),
     [uri],
   );
   const player = useVideoPlayer(null, (p) => {
     p.loop = true;
-    p.muted = true;
+    p.muted = !sound;
+    p.volume = 1;
+    p.audioMixingMode = 'mixWithOthers';
   });
   const [status, setStatus] = useState<VideoPlayerStatus>(player.status),
     [playing, setPlaying] = useState(player.playing),
-    [muted, setMuted] = useState(true),
+    [muted, setMuted] = useState(!sound),
     [slow, setSlow] = useState(false),
     [firstFrame, setFirstFrame] = useState(false);
+  const soundCallback = useRef(onSoundChange);
+  soundCallback.current = onSoundChange;
+  useEffect(() => {
+    player.muted = !sound;
+  }, [player, sound]);
   const sourceReady = useRef(false);
   const foreground = useRef(AppState.currentState === 'active' || Platform.OS === 'web'),
     allowed = useRef(active),
@@ -117,11 +134,31 @@ function VideoSession({
         intent.current = event.isPlaying;
       setPlaying(event.isPlaying);
     });
-    const sound = player.addListener('mutedChange', (event) => setMuted(event.muted));
+    const soundListener = player.addListener('mutedChange', (event) => {
+      setMuted(event.muted);
+      soundCallback.current?.(!event.muted);
+    });
+    let focused = true;
     const app = AppState.addEventListener('change', (state) => {
-      foreground.current = state === 'active';
+      foreground.current = state === 'active' && focused;
       sync();
     });
+    const blur =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('blur', () => {
+            focused = false;
+            foreground.current = false;
+            sync();
+          })
+        : undefined;
+    const focus =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('focus', () => {
+            focused = true;
+            foreground.current = AppState.currentState === 'active';
+            sync();
+          })
+        : undefined;
     sourceReady.current = false;
     void player
       .replaceAsync(source.uri ? source : null)
@@ -139,8 +176,10 @@ function VideoSession({
       alive = false;
       statusListener.remove();
       playback.remove();
-      sound.remove();
+      soundListener.remove();
       app.remove();
+      blur?.remove();
+      focus?.remove();
     };
   }, [player, source]);
   useEffect(() => {

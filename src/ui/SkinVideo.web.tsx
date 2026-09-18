@@ -8,22 +8,31 @@ export function SkinVideo({
   uri,
   autoplay = true,
   active = true,
+  sound = true,
+  onSoundChange,
   refresh,
 }: {
   uri: string;
   autoplay?: boolean;
   active?: boolean;
+  sound?: boolean;
+  onSoundChange?(sound: boolean): void;
   refresh?(): Promise<void>;
 }) {
   const { S } = useTheme(),
     src = safeMedia(uri),
     video = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false),
-    [muted, setMuted] = useState(true),
+    [muted, setMuted] = useState(!sound),
     [ready, setReady] = useState(false),
     [failed, setFailed] = useState(false),
     [busy, setBusy] = useState(false),
     [slow, setSlow] = useState(false);
+  const [needsTap, setNeedsTap] = useState(false);
+  useEffect(() => {
+    setMuted(!sound);
+    if (video.current) video.current.muted = !sound;
+  }, [sound]);
   const wanted = useRef(autoplay),
     current = useRef({ active, src }),
     mounted = useRef(true),
@@ -42,14 +51,17 @@ export function SkinVideo({
       return;
     try {
       await element.play();
+      setNeedsTap(false);
     } catch (error) {
       if (
         mounted.current &&
         generation === epoch.current &&
         error instanceof DOMException &&
         error.name !== 'AbortError'
-      )
-        setFailed(true);
+      ) {
+        if (error.name === 'NotAllowedError') setNeedsTap(true);
+        else setFailed(true);
+      }
     }
   }, []);
   useEffect(() => {
@@ -147,7 +159,11 @@ export function SkinVideo({
             )
               wanted.current = false;
           }}
-          onVolumeChange={() => setMuted(video.current?.muted ?? true)}
+          onVolumeChange={() => {
+            const muted = video.current?.muted ?? false;
+            setMuted(muted);
+            if (!needsTap) onSoundChange?.(!muted);
+          }}
         />
         {!ready && !failed && (
           <View
@@ -181,7 +197,7 @@ export function SkinVideo({
           <View style={{ flex: 1 }}>
             <Button
               secondary
-              title={playing ? 'Pause video' : 'Play video'}
+              title={playing ? 'Pause video' : needsTap ? 'Play with sound' : 'Play video'}
               icon={playing ? 'pause' : 'play'}
               onPress={toggle}
             />

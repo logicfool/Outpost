@@ -382,3 +382,153 @@ test('a forged own presence from a different domain is ignored', (t) => {
   h.feed(ownPresence('desktop').replace('@ap1.pvp.net/', '@other.pvp.net/'));
   assert.equal(h.chat.snapshot.selfPresence, undefined);
 });
+
+const REQUEST_ID = '77777777-7777-4777-8777-777777777777';
+const pendingPlayer = { subject: REQUEST_ID, name: 'New friend', tag: 'TEST' };
+const rosterItem = (id, subscription, name = 'New friend') =>
+  `<item jid="${id}@ap1.pvp.net" puuid="${id}" subscription="${subscription}"><id name="${name}" tagline="TEST"/></item>`;
+const pushRoster = (h, item, from = '') =>
+  h.feed(
+    `<iq type="set" id="roster-push"${from ? ` from="${from}"` : ''}><query xmlns="jabber:iq:riotgames:roster">${item}</query></iq>`,
+  );
+test('incoming and outgoing requests are separate from confirmed messaging friends', (t) => {
+  const h = harness(t);
+  h.start();
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_in'));
+  assert.equal(h.chat.snapshot.friends.length, 1);
+  assert.equal(h.chat.snapshot.friendRequests[0].direction, 'incoming');
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_out'));
+  assert.equal(h.chat.snapshot.friendRequests[0].direction, 'outgoing');
+  assert.equal(h.chat.snapshot.friendRequests.length, 1);
+});
+test('accept sends the Riot pending_out mutation once and waits for a confirmed friendship', async (t) => {
+  const h = harness(t);
+  h.start();
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_in'));
+  const work = h.chat.changeFriend('accept', pendingPlayer);
+  const sent = h.writes.at(-1);
+  assert.match(sent, /subscription="pending_out"/);
+  assert.match(sent, new RegExp(`puuid="${REQUEST_ID}"`));
+  assert.equal(
+    h.chat.snapshot.friends.some((f) => f.subject === REQUEST_ID),
+    false,
+  );
+  pushRoster(h, rosterItem(REQUEST_ID, 'both'));
+  await work;
+  assert.equal(
+    h.chat.snapshot.friends.some((f) => f.subject === REQUEST_ID),
+    true,
+  );
+  assert.equal(h.chat.snapshot.friendRequests.length, 0);
+});
+test('decline targets only a known incoming request and leaves existing friends untouched', async (t) => {
+  const h = harness(t);
+  h.start();
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_in'));
+  const work = h.chat.changeFriend('decline', pendingPlayer);
+  assert.match(h.writes.at(-1), /subscription="remove"/);
+  pushRoster(h, rosterItem(REQUEST_ID, 'remove'));
+  await work;
+  assert.equal(h.chat.snapshot.friends.length, 1);
+  assert.equal(h.chat.snapshot.friendRequests.length, 0);
+  const before = h.writes.length;
+  assert.throws(
+    () => h.chat.changeFriend('decline', { subject: OTHER, name: 'Friend', tag: 'TEST' }),
+    /no longer available|already friends/i,
+  );
+  assert.equal(h.writes.length, before);
+});
+test('adding from a profile uses a validated UUID and an acknowledged roster refresh', async (t) => {
+  const h = harness(t);
+  h.start();
+  const work = h.chat.changeFriend('add', pendingPlayer),
+    sent = h.writes.at(-1),
+    id = /id="([^"]+)"/.exec(sent)[1];
+  h.feed(`<iq type="result" id="${id}"/>`);
+  const query = /id="([^"]+)"/.exec(h.writes.at(-1))[1];
+  assert.equal(h.chat.snapshot.friendActions[REQUEST_ID].state, 'awaiting');
+  h.feed(
+    `<iq type="result" id="${query}"><query xmlns="jabber:iq:riotgames:roster">${rosterItem(OTHER, 'both', 'Friend')}${rosterItem(REQUEST_ID, 'pending_out')}</query></iq>`,
+  );
+  await work;
+  assert.equal(h.chat.snapshot.friendRequests[0].direction, 'outgoing');
+  assert.equal(h.chat.snapshot.friendActions[REQUEST_ID], undefined);
+});
+test('foreign friend acknowledgements and roster pushes cannot confirm a mutation', async (t) => {
+  const h = harness(t);
+  h.start();
+  const work = h.chat.changeFriend('add', pendingPlayer),
+    id = /id="([^"]+)"/.exec(h.writes.at(-1))[1];
+  h.feed(`<iq from="${OTHER}@ap1.pvp.net" type="result" id="${id}"/>`);
+  pushRoster(h, rosterItem(REQUEST_ID, 'both'), `${OTHER}@ap1.pvp.net`);
+  assert.equal(h.chat.snapshot.friendActions[REQUEST_ID].state, 'sending');
+  assert.equal(h.chat.snapshot.friends.length, 1);
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_out'));
+  await work;
+});
+test('self, hidden, forged and duplicate request attempts never issue an extra mutation', async (t) => {
+  const h = harness(t);
+  h.start();
+  for (const p of [
+    { ...pendingPlayer, subject: ID },
+    { ...pendingPlayer, hidden: true },
+    { ...pendingPlayer, subject: 'bad-id' },
+  ])
+    assert.throws(() => h.chat.changeFriend('add', p));
+  const work = h.chat.changeFriend('add', pendingPlayer),
+    count = h.writes.length;
+  assert.throws(() => h.chat.changeFriend('add', pendingPlayer), /already being processed/i);
+  assert.equal(h.writes.length, count);
+  pushRoster(h, rosterItem(REQUEST_ID, 'pending_out'));
+  await work;
+  assert.throws(() => h.chat.changeFriend('add', pendingPlayer), /already been sent/i);
+});
+test('friend-operation rejection does not disconnect working chat', async (t) => {
+  const h = harness(t);
+  h.start();
+  const work = h.chat.changeFriend('add', pendingPlayer),
+    id = /id="([^"]+)"/.exec(h.writes.at(-1))[1];
+  const rejected = assert.rejects(work, (e) => e.code === 'FRIEND_REJECTED');
+  h.feed(
+    `<iq id="${id}" type="error"><error><forbidden xmlns="urn:ietf:params:xml:ns:xmpp-stanzas"/></error></iq>`,
+  );
+  await rejected;
+  assert.equal(h.chat.snapshot.status, 'ready');
+  assert.equal(h.chat.snapshot.friendActions[REQUEST_ID].state, 'error');
+  assert.throws(
+    () => h.chat.changeFriend('add', pendingPlayer),
+    (e) => e.code === 'FRIEND_COOLDOWN',
+  );
+});
+test('an unconfirmed friend write is never automatically repeated after disconnect', async (t) => {
+  const h = harness(t);
+  h.start();
+  const work = h.chat.changeFriend('add', pendingPlayer);
+  const rejection = assert.rejects(work, (e) => e.code === 'FRIEND_UNCONFIRMED');
+  h.chat.disconnect();
+  await rejection;
+  const before = h.writes.filter((s) => s.includes('subscription="pending_out"')).length;
+  h.start();
+  assert.equal(h.writes.filter((s) => s.includes('subscription="pending_out"')).length, before);
+});
+test('friend action times out without treating absence of a reply as success', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness(t);
+  h.start();
+  const work = h.chat.changeFriend('add', pendingPlayer),
+    rejected = assert.rejects(work, (e) => e.code === 'FRIEND_UNCONFIRMED');
+  t.mock.timers.tick(15001);
+  await rejected;
+  assert.equal(h.chat.snapshot.status, 'ready');
+  assert.equal(h.chat.snapshot.friendRequests.length, 0);
+  assert.equal(h.writes.filter((s) => s.includes('subscription="pending_out"')).length, 1);
+});
+test('a mismatched roster puuid cannot redirect an incoming request to someone else', (t) => {
+  const h = harness(t);
+  h.start();
+  pushRoster(
+    h,
+    rosterItem(REQUEST_ID, 'pending_in').replace(`puuid="${REQUEST_ID}"`, `puuid="${OTHER}"`),
+  );
+  assert.equal(h.chat.snapshot.friendRequests.length, 0);
+});

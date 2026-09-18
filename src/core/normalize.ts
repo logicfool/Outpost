@@ -416,6 +416,9 @@ export function normalizeMatchDetail(
     duels.set(opponent, score);
   }
   return {
+    completed:
+      info.isCompleted === true ||
+      ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState)),
     id: text(info.matchId),
     map: catalog.maps[text(info.mapId)]?.name ?? 'Unknown map',
     mapImage: catalog.maps[text(info.mapId)]?.image,
@@ -429,16 +432,18 @@ export function normalizeMatchDetail(
     assists: self.assists,
     acs: self.acs,
     headshotPct: self.headshotPct,
-    result:
-      info.isCompleted !== true
-        ? 'UNKNOWN'
-        : own?.won === true
-          ? 'WIN'
-          : other?.won === true
-            ? 'LOSS'
-            : own && other && own.roundsWon === other.roundsWon
-              ? 'DRAW'
-              : 'UNKNOWN',
+    result: !(
+      info.isCompleted === true ||
+      ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState))
+    )
+      ? 'UNKNOWN'
+      : own?.won === true
+        ? 'WIN'
+        : other?.won === true
+          ? 'LOSS'
+          : own && other && own.roundsWon === other.roundsWon
+            ? 'DRAW'
+            : 'UNKNOWN',
     score:
       own && other && typeof own.roundsWon === 'number' && typeof other.roundsWon === 'number'
         ? `${own.roundsWon} - ${other.roundsWon}`

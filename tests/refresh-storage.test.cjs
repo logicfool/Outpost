@@ -6,44 +6,7 @@ const fs = require('node:fs'),
   ts = require('typescript');
 const { DatabaseSync } = require('node:sqlite');
 const { ID, OTHER, session } = require('./helpers.cjs');
-const compiled = ts.transpileModule(
-  fs.readFileSync(path.join(__dirname, '../src/platform/storage.ts'), 'utf8'),
-  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
-).outputText;
-async function fixture(t) {
-  const db = new DatabaseSync(':memory:');
-  t.after(() => db.close());
-  const adapter = {
-    execAsync: async (sql) => db.exec(sql),
-    runAsync: async (sql, ...args) => db.prepare(sql).run(...args),
-    getFirstAsync: async (sql, ...args) => db.prepare(sql).get(...args) ?? null,
-    getAllAsync: async (sql, ...args) => db.prepare(sql).all(...args),
-    withTransactionAsync: async (f) => {
-      db.exec('BEGIN');
-      try {
-        await f();
-        db.exec('COMMIT');
-      } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
-      }
-    },
-  };
-  const m = { exports: {} };
-  const load = (n) =>
-    n === 'expo-sqlite'
-      ? { openDatabaseAsync: async () => adapter }
-      : n.startsWith('../core/')
-        ? require(path.join(__dirname, '../.test-build', n.slice(8) + '.js'))
-        : (() => {
-            throw Error(n);
-          })();
-  vm.runInThisContext('(function(require,module,exports){' + compiled + '\n})')(load, m, m.exports);
-  const repo = await m.exports.openRepository();
-  await repo.saveAccount(session(ID).account);
-  await repo.saveAccount(session(OTHER).account);
-  return { repo, db };
-}
+const { repositoryFixture: fixture } = require('./repository-fixture.cjs');
 test('refresh reservations persist by account and purpose in SQLite', async (t) => {
   const { repo } = await fixture(t),
     gate = { attemptedAt: 1, notBefore: 60001, failures: 0 };
@@ -116,7 +79,7 @@ test('aim presets and pending settings checks persist independently for both acc
   await repo.clearCache();
   assert.equal((await repo.aimPresets(ID)).length, 1);
   assert.equal((await repo.aimState(ID)).nextReadAt, 60011);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
   await repo.removeAccount(ID);
   assert.deepEqual(await repo.aimPresets(ID), []);
   assert.equal(await repo.aimState(ID), null);

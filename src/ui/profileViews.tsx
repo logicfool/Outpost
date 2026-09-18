@@ -12,7 +12,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { Catalog } from '../core/types';
 import type { PlayerRef } from '../core/playerTypes';
 import type { AppModel } from '../state/useApp';
-import { useLivePolling } from '../state/useLivePolling';
 import { Button, ProgressBar, SectionHeader } from './components';
 import { useTheme, type Palette } from './theme';
 
@@ -148,11 +147,18 @@ export function PlayerCover({
     </View>
   );
 }
-export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void }) {
+export function LiveCard({
+  model,
+  onOpen,
+  loading = false,
+}: {
+  model: AppModel;
+  onOpen(): void;
+  loading?: boolean;
+}) {
   const { C, S, isDark } = useTheme();
 
-  const polling = useLivePolling(model),
-    section = model.snapshot?.liveGame;
+  const section = model.snapshot?.liveGame;
   const game = section?.status === 'ready' ? section.data : undefined;
   const progress = ownLiveProgress(
     game,
@@ -165,22 +171,8 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
   const error = section?.status === 'error' ? section : game?.detailError;
   return (
     <View style={{ gap: 10 }}>
-      <View style={S.between}>
-        <SectionHeader title="Current game" />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh live game"
-          onPress={polling.refresh}
-          style={{ padding: 10 }}
-        >
-          {polling.busy ? (
-            <ActivityIndicator color={C.accent} />
-          ) : (
-            <Feather name="refresh-cw" size={18} color={C.accent} />
-          )}
-        </Pressable>
-      </View>
-      {!game && polling.busy ? (
+      <SectionHeader title="Current game" />
+      {!game && loading ? (
         <Skeleton kind="row" label="Loading current game" />
       ) : (
         <Pressable

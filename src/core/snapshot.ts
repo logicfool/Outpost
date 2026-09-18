@@ -1,3 +1,4 @@
+import { appendMatchSection } from './matchArchive';
 import type { Snapshot } from './types';
 
 export function mergeSnapshot(previous: Snapshot | null, next: Snapshot): Snapshot {
@@ -34,5 +35,6 @@ export function mergeSnapshot(previous: Snapshot | null, next: Snapshot): Snapsh
       Object.assign(merged, { [key]: old });
     }
   }
+  merged.matches = appendMatchSection(previous.matches, merged.matches);
   return merged;
 }

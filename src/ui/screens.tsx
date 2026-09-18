@@ -1,3 +1,5 @@
+import { useLivePolling } from '../state/useLivePolling';
+import { BackupPanel } from './BackupPanel';
 import { Skeleton, MATCH_ROW_MIN_HEIGHT } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
 import type { PreviewIssue } from '../state/useMatchPreviews';
@@ -514,6 +516,14 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
               { id: 'history', label: 'History' },
             ]}
           />
+          {tab === 'history' && (
+            <Button
+              title="Saved Night Markets & bundles"
+              secondary
+              icon="archive"
+              onPress={() => onNavigate({ type: 'market-history' })}
+            />
+          )}
           {tab === 'bundles' && (
             <View style={S.between}>
               <Text style={S.small}>Browse collections</Text>
@@ -1141,6 +1151,7 @@ export function MatchCard({
   const navInset = useNavInset();
   const styles = useThemedStyles(makeStyles);
 
+  detail = detail ?? (match.preview as MatchDetail | undefined);
   if (!detail)
     return issue ? (
       <Pressable
@@ -1506,6 +1517,7 @@ export const HistoryRow = memo(function HistoryRow({
 const matchKey = (match: MatchSummary) => match.id;
 const HistoryGap = () => <View style={{ height: 12 }} />;
 export function MatchesScreen({ model, onNavigate }: Props) {
+  const polling = useLivePolling(model);
   const { C, S } = useTheme(),
     navInset = useNavInset();
   const [filter, setFilter] = useState('all'),
@@ -1543,8 +1555,8 @@ export function MatchesScreen({ model, onNavigate }: Props) {
       contentContainerStyle={[S.content, { gap: 0, paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
-          refreshing={model.busy}
-          onRefresh={() => void model.refresh()}
+          refreshing={polling.refreshing}
+          onRefresh={polling.refresh}
           tintColor={C.accent}
         />
       }
@@ -1553,8 +1565,15 @@ export function MatchesScreen({ model, onNavigate }: Props) {
           <Heading eyebrow="YOUR CAREER" title="Profile" />
           <ProfileBanner model={model} onNavigate={onNavigate} />
           <RankOverview model={model} onOpen={() => rank && onNavigate({ type: 'career', rank })} />
-          <LiveCard model={model} onOpen={() => onNavigate({ type: 'live' })} />
-          <SectionHeader title="Match history" />
+          {model.snapshot?.profileIssue && (
+            <Text style={[S.small, { color: C.gold }]}>{model.snapshot.profileIssue.message}</Text>
+          )}
+          <LiveCard
+            model={model}
+            loading={polling.busy}
+            onOpen={() => onNavigate({ type: 'live' })}
+          />
+          <SectionHeader title="Match history" detail="Saved locally" />
           {queues.length > 2 && (
             <Tabs
               value={queues.includes(filter) ? filter : 'all'}
@@ -1573,7 +1592,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
         matches ? <Empty title="No matches in this view" icon="crosshair" /> : null
       }
       ListFooterComponent={
-        !model.active?.demo && !!matches?.length && matches.length < 1000 ? (
+        !model.active?.demo && !!matches?.length && matches.length < 10000 ? (
           <View style={{ paddingTop: 16 }}>
             <View style={{ gap: 12 }}>
               {loadingOlder && <Skeleton kind="match" count={2} label="Loading older matches" />}
@@ -1749,9 +1768,16 @@ export function AccountScreen({ model, onLink }: Props) {
         <View style={S.card}>
           <Setting
             title="Autoplay previews"
-            detail="Muted until you unmute."
+            detail="Play skin previews automatically."
             value={model.settings.autoplayVideos !== false}
             onChange={(value) => void model.setAutoplayVideos(value)}
+          />
+          <View style={S.divider} />
+          <Setting
+            title="Video sound"
+            detail="Start previews with sound."
+            value={model.settings.videoSound !== false}
+            onChange={(value) => void model.setVideoSound(value)}
           />
         </View>
         <SectionHeader title="Chat history" />
@@ -1760,12 +1786,15 @@ export function AccountScreen({ model, onLink }: Props) {
         </View>
         <SectionHeader title="Refresh schedule" />
         <View style={S.card}>
-          <InfoRow label="Live matches" value="Every 60 seconds" />
+          <InfoRow label="Live matches" value="Every 5 seconds in game" />
           <View style={S.divider} />
           <InfoRow label="Automatic store refresh" value="When the daily timer resets" />
           <View style={S.divider} />
           <InfoRow label="Skins & catalog" value="Cached for 24 hours" />
-          <Text style={S.small}>Pull down to refresh. Requests stay rate-limited.</Text>
+          <Text style={S.small}>
+            Idle and Profile updates run every 60 seconds. Saved match reports are reused. Pull to
+            check for new data.
+          </Text>
         </View>
         <SectionHeader title="Notifications" />
         <View style={S.card}>
@@ -1829,6 +1858,7 @@ export function AccountScreen({ model, onLink }: Props) {
           <PurchaseHistory model={model} />
         </View>
         <SectionHeader title="Data" />
+        <BackupPanel model={model} />
         <DiagnosticsPanel model={model} />
         <Button
           title="Clear cached data"
@@ -1854,7 +1884,7 @@ export function AccountScreen({ model, onLink }: Props) {
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.7.3</Text>
+          <Text style={S.small}>Outpost 0.9.0</Text>
         </View>
       </Page>
       <Modal
@@ -1879,7 +1909,7 @@ export function AccountScreen({ model, onLink }: Props) {
                 ? 'End this Riot web session and delete this account’s local chats, wishlist and presets? Other accounts and devices are not signed out.'
                 : confirm === 'remove'
                   ? 'Delete this account and its local chats, wishlist and presets?'
-                  : 'Cached game data, artwork and catalog will be cleared. Accounts, saved chats and wishlists stay.'}
+                  : 'Temporary game data, artwork and catalog will be cleared. Saved matches, store history, accounts, chats and presets stay.'}
             </Text>
             {actionError && (
               <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
@@ -2019,6 +2049,8 @@ export function ItemModal({
               key={video}
               uri={video}
               autoplay={model.settings.autoplayVideos !== false}
+              sound={model.settings.videoSound !== false}
+              onSoundChange={model.setVideoSound}
               refresh={model.refreshMedia}
             />
           ) : weaponItem ? (

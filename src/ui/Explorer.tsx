@@ -1,3 +1,7 @@
+import { FriendActions } from './FriendActions';
+import { FriendRequestsPanel } from './FriendRequestsPanel';
+import { ChatsPanel } from './ChatsPanel';
+import { MarketHistoryPanel } from './MarketHistoryPanel';
 import { LiveDataStatus, LiveStatsLine } from './LiveDataStatus';
 import { AimPanel } from './AimPanel';
 import { IdentityPanel } from './IdentityPanel';
@@ -141,9 +145,17 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     setError(null);
     setFinished(false);
     setLoading(false);
+    let freshArrived = false;
+    void model
+      .cachedPlayerProfile(player)
+      .then((value) => {
+        if (value && generation.current === stamp && !freshArrived) setData(value);
+      })
+      .catch(() => {});
     model
       .playerProfile(player)
       .then((value) => {
+        freshArrived = true;
         if (generation.current === stamp) setData(value);
       })
       .catch((e) => {
@@ -242,6 +254,7 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
                 />
               )}
             </>
+            <FriendActions model={model} player={data?.player ?? player} />
             {friend && (
               <Text style={[S.small, { color: C.mint }]}>
                 {friend.presence === 'in_game'
@@ -277,10 +290,12 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
             <Resource
               title="Rank"
               section={
-                data?.rank ??
-                (error
-                  ? { status: 'error', code: 'PROFILE_UNAVAILABLE', message: error }
-                  : undefined)
+                checking && data?.rank.status === 'error' && data.rank.code === 'RANK_NOT_CACHED'
+                  ? undefined
+                  : (data?.rank ??
+                    (error
+                      ? { status: 'error', code: 'PROFILE_UNAVAILABLE', message: error }
+                      : undefined))
               }
             >
               {(rank) => (
@@ -380,22 +395,13 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
       <ScrollView
         refreshControl={
           <RefreshControl
-            refreshing={polling.busy}
+            refreshing={polling.refreshing}
             onRefresh={polling.refresh}
             tintColor={C.accent}
           />
         }
         contentContainerStyle={S.content}
       >
-        {false && (
-          <Button
-            title={polling.busy ? 'Checking…' : 'Refresh live game'}
-            icon="refresh-cw"
-            secondary
-            disabled={polling.busy}
-            onPress={polling.refresh}
-          />
-        )}
         <Resource
           title="Live game"
           section={section}
@@ -546,166 +552,6 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
   );
 }
 
-function FriendsPanel({ model, onNavigate, onBack }: PanelProps) {
-  const { C, S } = useTheme();
-  const [filter, setFilter] = useState<'all' | 'online' | 'saved'>('online'),
-    [search, setSearch] = useState('');
-  const { chat } = model,
-    connected = chat.status === 'ready',
-    busy = chat.status === 'connecting' || chat.status === 'authenticating';
-  const saved = model.savedConversations.filter((c) => c.count > 0);
-  const rows =
-    filter === 'saved'
-      ? saved.map((c) => ({
-          subject: c.subject,
-          friend: chat.friends.find((f) => f.subject === c.subject) ?? c.friend,
-          count: c.count,
-          unread: c.unread,
-        }))
-      : chat.friends
-          .filter((f) => filter === 'all' || f.presence !== 'offline')
-          .map((f) => ({
-            subject: f.subject,
-            friend: f,
-            count: 0,
-            unread: chat.unread[f.subject] ?? 0,
-          }));
-  const friends = rows.filter((row) =>
-    `${row.friend?.name ?? 'Saved conversation'}#${row.friend?.tag ?? ''}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
-  return (
-    <ModalPage>
-      <ModalHeader title="Chats" closeLabel="Back from friends" onClose={onBack} />
-      <FlatList
-        data={friends}
-        keyExtractor={(row) => row.subject}
-        contentContainerStyle={S.content}
-        ListHeaderComponent={
-          <View style={{ gap: 14, paddingBottom: 8 }}>
-            <View style={S.card}>
-              <View style={[S.between, { flexWrap: 'wrap', rowGap: 8 }]}>
-                <Text style={[S.h2, { flexShrink: 1 }]}>Your Riot friends</Text>
-                <Badge
-                  text={connected ? 'CONNECTED' : busy ? 'CONNECTING' : 'OFFLINE'}
-                  color={connected ? C.mint : C.gold}
-                />
-              </View>
-              <Text style={S.body}>
-                Messages are saved on this device, separately for each account. Connect to see live
-                presence, send whispers or sync Riot history.
-              </Text>
-              {chat.error && <Text style={[S.body, { color: C.gold }]}>{chat.error}</Text>}
-              <Button
-                title={busy ? 'Connecting…' : connected ? 'Disconnect chat' : 'Connect Riot chat'}
-                disabled={busy}
-                icon={connected ? 'wifi-off' : 'message-circle'}
-                onPress={() => (connected ? model.disconnectChat() : void model.connectChat())}
-              />
-            </View>
-            {chat.storageError && (
-              <Text accessibilityRole="alert" style={[S.body, { color: C.accent }]}>
-                {chat.storageError}
-              </Text>
-            )}
-            {model.active?.demo && (
-              <Text style={S.small}>
-                Demo conversations are simulated. No messages are sent to Riot.
-              </Text>
-            )}
-            <Tabs
-              value={filter}
-              onChange={setFilter}
-              items={[
-                {
-                  id: 'online',
-                  label: `Online · ${chat.friends.filter((f) => f.presence !== 'offline').length}`,
-                },
-                { id: 'all', label: `All friends · ${chat.friends.length}` },
-                { id: 'saved', label: `Saved · ${saved.length}` },
-              ]}
-            />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              accessibilityLabel="Search friends"
-              placeholder="Search Riot ID"
-              placeholderTextColor={C.subtle}
-              autoCorrect={false}
-              style={S.input}
-            />
-          </View>
-        }
-        renderItem={({ item: row }) => (
-          <View style={[S.card, { marginBottom: 12 }]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`View ${row.friend?.name ?? 'saved friend'} profile`}
-              disabled={!connected || !chat.friends.some((f) => f.subject === row.subject)}
-              onPress={() => row.friend && onNavigate({ type: 'player', player: row.friend })}
-              style={S.between}
-            >
-              <PlayerAvatar card={row.friend?.card} catalog={model.catalog} size={44} />
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={S.h3}>
-                  {row.friend?.name ?? 'Saved conversation'}
-                  <Text style={{ color: C.subtle }}>
-                    {row.friend?.tag ? ` #${row.friend.tag}` : ''}
-                  </Text>
-                </Text>
-                <Text
-                  style={[
-                    S.small,
-                    { color: connected && row.friend?.presence !== 'offline' ? C.mint : C.subtle },
-                  ]}
-                >
-                  {connected && row.friend ? statusName[row.friend.presence] : 'Offline'}
-                  {row.friend?.map ? ` · ${row.friend.map}` : ''}
-                  {row.count ? ` · ${row.count} saved messages` : ''}
-                </Text>
-              </View>
-              <Feather name="chevron-right" size={20} color={C.subtle} />
-            </Pressable>
-            <Button
-              title={`Message${row.unread ? ` · ${row.unread} unread` : ''}`}
-              secondary
-              icon="message-circle"
-              onPress={() => onNavigate({ type: 'chat', subject: row.subject })}
-            />
-          </View>
-        )}
-        ListEmptyComponent={
-          (filter === 'saved' ? model.historyLoading : busy) ? (
-            <Skeleton kind="row" count={4} label="Loading conversations" />
-          ) : (
-            <Empty
-              title={
-                filter === 'saved'
-                  ? model.historyLoading
-                    ? 'Opening saved history…'
-                    : 'No saved conversations yet'
-                  : connected
-                    ? 'No friends in this view'
-                    : busy
-                      ? 'Connecting to Riot…'
-                      : 'Connect to load friends'
-              }
-              detail={
-                filter === 'saved'
-                  ? 'Messages you send, receive or sync are kept until you delete them or remove this account.'
-                  : connected
-                    ? 'Try All friends or a different search.'
-                    : 'Saved conversations remain available without connecting.'
-              }
-              icon="users"
-            />
-          )
-        }
-      />
-    </ModalPage>
-  );
-}
 export function ExplorerModal({
   model,
   routes,
@@ -721,6 +567,7 @@ export function ExplorerModal({
     props = { model, onNavigate, onBack };
   return (
     <Modal visible={!!route} animationType="slide" onRequestClose={onBack}>
+      {route?.type === 'market-history' && <MarketHistoryPanel {...props} />}
       {route?.type === 'bundle' && <BundlePanel {...props} id={route.id} />}
       {route?.type === 'item' && (
         <ItemModal key={route.item.id} model={model} item={route.item} onClose={onBack} embedded />
@@ -788,7 +635,8 @@ export function ExplorerModal({
           onNavigate={onNavigate}
         />
       )}
-      {route?.type === 'friends' && <FriendsPanel {...props} />}
+      {route?.type === 'friends' && <ChatsPanel {...props} />}
+      {route?.type === 'friend-requests' && <FriendRequestsPanel model={model} onBack={onBack} />}
       {route?.type === 'chat-settings' && (
         <ModalPage>
           <ModalHeader

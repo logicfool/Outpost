@@ -1,3 +1,11 @@
+import {
+  FRIEND_ACTION_COOLDOWN,
+  rosterEntry,
+  friendMutationXml,
+  validFriendTarget,
+} from './friendRequests';
+import type { FriendRequest, FriendAction } from './chatTypes';
+import type { PlayerRef } from './playerTypes';
 import { detailedDiagnosticEvent } from './detailedDiagnostics';
 import type { Catalog } from './types';
 import type {
@@ -59,6 +67,20 @@ export class RiotChat {
   private persistence = new Set<Promise<unknown>>();
   private sends = new Set<Promise<unknown>>();
   private roster = new Map<string, Friend>();
+  private requests = new Map<string, FriendRequest>();
+  private friendWrites = new Map<
+    string,
+    {
+      subject: string;
+      action: FriendAction;
+      timer: ReturnType<typeof setTimeout>;
+      resolve(): void;
+      reject(error: AppError): void;
+    }
+  >();
+  private friendChecks = new Map<string, string>();
+  private friendTimes = new Map<string, number>();
+  private lastFriendWrite = -Infinity;
   private resources = new Map<string, Map<string, Partial<Friend>>>();
   private state: ChatState = { status: 'disconnected', unread: {}, friends: [], messages: {} };
   constructor(
@@ -73,8 +95,18 @@ export class RiotChat {
     return this.state;
   }
   restoreMessages(previous: ChatState) {
-    if (this.phase === 'closed')
-      this.state = { ...this.state, messages: previous.messages, unread: previous.unread };
+    if (this.phase === 'closed') {
+      this.state = {
+        ...this.state,
+        messages: previous.messages,
+        unread: previous.unread,
+        friendRequests: previous.friendRequests,
+        friendActions: previous.friendActions,
+      };
+      this.requests = new Map((previous.friendRequests ?? []).map((r) => [r.subject, r]));
+      for (const [id, op] of Object.entries(previous.friendActions ?? {}))
+        this.friendTimes.set(id, op.retryAt);
+    }
   }
   private update(next: Partial<ChatState>) {
     this.state = { ...this.state, ...next };
@@ -229,6 +261,41 @@ export class RiotChat {
       this.fail('Riot denied friends or chat access for this session.');
       return;
     }
+    if (
+      name === 'iq' &&
+      this.phase === 'ready' &&
+      id &&
+      this.friendWrites.has(id) &&
+      ['result', 'error'].includes(type ?? '')
+    ) {
+      if (
+        node.attrs.from &&
+        node.attrs.from !== c.domain &&
+        node.attrs.from !== `${c.subject}@${c.domain}`
+      )
+        return;
+      this.friendReply(node);
+      return;
+    }
+    if (name === 'iq' && type === 'error' && id && this.friendChecks.has(id)) {
+      if (
+        node.attrs.from &&
+        node.attrs.from !== c.domain &&
+        node.attrs.from !== `${c.subject}@${c.domain}`
+      )
+        return;
+      const subject = this.friendChecks.get(id);
+      for (const [key, op] of this.friendWrites)
+        if (op.subject === subject)
+          this.finishFriend(
+            key,
+            new AppError(
+              'FRIEND_UNCONFIRMED',
+              'Riot accepted the command but did not return the updated request list.',
+            ),
+          );
+      return;
+    }
     if (name === 'iq' && this.phase === 'ready' && id && this.historyRequests.has(id)) {
       void this.receiveHistory(node).catch(() => {});
       return;
@@ -238,7 +305,8 @@ export class RiotChat {
       const query = child(node, 'query');
       if (
         query?.ns === NS.roster &&
-        ((type === 'result' && id === 'outpost-roster') || type === 'set')
+        ((type === 'result' && (id === 'outpost-roster' || (!!id && this.friendChecks.has(id)))) ||
+          type === 'set')
       ) {
         if (
           node.attrs.from &&
@@ -247,6 +315,21 @@ export class RiotChat {
         )
           return;
         this.applyRoster(query, type === 'result');
+        if (type === 'result' && id && this.friendChecks.has(id)) {
+          const subject = this.friendChecks.get(id);
+          for (const [key, op] of this.friendWrites)
+            if (op.subject === subject)
+              this.finishFriend(
+                key,
+                this.friendMatches(op.subject, op.action)
+                  ? undefined
+                  : new AppError(
+                      'FRIEND_UNCONFIRMED',
+                      'The returned roster does not yet confirm this change.',
+                    ),
+              );
+          this.friendChecks.delete(id);
+        }
         if (type === 'set' && id) this.sendRaw(`<iq type="result" id="${xml(id)}"/>`);
         if (this.phase === 'roster' && type === 'result') this.ready();
         return;
@@ -286,29 +369,60 @@ export class RiotChat {
     );
   }
   private applyRoster(query: XmlNode, full: boolean) {
+    if (full && children(query, 'item').length > 1000) {
+      this.fail(
+        'The roster exceeds the supported size. No pending request was changed.',
+        'CHAT_ROSTER_SIZE',
+      );
+      return;
+    }
     const next = full ? new Map<string, Friend>() : new Map(this.roster);
+    const requests = full ? new Map<string, FriendRequest>() : new Map(this.requests);
+    const changed = new Set<string>();
     for (const item of children(query, 'item').slice(0, 1000)) {
       const jid = parseJid(item.attrs.jid ?? '');
-      if (!jid || jid.subject === this.credentials?.subject) continue;
-      if (item.attrs.subscription && !['both', 'to'].includes(item.attrs.subscription)) {
+      if (!jid) continue;
+      const entry = rosterEntry(
+        item,
+        this.credentials!.subject,
+        this.now(),
+        this.roster.get(jid.subject) ?? this.requests.get(jid.subject),
+      );
+      if (!entry) continue;
+      changed.add(jid.subject);
+      if (entry.kind === 'friend') {
+        next.set(jid.subject, entry.friend);
+        requests.delete(jid.subject);
+      } else {
         next.delete(jid.subject);
         this.resources.delete(jid.subject);
-        continue;
+        if (entry.kind === 'request') requests.set(jid.subject, entry.request);
+        else requests.delete(jid.subject);
       }
-      const identity = child(item, 'id'),
-        old = this.roster.get(jid.subject);
-      next.set(jid.subject, {
-        ...old,
-        subject: jid.subject,
-        jid: jid.bare,
-        name: (identity?.attrs.name || item.attrs.name || old?.name || 'Friend').slice(0, 80),
-        tag: (identity?.attrs.tagline || old?.tag || '').slice(0, 32),
-        presence: old?.presence ?? 'offline',
-      });
     }
     this.roster = next;
+    this.requests = requests;
     for (const id of this.resources.keys())
       if (!next.has(id) && id !== this.credentials?.subject) this.resources.delete(id);
+    const actions = { ...this.state.friendActions };
+    for (const [subject, op] of Object.entries(actions))
+      if (
+        (full || changed.has(subject)) &&
+        this.friendMatches(subject, op.action) &&
+        ![...this.friendWrites.values()].some((w) => w.subject === subject)
+      )
+        delete actions[subject];
+    this.update({
+      friendActions: actions,
+      friendRequests: [...requests.values()].sort(
+        (a, b) =>
+          Number(a.direction === 'outgoing') - Number(b.direction === 'outgoing') ||
+          a.name.localeCompare(b.name),
+      ),
+    });
+    for (const [id, op] of this.friendWrites)
+      if ((full || changed.has(op.subject)) && this.friendMatches(op.subject, op.action))
+        this.finishFriend(id);
     this.publishFriends();
   }
   private applyPresence(node: XmlNode) {
@@ -666,6 +780,131 @@ export class RiotChat {
       );
     }
   }
+  changeFriend(action: FriendAction, player: PlayerRef): Promise<void> {
+    const c = this.credentials,
+      subject = validFriendTarget(player, c?.subject ?? '');
+    if (!['add', 'accept', 'decline'].includes(action))
+      throw new AppError('FRIEND_ACTION', 'Unknown friend action.');
+    if (this.phase !== 'ready' || !c || !this.socket || c.expiresAt <= this.now())
+      throw new AppError('CHAT_OFFLINE', 'Connect friends before changing a request.');
+    const incoming = this.requests.get(subject);
+    if (action !== 'add' && incoming?.direction !== 'incoming')
+      throw new AppError('FRIEND_REQUEST_CHANGED', 'This incoming request is no longer available.');
+    if (this.roster.has(subject)) throw new AppError('ALREADY_FRIENDS', 'You are already friends.');
+    if (action === 'add' && incoming)
+      throw new AppError(
+        'FRIEND_REQUEST_PENDING',
+        incoming.direction === 'incoming'
+          ? 'Accept the incoming request instead.'
+          : 'A request has already been sent.',
+      );
+    if (
+      this.friendWrites.size >= 3 ||
+      [...this.friendWrites.values()].some((v) => v.subject === subject)
+    )
+      throw new AppError('FRIEND_BUSY', 'A friend request is already being processed.');
+    const allowed = Math.max(this.lastFriendWrite + 2000, this.friendTimes.get(subject) ?? 0);
+    if (allowed > this.now())
+      throw new AppError('FRIEND_COOLDOWN', 'Wait before changing this request again.', allowed);
+    const id = `outpost-friend-${++this.counter}`,
+      epoch = this.generation,
+      at = this.now(),
+      socket = this.socket;
+    for (const [key, until] of this.friendTimes) if (until <= at) this.friendTimes.delete(key);
+    this.lastFriendWrite = at;
+    this.friendTimes.set(subject, at + FRIEND_ACTION_COOLDOWN);
+    this.update({
+      friendActions: {
+        ...this.state.friendActions,
+        [subject]: { action, state: 'sending', at, retryAt: at + FRIEND_ACTION_COOLDOWN },
+      },
+    });
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          this.finishFriend(
+            id,
+            new AppError(
+              'FRIEND_UNCONFIRMED',
+              'Riot has not confirmed this request. It was not sent again automatically.',
+            ),
+          ),
+        15000,
+      );
+      this.friendWrites.set(id, { subject, action, resolve, reject, timer });
+      const value = friendMutationXml(id, action, subject, incoming);
+      detailedDiagnosticEvent('xmpp-out', { stanza: value });
+      void socket.write(value).catch(() => {
+        if (epoch === this.generation)
+          this.finishFriend(
+            id,
+            new AppError(
+              'FRIEND_UNCONFIRMED',
+              'The connection changed. Check requests before trying again.',
+            ),
+          );
+      });
+    });
+  }
+  private finishFriend(id: string, error?: AppError): void {
+    const operation = this.friendWrites.get(id);
+    if (!operation) return;
+    clearTimeout(operation.timer);
+    this.friendWrites.delete(id);
+    for (const [query, subject] of this.friendChecks)
+      if (subject === operation.subject) this.friendChecks.delete(query);
+    const actions = { ...this.state.friendActions },
+      old = actions[operation.subject];
+    if (error && old)
+      actions[operation.subject] = {
+        ...old,
+        state: 'error',
+        code: error.code,
+        message: error.message,
+      };
+    else delete actions[operation.subject];
+    this.update({ friendActions: actions });
+    error ? operation.reject(error) : operation.resolve();
+  }
+  private friendMatches(subject: string, action: FriendAction): boolean {
+    return action === 'accept'
+      ? this.roster.has(subject)
+      : action === 'add'
+        ? this.roster.has(subject) || this.requests.get(subject)?.direction === 'outgoing'
+        : !this.requests.has(subject) && !this.roster.has(subject);
+  }
+  private friendReply(node: XmlNode): void {
+    const id = node.attrs.id!,
+      operation = this.friendWrites.get(id);
+    if (!operation) return;
+    if (node.attrs.type === 'error') {
+      const reason = child(node, 'error')?.children.find(
+        (n) => n.ns === 'urn:ietf:params:xml:ns:xmpp-stanzas',
+      )?.name;
+      this.finishFriend(
+        id,
+        new AppError(
+          'FRIEND_REJECTED',
+          reason ? `Riot rejected the request (${reason}).` : 'Riot rejected this friend request.',
+        ),
+      );
+      return;
+    }
+    const old = this.state.friendActions?.[operation.subject];
+    if (old?.state === 'awaiting') return;
+    if (old)
+      this.update({
+        friendActions: {
+          ...this.state.friendActions,
+          [operation.subject]: { ...old, state: 'awaiting' },
+        },
+      });
+    const query = `outpost-friends-check-${++this.counter}`;
+    this.friendChecks.set(query, operation.subject);
+    this.sendRaw(
+      `<iq id="${query}" type="get"><query xmlns="jabber:iq:riotgames:roster" last_state="true"/></iq>`,
+    );
+  }
   private fail(message: string, code = 'CHAT_NETWORK') {
     this.disconnect();
     this.update({ status: 'error', error: message, errorCode: code });
@@ -676,6 +915,19 @@ export class RiotChat {
       this.update({ unread: { ...this.state.unread, [subject]: 0 } });
   }
   disconnect(clear = false) {
+    for (const id of [...this.friendWrites.keys()])
+      this.finishFriend(
+        id,
+        new AppError(
+          'FRIEND_UNCONFIRMED',
+          'Chat disconnected before the request was confirmed. Check requests after reconnecting.',
+        ),
+      );
+    this.friendChecks.clear();
+    if (clear) {
+      this.requests.clear();
+      this.friendTimes.clear();
+    }
     for (const request of this.historyRequests.values()) {
       clearTimeout(request.timer);
       request.reject(
@@ -721,7 +973,7 @@ export class RiotChat {
       error: undefined,
       errorCode: undefined,
       messages,
-      ...(clear ? { messages: {}, unread: {} } : {}),
+      ...(clear ? { messages: {}, unread: {}, friendRequests: [], friendActions: {} } : {}),
     });
   }
 }

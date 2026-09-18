@@ -14,7 +14,7 @@ export function normalizeLiveStats(
 ): LiveStats | undefined {
   if (!inGame) return;
   const p = object(player),
-    raw = object(p.Stats ?? p.MatchStats);
+    raw = object(p.Stats ?? p.MatchStats ?? p.stats ?? p.matchStats);
   const values = ['Kills', 'Deaths', 'Assists'].map((key) => raw[key] ?? raw[key.toLowerCase()]);
   if (values.some((v) => typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1000))
     return;

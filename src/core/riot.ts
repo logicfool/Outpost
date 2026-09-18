@@ -1,3 +1,4 @@
+import { livePollInterval } from './refreshPolicy';
 import { aimOrigin } from './aimService';
 import { decodeAimDocument, encodeAimDocument } from './aimCodec';
 import type { AimDocument } from './aimTypes';
@@ -313,8 +314,18 @@ export class RiotClient {
         : { ...player, name: hasPlayerName(player.name) ? player.name : 'Name unavailable' };
     });
   }
+  private lastLive?: LiveGame;
   async liveGame(): Promise<LiveGame> {
-    return this.cache.get('live-result', 60000, () => this.fetchLiveGame());
+    if (
+      this.lastLive?.observedAt &&
+      Date.now() - this.lastLive.observedAt < livePollInterval(this.lastLive)
+    )
+      return this.lastLive;
+    return this.cache.get('live-result', 0, async () => {
+      const game = await this.fetchLiveGame();
+      this.lastLive = game;
+      return game;
+    });
   }
   private async fetchLiveGame(): Promise<LiveGame> {
     const id = this.session.account.puuid;
@@ -322,7 +333,7 @@ export class RiotClient {
       let matchId: string;
       try {
         const current = object(
-          (await this.read(`/${mode}/v1/players/${id}`, 60000, 'GET', undefined, id, 'glz')).data,
+          (await this.read(`/${mode}/v1/players/${id}`, 5000, 'GET', undefined, id, 'glz')).data,
         );
         matchId = uuid(current.MatchID);
       } catch (error) {
@@ -334,7 +345,7 @@ export class RiotClient {
       try {
         const detail = await this.read(
           `/${mode}/v1/matches/${matchId}`,
-          60000,
+          5000,
           'GET',
           undefined,
           id,
@@ -445,14 +456,18 @@ export class RiotClient {
     for (const match of matches) this.scope.allowMatch(id, uuid(match.id));
     return matches;
   }
-  async matchDetail(id: string, subject = this.session.account.puuid): Promise<MatchDetail> {
+  async matchDetail(
+    id: string,
+    subject = this.session.account.puuid,
+    fresh = false,
+  ): Promise<MatchDetail> {
     id = uuid(id);
     subject = uuid(subject);
     this.scope.player(subject);
     if (!this.scope.allowsMatch(subject, id)) await this.matchHistory(0, 20, subject);
     if (!this.scope.allowsMatch(subject, id))
       throw new AppError('MATCH_SCOPE', 'Open a match from this player’s loaded history.');
-    const raw = await this.read(`/match-details/v1/matches/${id}`, 24 * 60 * 60000);
+    const raw = await this.read(`/match-details/v1/matches/${id}`, fresh ? 0 : 60000);
     const detail = normalizeMatchDetail(
       raw.data,
       subject,
@@ -620,7 +635,12 @@ export class RiotClient {
     this.scope.allowMatch(subject, uuid(match.id));
     return this.matchIdentity(subject, match.id);
   }
-  async playerProfile(subject: string): Promise<PlayerProfile> {
+  async playerProfile(
+    subject: string,
+    identityLoader?: (
+      matchId: string,
+    ) => Promise<import('./friendLookup').IdentityObservation | undefined>,
+  ): Promise<PlayerProfile> {
     subject = uuid(subject);
     const entry = this.scope.player(subject);
     const [rank, matches] = await Promise.all([
@@ -631,7 +651,9 @@ export class RiotClient {
     let observed: import('./friendLookup').IdentityObservation | undefined;
     if (matches.status === 'ready' && matches.data[0]) {
       try {
-        observed = await this.matchIdentity(subject, matches.data[0].id);
+        observed = identityLoader
+          ? await identityLoader(matches.data[0].id)
+          : await this.matchIdentity(subject, matches.data[0].id);
       } catch {}
     }
     if (this.disposed)
@@ -905,7 +927,7 @@ export class RiotClient {
         pick(plan.account, previous?.rank, () => this.rank()),
         pick(plan.account, previous?.xp, async () => {
           const progress = object(
-            object((await this.read(`/account-xp/v1/players/${id}`, 2 * 60000)).data).Progress,
+            object((await this.read(`/account-xp/v1/players/${id}`, 60000)).data).Progress,
           );
           return {
             level: requiredNumber(progress.Level, 'account level'),
@@ -914,7 +936,7 @@ export class RiotClient {
         }),
         pick(plan.account, previous?.progression, async () =>
           normalizeProgression(
-            (await this.read(`/contracts/v1/contracts/${id}`, 2 * 60000)).data,
+            (await this.read(`/contracts/v1/contracts/${id}`, 60000)).data,
             this.catalog,
           ),
         ),

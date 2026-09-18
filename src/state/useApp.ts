@@ -1,3 +1,7 @@
+import { livePollInterval } from '../core/refreshPolicy';
+import { validateBackupData, type BackupData } from '../core/backup';
+import { mergeMatchSummaries, observedMarkets } from '../core/matchArchive';
+import { matchPreview } from '../core/matchArchive';
 import { useAim } from './useAim';
 import type { Friend } from '../core/chatTypes';
 import { useActions } from './useActions';
@@ -589,6 +593,19 @@ export function useApp() {
     },
     [settings],
   );
+  const setVideoSound = useCallback(
+    async (enabled: boolean) => {
+      if ((settings.videoSound !== false) === enabled) return;
+      const next = { ...settings, videoSound: enabled };
+      setSettings(next);
+      try {
+        await (await getRuntime()).repository.saveSettings(next);
+      } catch {
+        setMessage('Video sound preference could not be saved.');
+      }
+    },
+    [settings],
+  );
   const setAutoChatHistory = useCallback(
     async (enabled: boolean) => {
       const next = { ...settings, autoChatHistory: enabled };
@@ -624,11 +641,36 @@ export function useApp() {
       const stamp = epoch.current,
         runtime = await getRuntime();
 
-      await runtime.loadCatalog().catch(() => {});
+      const savedReport = await runtime.repository.archivedReport(
+        account.puuid,
+        subject ?? account.puuid,
+        id,
+      );
+      if (!savedReport) await runtime.loadCatalog().catch(() => {});
       if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
         throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
       setCatalog(runtime.catalog);
-      const detail = await (await runtime.client(account.puuid)).matchDetail(id, subject);
+      const detail = await runtime.matchReport(account.puuid, id, subject ?? account.puuid);
+      if (epoch.current === stamp && (!subject || subject === account.puuid))
+        setSnapshot((previous) =>
+          previous?.accountId === account.puuid && previous.matches.status === 'ready'
+            ? {
+                ...previous,
+                matches: {
+                  ...previous.matches,
+                  data: previous.matches.data.map((m) =>
+                    m.id === id
+                      ? {
+                          ...m,
+                          preview: matchPreview(detail),
+                          previewComplete: detail.completed !== false,
+                        }
+                      : m,
+                  ),
+                },
+              }
+            : previous,
+        );
       const own = detail.players.find((p) => p.subject === account.puuid);
       if (own?.card && epoch.current === stamp && activeRef.current?.puuid === account.puuid)
         setObservedIdentity((previous) =>
@@ -649,22 +691,28 @@ export function useApp() {
     setBusy(true);
     try {
       const runtime = await getRuntime(),
-        next = await (
-          await runtime.client(account.puuid)
-        ).matchHistory(snapshot.matches.data.length);
+        next = await runtime.historyPage(
+          account.puuid,
+          account.puuid,
+          snapshot.matches.data.length,
+        );
       if (epoch.current !== stamp) return;
       if (!next.length) {
         setMessage('No more matches were returned in this range.');
         return;
       }
-      const unique = new Map<string, MatchSummary>(
-        [...snapshot.matches.data, ...next].map((m) => [m.id, m]),
-      );
       setSnapshot((previous) =>
         previous?.accountId === account.puuid
           ? {
               ...previous,
-              matches: { status: 'ready', fetchedAt: Date.now(), data: [...unique.values()] },
+              matches: {
+                status: 'ready',
+                fetchedAt: Date.now(),
+                data: mergeMatchSummaries(
+                  previous.matches.status === 'ready' ? previous.matches.data : [],
+                  next,
+                ),
+              },
             }
           : previous,
       );
@@ -674,6 +722,20 @@ export function useApp() {
       if (epoch.current === stamp) setBusy(false);
     }
   }, [snapshot]);
+  const refreshProfile = useCallback(async (): Promise<Snapshot | null> => {
+    const account = activeRef.current;
+    if (!account) return null;
+    const stamp = epoch.current;
+    if (account.demo) return snapshotRef.current;
+    const runtime = await getRuntime(),
+      profile = await runtime.profile(account.puuid);
+    if (stamp !== epoch.current || activeRef.current?.puuid !== account.puuid) return null;
+    if (profile)
+      setSnapshot((previous) =>
+        previous?.accountId === account.puuid ? mergeSnapshot(previous, profile) : profile,
+      );
+    return profile;
+  }, []);
   const liveFlight = useRef<{ id: string; work: Promise<Section<LiveGame>> } | null>(null);
   const refreshLive = useCallback(async (): Promise<Section<LiveGame>> => {
     const account = activeRef.current;
@@ -686,7 +748,13 @@ export function useApp() {
         const game = account.demo
           ? makeDemo().snapshot.liveGame
           : await (await getRuntime()).live(account.puuid);
-        next = game;
+        next =
+          account.demo && game.status === 'ready'
+            ? {
+                ...game,
+                data: { ...game.data, nextCheckAt: Date.now() + livePollInterval(game.data) },
+              }
+            : game;
       } catch (reason) {
         const e = safeError(reason);
         next = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
@@ -705,6 +773,24 @@ export function useApp() {
       if (liveFlight.current?.work === work) liveFlight.current = null;
     }
   }, []);
+  const cachedPlayerProfile = useCallback(
+    async (player: PlayerRef): Promise<PlayerProfile | null> => {
+      const account = activeRef.current;
+      if (!account || account.demo) return null;
+      const stamp = epoch.current;
+      const runtime = await getRuntime(),
+        rows = await runtime.repository.archivedMatches(account.puuid, player.subject, 0, 40);
+      if (epoch.current !== stamp || !rows.length) return null;
+      return {
+        player,
+        identitySource: 'match',
+        fetchedAt: 0,
+        rank: { status: 'error', code: 'RANK_NOT_CACHED', message: 'Refreshing rank...' },
+        matches: { status: 'ready', data: rows, fetchedAt: 0 },
+      };
+    },
+    [],
+  );
   const playerProfile = useCallback(
     async (player: PlayerRef): Promise<PlayerProfile> => {
       const account = activeRef.current;
@@ -725,7 +811,39 @@ export function useApp() {
         runtime = await getRuntime(),
         client = await runtime.client(account.puuid);
       client.scope.player(player.subject);
-      const data = await client.playerProfile(player.subject);
+      const data = await client.playerProfile(player.subject, async (matchId) => {
+        const detail = await runtime.matchReport(account.puuid, matchId, player.subject);
+        const identity = detail.players.find((p) => p.subject === player.subject && !p.hidden);
+        return identity ? { player: identity, observedAt: detail.startedAt } : undefined;
+      });
+      if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      if (data.matches.status === 'ready')
+        await runtime.repository.saveArchivedMatches(
+          account.puuid,
+          player.subject,
+          data.matches.data,
+        );
+      const cachedMatches = await runtime.repository.archivedMatches(
+        account.puuid,
+        player.subject,
+        0,
+        40,
+      );
+      if (cachedMatches.length)
+        data.matches =
+          data.matches.status === 'ready'
+            ? { ...data.matches, data: cachedMatches }
+            : {
+                status: 'ready',
+                data: cachedMatches,
+                fetchedAt: 0,
+                warning: {
+                  code: data.matches.code,
+                  message: data.matches.message,
+                  retryAt: data.matches.retryAt,
+                },
+              };
       if (epoch.current !== stamp || activeRef.current?.puuid !== account.puuid)
         throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
       await social
@@ -756,7 +874,7 @@ export function useApp() {
   const playerMatches = useCallback(async (subject: string, start: number) => {
     const account = activeRef.current;
     if (!account || account.demo) return [];
-    return (await (await getRuntime()).client(account.puuid)).matchHistory(start, 20, subject);
+    return (await getRuntime()).historyPage(account.puuid, subject, start, 20);
   }, []);
   const liveEquipment = useCallback(
     async (matchId: string): Promise<Section<import('../core/matchTypes').LiveEquipment>> => {
@@ -841,6 +959,126 @@ export function useApp() {
     },
     [catalog],
   );
+  const savedMarkets = useCallback(async () => {
+    const a = activeRef.current;
+    if (!a) return [];
+    if (a.demo) {
+      const d = makeDemo().snapshot.store;
+      return d.status === 'ready' ? observedMarkets(a.puuid, d.data) : [];
+    }
+    return (await getRuntime()).repository.marketHistory(a.puuid);
+  }, []);
+  const exportBackupData = useCallback(
+    async (includeReports: boolean): Promise<BackupData> => {
+      const a = activeRef.current;
+      if (!a) throw new AppError('NO_ACCOUNT', 'Select an account.');
+      if (!a.demo)
+        return (await getRuntime()).repository.exportAccountData(a.puuid, includeReports);
+      const d = snapshotRef.current ?? makeDemo().snapshot;
+      return validateBackupData(
+        JSON.parse(
+          JSON.stringify({
+            account: {
+              puuid: a.puuid,
+              gameName: a.gameName,
+              tagLine: a.tagLine,
+              region: a.region,
+              shard: a.shard,
+            },
+            presets: await actions.listPresets(),
+            aimPresets: aim.aimPresets,
+            wishlist: demoWishes.current,
+            matches:
+              d.matches.status === 'ready'
+                ? d.matches.data.map((summary) => ({ subject: a.puuid, summary }))
+                : [],
+            reports:
+              includeReports && d.matches.status === 'ready'
+                ? d.matches.data.slice(0, 3).map((m) => ({
+                    subject: a.puuid,
+                    savedAt: Date.now(),
+                    completed: true,
+                    detail: demoMatch(m.id),
+                  }))
+                : [],
+            markets: d.store.status === 'ready' ? observedMarkets(a.puuid, d.store.data) : [],
+            storeHistory: history,
+            profile: { rank: d.rank, xp: d.xp, loadout: d.loadout, progression: d.progression },
+            settings,
+          }),
+        ),
+      );
+    },
+    [actions.listPresets, aim.aimPresets, history, settings],
+  );
+  const restoreBackupData = useCallback(
+    async (input: BackupData, restoreSettings: boolean) => {
+      const a = activeRef.current,
+        stamp = epoch.current;
+      if (!a) throw new AppError('NO_ACCOUNT', 'Select an account.');
+      const guard = () => {
+        if (epoch.current !== stamp || activeRef.current?.puuid !== a.puuid)
+          throw new AppError('ACCOUNT_CHANGED', 'The selected account changed.');
+      };
+      const data = validateBackupData(input);
+      if (data.account.puuid !== a.puuid)
+        throw new AppError('BACKUP_ACCOUNT', 'Sign in to the account named in this backup first.');
+      if (a.demo) {
+        const existing = await actions.listPresets();
+        for (const p of data.presets)
+          if (!existing.some((x) => x.id === p.id))
+            await actions.savePreset(p.name, p.weapons, p.id);
+        for (const p of data.aimPresets)
+          if (!aim.aimPresets.some((x) => x.id === p.id))
+            await aim.saveAimPreset(p.name, p.profile, p.sensitivity, p.id);
+        guard();
+        demoWishes.current = [...new Set([...demoWishes.current, ...data.wishlist])];
+        setWishlist(demoWishes.current);
+        setHistory((previous) => [
+          ...new Map([...data.storeHistory, ...previous].map((x) => [x.id, x])).values(),
+        ]);
+        setSnapshot((previous) => {
+          if (!previous) return previous;
+          const own = data.matches.filter((m) => m.subject === a.puuid).map((m) => m.summary);
+          return {
+            ...previous,
+            ...data.profile,
+            matches: {
+              status: 'ready',
+              fetchedAt: Date.now(),
+              data: mergeMatchSummaries(
+                previous.matches.status === 'ready' ? previous.matches.data : [],
+                own,
+              ),
+            },
+          };
+        });
+        if (restoreSettings) {
+          const next = { ...data.settings, allowPurchases: settings.allowPurchases };
+          setSettings(next);
+          await (await getRuntime()).repository.saveSettings(next);
+        }
+        return;
+      }
+      const runtime = await getRuntime();
+      guard();
+      await runtime.repository.restoreAccountData(a.puuid, data, restoreSettings, guard);
+      guard();
+      const [saved, wishes, entries, prefs] = await Promise.all([
+        runtime.repository.snapshot(a.puuid),
+        runtime.repository.wishlist(a.puuid),
+        runtime.repository.history(a.puuid),
+        runtime.repository.settings(),
+      ]);
+      guard();
+      setSnapshot(saved);
+      setWishlist(wishes);
+      setHistory(entries);
+      setSettings(prefs);
+      setLinkRevision((v) => v + 1);
+    },
+    [actions.listPresets, actions.savePreset, aim.aimPresets, aim.saveAimPreset, settings],
+  );
   const playerRank = useCallback(async (player: PlayerRef) => {
     const account = activeRef.current;
     if (!account) throw new AppError('NO_ACCOUNT', 'Select an account.');
@@ -871,6 +1109,10 @@ export function useApp() {
     setTheme,
     setAutoChatHistory,
     setAutoplayVideos,
+    setVideoSound,
+    savedMarkets,
+    exportBackupData,
+    restoreBackupData,
     refreshMedia,
     refresh,
     switchAccount,
@@ -885,6 +1127,8 @@ export function useApp() {
     matchDetail,
     moreMatches,
     refreshLive,
+    refreshProfile,
+    cachedPlayerProfile,
     playerProfile,
     playerMatches,
     playerRank,

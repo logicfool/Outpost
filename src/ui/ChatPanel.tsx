@@ -33,32 +33,29 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const { C, S } = useTheme();
   return (
-    <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+    <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
       {day && <Text style={[S.small, { textAlign: 'center', marginBottom: 12 }]}>{day}</Text>}
       <View
         style={{
           alignSelf: message.direction === 'outgoing' ? 'flex-end' : 'flex-start',
-          maxWidth: '88%',
+          maxWidth: '84%',
           backgroundColor: message.direction === 'outgoing' ? `${C.accent}18` : C.surface,
-          borderRadius: 18,
-          borderWidth: 1,
+          borderRadius: 16,
+          borderWidth: 0.5,
           borderColor: C.border,
-          padding: 14,
-          gap: 6,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          gap: 4,
         }}
       >
         <Text selectable style={[S.body, { color: C.ink }]}>
           {message.body}
         </Text>
-        <Text style={S.small}>
+        <Text style={[S.small, { fontSize: 10, alignSelf: 'flex-end' }]}>
           {new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          {message.serverStored
-            ? ' · Riot history'
-            : message.source === 'riot-client'
-              ? ' · Riot client'
-              : message.direction === 'outgoing'
-                ? ` · ${message.state === 'sent' ? 'Sent' : message.state === 'failed' ? 'Unconfirmed - not retried' : 'Sending…'}`
-                : ''}
+          {message.direction === 'outgoing'
+            ? ` · ${message.state === 'sent' ? '✓' : message.state === 'failed' ? 'Unconfirmed' : 'Sending...'}`
+            : ''}
         </Text>
       </View>
     </View>
@@ -84,7 +81,6 @@ export function ChatPanel({
     [error, setError] = useState<string>(),
     [sending, setSending] = useState(false),
     [more, setMore] = useState(false),
-    [confirm, setConfirm] = useState(false),
     [opening, setOpening] = useState(true);
   const list = useRef<FlatList<ChatMessage>>(null),
     mounted = useRef(true),
@@ -144,14 +140,6 @@ export function ChatPanel({
       if (mounted.current) setMore(false);
     }
   }, [cursor, subject, model.loadChatMessages]);
-  const erase = async () => {
-    setConfirm(false);
-    try {
-      await model.clearChatHistory(subject);
-    } catch (reason) {
-      if (mounted.current) setError(safeError(reason).message);
-    }
-  };
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     follow.current = event.nativeEvent.contentOffset.y < 80;
   }, []);
@@ -290,24 +278,6 @@ export function ChatPanel({
           >
             {error ?? model.chat.storageError}
           </Text>
-        )}
-        {confirm ? (
-          <View style={{ padding: 16, gap: 10 }}>
-            <Text style={S.body}>
-              Delete this conversation from this device? Riot’s copy is unchanged.
-            </Text>
-            <Button title="Delete local messages" onPress={() => void erase()} />
-            <Button title="Keep messages" secondary onPress={() => setConfirm(false)} />
-          </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Delete saved conversation"
-            onPress={() => setConfirm(true)}
-            style={{ paddingHorizontal: 16, paddingVertical: 8 }}
-          >
-            <Text style={S.small}>Delete saved conversation</Text>
-          </Pressable>
         )}
         <View
           style={[

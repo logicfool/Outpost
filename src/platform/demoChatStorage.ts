@@ -41,7 +41,9 @@ export const demoChatStorage: ChatStore = {
     ];
     return peers.map((subject) => {
       const msgs = data.messages.filter((m) => m.subject === subject);
+      const lastMessage = [...msgs].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id))[0];
       return {
+        lastMessage,
         subject,
         friend: data.friends.find((f) => f.subject === subject),
         lastAt: Math.max(0, ...msgs.map((m) => m.at)),

@@ -212,6 +212,16 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
               <Feather name="message-square" color={C.ink} size={21} />
             </Pressable>
           </View>
+          <Button
+            title={
+              'Friend requests (' +
+              (model.chat.friendRequests ?? []).filter((r) => r.direction === 'incoming').length +
+              ')'
+            }
+            secondary
+            icon="user-plus"
+            onPress={() => onNavigate({ type: 'friend-requests' })}
+          />
           <View style={[styles.row, { marginBottom: 0 }]}>
             <PlayerAvatar card={ownCard ?? self?.card} catalog={model.catalog} size={40} />
             <View style={styles.identity}>

@@ -22,6 +22,7 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
   const cache = useRef<Record<string, MatchDetail>>({}),
     wanted = useRef<string[]>([]),
     blocked = useRef(0);
+  const loadedAt = useRef<Record<string, number>>({});
   const generation = useRef(0),
     running = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -60,6 +61,7 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
         if (oldest) delete next[oldest];
       }
       cache.current = next;
+      loadedAt.current[id] = Date.now();
       setView({ scope: selectedScope, details: next });
     } catch (reason) {
       if (stamp === generation.current && current.current.scope === selectedScope) {
@@ -85,6 +87,7 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
   useEffect(() => {
     generation.current++;
     cache.current = {};
+    loadedAt.current = {};
     wanted.current = [];
     blocked.current = 0;
     running.current = false;
@@ -106,6 +109,17 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
       listener.remove();
     };
   }, [enabled]);
+  useEffect(() => {
+    const expired = Object.keys(cache.current).filter(
+      (id) =>
+        cache.current[id]?.completed === false && Date.now() - (loadedAt.current[id] ?? 0) >= 60000,
+    );
+    if (expired.length) {
+      for (const id of expired) delete cache.current[id];
+      setView({ scope, details: { ...cache.current } });
+      void pump.current();
+    }
+  }, [model.snapshot?.matches, scope]);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 15,
     minimumViewTime: 200,
@@ -113,7 +127,7 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: { item: MatchSummary; isViewable: boolean }[] }) => {
       wanted.current = viewableItems
-        .filter((v) => v.isViewable)
+        .filter((v) => v.isViewable && (!v.item.preview || v.item.previewComplete === false))
         .slice(0, 6)
         .map((v) => v.item.id);
       void pump.current();

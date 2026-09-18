@@ -39,7 +39,23 @@ export interface ChatMessage {
   source?: 'outpost' | 'live' | 'riot-archive' | 'riot-client';
   serverStored?: boolean;
 }
+export interface FriendRequest extends PlayerRef {
+  jid: string;
+  direction: 'incoming' | 'outgoing';
+  updatedAt: number;
+}
+export type FriendAction = 'add' | 'accept' | 'decline';
+export interface FriendOperation {
+  action: FriendAction;
+  state: 'sending' | 'awaiting' | 'error';
+  at: number;
+  retryAt: number;
+  code?: string;
+  message?: string;
+}
 export interface ChatState {
+  friendRequests?: FriendRequest[];
+  friendActions?: Record<string, FriendOperation>;
   status: 'disconnected' | 'connecting' | 'authenticating' | 'ready' | 'error';
   error?: string;
   errorCode?: string;
@@ -88,6 +104,7 @@ export interface Conversation {
   lastAt: number;
   count: number;
   unread: number;
+  lastMessage?: ChatMessage;
 }
 export interface MessageCursor {
   at: number;

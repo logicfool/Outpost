@@ -17,9 +17,11 @@ export type ExplorerRoute =
   | { type: 'round'; detail: import('../core/types').MatchDetail; round: number; eventId?: string }
   | { type: 'live-loadout'; matchId: string; subject?: string }
   | { type: 'presets' }
+  | { type: 'market-history' }
   | { type: 'buddies' }
   | { type: 'aim'; tab?: import('./AimPanel').AimTab }
   | { type: 'friends' }
+  | { type: 'friend-requests' }
   | { type: 'chat-settings'; subject?: string }
   | { type: 'chat'; subject: string };
 export type Navigate = (route: ExplorerRoute) => void;

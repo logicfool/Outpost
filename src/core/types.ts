@@ -171,6 +171,8 @@ export interface LiveGame {
   mapImage?: string;
 }
 export interface MatchSummary {
+  preview?: import('./matchArchive').MatchPreview;
+  previewComplete?: boolean;
   id: string;
   startedAt: number;
   queue: string;
@@ -201,6 +203,7 @@ export interface MatchPlayer {
   headshotPct: number | null;
 }
 export interface MatchDetail {
+  completed?: boolean;
   id: string;
   map: string;
   mapImage?: string;
@@ -255,6 +258,8 @@ export interface Snapshot {
   accountId: string;
   fetchedAt: number;
   demo: boolean;
+  profileNextCheckAt?: number;
+  profileIssue?: { code: string; message: string; retryAt?: number };
   nextAutoRefreshAt?: number;
   refreshIssue?: { code: string; message: string; retryAt?: number };
   store: Section<Store>;
@@ -284,6 +289,7 @@ export interface Settings {
   theme?: import('./theme').ThemePreference;
   autoChatHistory?: boolean;
   autoplayVideos?: boolean;
+  videoSound?: boolean;
   defaultsVersion?: number;
 }
 export const MAX_ACCOUNTS = 10;
@@ -298,6 +304,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'navy',
   autoChatHistory: true,
   autoplayVideos: true,
+  videoSound: true,
   defaultsVersion: 2,
 };
 export const EMPTY_CATALOG: Catalog = {

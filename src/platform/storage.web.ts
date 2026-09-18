@@ -10,12 +10,21 @@ try {
     settings.theme = themePreference(localStorage.getItem('outpost.theme'));
     settings.autoChatHistory = localStorage.getItem('outpost.autoChatHistory') !== 'false';
     settings.autoplayVideos = localStorage.getItem('outpost.autoplayVideos') !== 'false';
+    settings.videoSound = localStorage.getItem('outpost.videoSound') !== 'false';
   }
 } catch {}
 const unavailable = async (): Promise<never> => {
   throw new AppError('NATIVE_REQUIRED', 'Real account access is available only in the native app.');
 };
 const repository: Repository = {
+  exportAccountData: unavailable,
+  restoreAccountData: unavailable,
+  archivedMatchTrusted: async () => false,
+  archivedMatches: async () => [],
+  saveArchivedMatches: unavailable,
+  archivedReport: async () => null,
+  saveArchivedReport: unavailable,
+  marketHistory: async () => [],
   aimState: async () => null,
   saveAimState: unavailable,
   aimPresets: async () => [],
@@ -46,6 +55,7 @@ const repository: Repository = {
         localStorage.setItem('outpost.theme', settings.theme!);
         localStorage.setItem('outpost.autoChatHistory', String(settings.autoChatHistory !== false));
         localStorage.setItem('outpost.autoplayVideos', String(settings.autoplayVideos !== false));
+        localStorage.setItem('outpost.videoSound', String(settings.videoSound !== false));
       }
     } catch {}
   },
