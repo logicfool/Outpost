@@ -1,3 +1,4 @@
+import { normalizeLiveStats } from './liveStats';
 import type { Catalog, LiveGame } from './types';
 import type { LivePlayer } from './playerTypes';
 import { catalogItem } from './catalog';
@@ -47,6 +48,7 @@ export function normalizeLive(
     const tier = nullableNumber(p.CompetitiveTier),
       meta = tierMeta(catalog, tier);
     players.set(subject, {
+      stats: normalizeLiveStats(p, state === 'in_game'),
       subject,
       self: subject === self,
       teamId: text(p.TeamID),

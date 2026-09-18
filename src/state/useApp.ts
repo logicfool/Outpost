@@ -1,3 +1,4 @@
+import { useAim } from './useAim';
 import type { Friend } from '../core/chatTypes';
 import { useActions } from './useActions';
 import { useNotificationSetup } from './useNotificationSetup';
@@ -83,6 +84,16 @@ export function useApp() {
       ),
     setCatalog,
     setSnapshot,
+    () => ({ accountId: activeRef.current?.puuid, revision: epoch.current }),
+  );
+  const aim = useAim(
+    active,
+    !booting &&
+      !busy &&
+      snapshot?.accountId === active?.puuid &&
+      snapshot?.store.status === 'ready' &&
+      snapshot?.wallet.status === 'ready',
+    linkRevision,
     () => ({ accountId: activeRef.current?.puuid, revision: epoch.current }),
   );
   useEffect(() => {
@@ -439,6 +450,15 @@ export function useApp() {
     async (tokens: LoginTokens, region?: Region, expectedId?: string) => {
       const runtime = await getRuntime(),
         account = await runtime.link(tokens, region, expectedId);
+      await runtime.markAimLogin(account.puuid).catch(() =>
+        recordRequest({
+          at: Date.now(),
+          service: 'Aim settings',
+          method: 'LOCAL',
+          code: 'LOGIN_SYNC_DEFERRED',
+          durationMs: 0,
+        }),
+      );
       setAccounts((list) =>
         list.some((a) => a.puuid === account.puuid)
           ? list.map((a) => (a.puuid === account.puuid ? account : a))
@@ -834,6 +854,7 @@ export function useApp() {
   return {
     ...social,
     ...actions,
+    ...aim,
     observedIdentity: observedIdentity?.accountId === active?.puuid ? observedIdentity : null,
     booting,
     accounts,

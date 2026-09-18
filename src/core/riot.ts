@@ -1,3 +1,6 @@
+import { aimOrigin } from './aimService';
+import { decodeAimDocument, encodeAimDocument } from './aimCodec';
+import type { AimDocument } from './aimTypes';
 import {
   ownedBuddies,
   applyBuddyChoices,
@@ -463,6 +466,94 @@ export class RiotClient {
       name: detail.players.find((p) => p.subject === duel.subject)?.name ?? duel.name,
     }));
     return detail;
+  }
+  async readAimDocument(): Promise<AimDocument> {
+    if (!this.isActive())
+      throw new AppError('SESSION_EXPIRED', 'Renew the account before loading aim settings.');
+    const result = await this.http
+      .json(
+        aimOrigin(this.session.account.region) + '/playerPref/v3/getPreference/Ares.PlayerSettings',
+        {
+          headers: {
+            Authorization: `Bearer ${this.session.accessToken}`,
+            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+            Accept: 'application/json',
+          },
+        },
+        {
+          maxResponseBytes: 512 * 1024,
+          beforeDispatch: async () => {
+            if (!this.isActive())
+              throw new AppError('SESSION_EXPIRED', 'The account changed before loading settings.');
+          },
+        },
+      )
+      .catch(async (reason) => {
+        if (safeError(reason).status === 401)
+          throw new AppError(
+            'AIM_AUTH',
+            'Riot rejected access to aim settings. Other account features are unchanged.',
+            undefined,
+            401,
+          );
+        if (safeError(reason).status === 403)
+          throw new AppError(
+            'AIM_ACCESS',
+            'Riot did not allow aim settings access for this account.',
+            undefined,
+            403,
+          );
+        throw reason;
+      });
+    if (!this.isActive())
+      throw new AppError('SESSION_REMOVED', 'The account changed while loading settings.');
+    const subject = object(result.data).Subject ?? object(result.data).subject;
+    if (subject !== undefined && uuid(subject) !== this.session.account.puuid)
+      throw new AppError('ACCOUNT_MISMATCH', 'Riot returned another account settings response.');
+    return decodeAimDocument(result.data);
+  }
+  async writeAimDocument(data: Record<string, unknown>, guard: () => void): Promise<void> {
+    const payload = encodeAimDocument(data);
+    await this.http
+      .json(
+        aimOrigin(this.session.account.region) + '/playerPref/v3/savePreference',
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${this.session.accessToken}`,
+            'X-Riot-Entitlements-JWT': this.session.entitlementsToken,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(payload),
+        },
+        {
+          allowEmptyJson: true,
+          maxResponseBytes: 512 * 1024,
+          beforeDispatch: async () => {
+            if (!this.isActive())
+              throw new AppError('SESSION_EXPIRED', 'The account session changed before saving.');
+            guard();
+          },
+        },
+      )
+      .catch(async (reason) => {
+        if (safeError(reason).status === 401)
+          throw new AppError(
+            'AIM_AUTH',
+            'Riot rejected access to aim settings. Other account features are unchanged.',
+            undefined,
+            401,
+          );
+        if (safeError(reason).status === 403)
+          throw new AppError(
+            'AIM_ACCESS',
+            'Riot did not allow aim settings access for this account.',
+            undefined,
+            403,
+          );
+        throw reason;
+      });
   }
   async chatBootstrap() {
     if (!this.isActive())

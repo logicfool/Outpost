@@ -16,6 +16,11 @@ const unavailable = async (): Promise<never> => {
   throw new AppError('NATIVE_REQUIRED', 'Real account access is available only in the native app.');
 };
 const repository: Repository = {
+  aimState: async () => null,
+  saveAimState: unavailable,
+  aimPresets: async () => [],
+  saveAimPreset: unavailable,
+  deleteAimPreset: unavailable,
   presets: async () => [],
   savePreset: unavailable,
   deletePreset: unavailable,

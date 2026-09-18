@@ -43,7 +43,9 @@ export function presenceProgress(
   }
   const queue = (text(match.queueId) || text(party.queueId)).toLowerCase(),
     rounds = ROUND_QUEUES.has(queue);
-  const explicitRound = count(first(match.currentRound, match.roundNumber));
+  const explicitRound = count(
+    first(match.currentRound, match.roundNumber, match.CurrentRound, match.RoundNumber),
+  );
   const validRound =
     rounds && explicitRound !== undefined && explicitRound >= 1 && explicitRound <= 200
       ? explicitRound
@@ -85,32 +87,60 @@ export function ownLiveProgress(
   self: Friend | undefined,
   connected: boolean,
   now = Date.now(),
+  friends: readonly Friend[] = [],
 ): MatchProgress | undefined {
   if (!game || game.state !== 'in_game') return;
-  if (game.progress && progressLabel(game.progress, now)) return game.progress;
+  const candidates: MatchProgress[] = [];
   if (
-    !connected ||
-    !self ||
-    self.presence !== 'in_game' ||
-    !self.progress ||
-    !progressLabel(self.progress, now)
+    game.progress &&
+    (!game.progress.matchId || game.progress.matchId === game.matchId) &&
+    progressLabel(game.progress, now)
   )
-    return;
-  if (self.matchId) {
-    if (self.matchId !== game.matchId) return;
-  } else if (
-    !self.mapId ||
-    !game.mapId ||
-    self.mapId !== game.mapId ||
-    !self.queue ||
-    !game.queue ||
-    self.queue !== game.queue
-  )
-    return;
-  return {
-    ...self.progress,
-    source: self.progress.source === 'party-owner' ? 'party-owner' : 'self-presence',
+    candidates.push(game.progress);
+  if (!connected) return candidates[0];
+  const own = game.players?.find((p) => p.self);
+  const accept = (presence: Friend | undefined, teammate: boolean) => {
+    if (
+      !presence ||
+      presence.presence !== 'in_game' ||
+      !presence.progress ||
+      !progressLabel(presence.progress, now)
+    )
+      return;
+    const member = game.players?.find((p) => p.subject === presence.subject);
+    if (
+      teammate &&
+      (!member ||
+        member.hidden ||
+        !own ||
+        member.teamId !== own.teamId ||
+        member.subject === own.subject)
+    )
+      return;
+    if (!teammate && own && presence.subject !== own.subject) return;
+    const ids = [presence.matchId, presence.progress.matchId].filter(Boolean);
+    if (teammate && !ids.length) return;
+    if (
+      ids.length
+        ? ids.some((id) => id !== game.matchId)
+        : !presence.mapId ||
+          presence.mapId !== game.mapId ||
+          !presence.queue ||
+          (!!game.queue && presence.queue.toLowerCase() !== game.queue.toLowerCase())
+    )
+      return;
+    candidates.push({
+      ...presence.progress,
+      source: teammate
+        ? 'teammate-presence'
+        : presence.progress.source === 'party-owner'
+          ? 'party-owner'
+          : 'self-presence',
+    });
   };
+  accept(self, false);
+  for (const friend of friends) accept(friend, true);
+  return candidates.sort((a, b) => b.observedAt - a.observedAt)[0];
 }
 
 export function matchProgress(

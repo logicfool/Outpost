@@ -1,3 +1,5 @@
+import { LiveDataStatus, LiveStatsLine } from './LiveDataStatus';
+import { AimPanel } from './AimPanel';
 import { IdentityPanel } from './IdentityPanel';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { BuddiesPanel } from './BuddiesPanel';
@@ -340,6 +342,8 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
     gameData,
     model.chat.selfPresence,
     model.chat.status === 'ready',
+    Date.now(),
+    model.chat.friends,
   );
   const rosterKey = gameData?.players
     ?.filter((p) => !p.hidden)
@@ -432,6 +436,12 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                   {model.active?.region.toUpperCase()}
                 </Text>
               </View>
+              {game.state === 'in_game' && (
+                <LiveDataStatus
+                  progress={progress}
+                  hasStats={game.players?.some((p) => !!p.stats) ?? false}
+                />
+              )}
               {game.detailError && (
                 <Empty
                   title="Match found; details unavailable"
@@ -510,6 +520,7 @@ function LivePanel({ model, onBack, onNavigate }: PanelProps) {
                                   : ''}
                               </Text>
                             ))}
+                          {game.state === 'in_game' && <LiveStatsLine stats={p.stats} />}
                         </View>
                         {(p.tierImage ?? ranks[p.subject]?.image) && (
                           <Image
@@ -740,6 +751,9 @@ export function ExplorerModal({
           subject={route.subject}
           onBack={onBack}
         />
+      )}
+      {route?.type === 'aim' && (
+        <AimPanel key={model.active?.puuid} model={model} initialTab={route.tab} onBack={onBack} />
       )}
       {route?.type === 'buddies' && (
         <BuddiesPanel key={model.active?.puuid} model={model} onBack={onBack} />

@@ -1,3 +1,5 @@
+import { AimService, type AimConsent } from '../core/aimService';
+import type { AimEdit, AimState } from '../core/aimTypes';
 import { FriendLookupGate } from '../core/friendLookup';
 import { needsSessionRecovery } from '../core/sessionRecovery';
 import {
@@ -80,6 +82,48 @@ export class Runtime {
     readonly repository: Repository,
     private now: () => number = Date.now,
   ) {}
+  private aimService?: AimService;
+  private aim() {
+    return (this.aimService ??= new AimService(
+      this.repository,
+      (id) => this.client(id),
+      this.now,
+      randomId,
+    ));
+  }
+  private aimGuard(id: string, selection?: () => void) {
+    const generation = this.generations.get(id) ?? 0;
+    return () => {
+      selection?.();
+      if (
+        generation !== (this.generations.get(id) ?? 0) ||
+        this.signingOut.has(id) ||
+        this.linkingAccounts.has(id)
+      )
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed during the settings operation.');
+    };
+  }
+  syncAim(
+    id: string,
+    reason: 'auto' | 'manual' = 'manual',
+    selection?: () => void,
+  ): Promise<AimState> {
+    return this.aim().sync(uuid(id), reason, this.aimGuard(id, selection));
+  }
+  applyAim(
+    id: string,
+    edit: AimEdit,
+    consent: AimConsent,
+    selection: () => void,
+  ): Promise<AimState> {
+    return this.aim().apply(uuid(id), edit, consent, this.aimGuard(id, selection));
+  }
+  acceptAimServerState(id: string, selection: () => void): Promise<AimState> {
+    return this.aim().acceptServerState(uuid(id), this.aimGuard(id, selection));
+  }
+  async markAimLogin(id: string): Promise<void> {
+    await this.aim().markLogin(uuid(id));
+  }
   async loadCatalog(force = false, allowNetwork = true): Promise<Catalog> {
     if (this.catalogFlight) return this.catalogFlight;
     const work = async () => {
@@ -195,6 +239,7 @@ export class Runtime {
       initializing = this.clientFlights.get(id);
     this.linkingAccounts.add(id);
     try {
+      await this.aimService?.drain(id);
       await this.purchaseFlights.get(id)?.catch(() => {});
       await this.purchaseCheckFlights.get(id)?.work.catch(() => {});
       this.invalidate(id);
@@ -1257,6 +1302,7 @@ export class Runtime {
 
     await this.flights.get(id)?.catch(() => {});
     await this.identityFlights.get(id)?.catch(() => {});
+    await this.aimService?.drain(id);
     await cancelAccountNotifications(id);
     await removeChatStorage(id);
     await vault.remove(id);

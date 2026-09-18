@@ -153,6 +153,8 @@ async function harness(t, options = {}) {
       );
       return mod.exports;
     }
+    if (name === './useAim')
+      return { useAim: () => ({ aimState: {}, aimPresets: [], aimLoading: false }) };
     if (name === './useActions') return { useActions: () => ({}) };
     if (name === './useSocial') return { useSocial: () => social };
     if (name.endsWith('/runtime')) return { getRuntime: async () => runtime };

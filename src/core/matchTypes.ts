@@ -76,7 +76,7 @@ export interface MatchProgress {
   roundNumber?: number;
   completedRounds?: number;
   roundEstimated?: boolean;
-  source: 'match' | 'self-presence' | 'friend-presence' | 'party-owner';
+  source: 'match' | 'self-presence' | 'teammate-presence' | 'friend-presence' | 'party-owner';
   scoreOnly?: boolean;
   observedAt: number;
   matchId?: string;

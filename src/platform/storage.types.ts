@@ -1,5 +1,6 @@
+import type { AimStore as importAimStore } from '../core/aimTypes';
 import type { Account, Catalog, HistoryEntry, Settings, Snapshot } from '../core/types';
-export interface Repository {
+export interface Repository extends importAimStore {
   presets(id: string): Promise<import('../core/presets').LoadoutPreset[]>;
   savePreset(preset: import('../core/presets').LoadoutPreset): Promise<void>;
   deletePreset(id: string, presetId: string): Promise<void>;

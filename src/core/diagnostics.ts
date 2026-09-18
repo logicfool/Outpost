@@ -12,6 +12,7 @@ const records: RequestDiagnostic[] = [];
 export function serviceLabel(url: string): string {
   const parsed = new URL(url),
     path = parsed.pathname;
+  if (path.startsWith('/playerPref/')) return 'Aim settings';
   if (parsed.hostname === 'valorant-api.com') return 'Public catalog';
   if (parsed.hostname === 'clientconfig.rpg.riotgames.com') return 'Chat configuration';
   if (path.endsWith('/loadouts') && (path.includes('/core-game/') || path.includes('/pregame/')))

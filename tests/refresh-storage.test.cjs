@@ -88,3 +88,46 @@ test('saved presets and purchase records survive game-cache clearing but cascade
   assert.equal((await repo.presets(ID)).length, 0);
   assert.equal((await repo.purchaseRecords(ID)).length, 0);
 });
+
+test('aim presets and pending settings checks persist independently for both accounts', async (t) => {
+  const { repo, db } = await fixture(t),
+    { defaultCrosshair } = require('../.test-build/crosshair.js'),
+    { aimSnapshot } = require('../.test-build/aimSettings.js'),
+    { document, change } = require('./aim-helpers.cjs');
+  const p = {
+    id: OTHER,
+    accountId: ID,
+    name: 'Aim',
+    profile: defaultCrosshair('Aim'),
+    sensitivity: { hipfire: 0.25, ads: 1, scoped: 1 },
+    updatedAt: 1,
+  };
+  const state = {
+    snapshot: aimSnapshot(document(), ID, 10),
+    pending: { id: OTHER, at: 11, desired: change() },
+    lastApplyAt: 11,
+    nextReadAt: 60011,
+  };
+  await repo.saveAimPreset(p);
+  await repo.saveAimState(ID, state);
+  assert.equal((await repo.aimPresets(ID)).length, 1);
+  assert.deepEqual(await repo.aimState(ID), state);
+  assert.equal(await repo.aimState(OTHER), null);
+  await repo.clearCache();
+  assert.equal((await repo.aimPresets(ID)).length, 1);
+  assert.equal((await repo.aimState(ID)).nextReadAt, 60011);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+  await repo.removeAccount(ID);
+  assert.deepEqual(await repo.aimPresets(ID), []);
+  assert.equal(await repo.aimState(ID), null);
+  assert.equal((await repo.accounts()).length, 1);
+});
+test('an aim cache row cannot be saved under a different account', async (t) => {
+  const { repo } = await fixture(t),
+    { aimSnapshot } = require('../.test-build/aimSettings.js'),
+    { document } = require('./aim-helpers.cjs');
+  await assert.rejects(
+    repo.saveAimState(ID, { snapshot: aimSnapshot(document(), OTHER) }),
+    (e) => e.code === 'ACCOUNT_MISMATCH',
+  );
+});

@@ -18,6 +18,7 @@ export type ExplorerRoute =
   | { type: 'live-loadout'; matchId: string; subject?: string }
   | { type: 'presets' }
   | { type: 'buddies' }
+  | { type: 'aim'; tab?: import('./AimPanel').AimTab }
   | { type: 'friends' }
   | { type: 'chat-settings'; subject?: string }
   | { type: 'chat'; subject: string };

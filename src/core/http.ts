@@ -13,6 +13,7 @@ export interface RequestPolicy {
   beforeDispatch?(): Promise<void>;
   allowEmptyJson?: boolean;
   purchase?: boolean;
+  maxResponseBytes?: number;
 }
 export class HttpClient {
   private active = 0;
@@ -159,7 +160,13 @@ export class HttpClient {
       const contentType = response.headers.get('content-type') ?? '';
       let body: string;
       try {
-        body = await readBoundedText(response, format === 'json' ? 32 * 1024 * 1024 : 32000);
+        body = await readBoundedText(
+          response,
+          Math.min(
+            policy.maxResponseBytes ?? (format === 'json' ? 32 * 1024 * 1024 : 32000),
+            32 * 1024 * 1024,
+          ),
+        );
       } catch (error) {
         if (error instanceof AppError) throw error;
         throw new AppError(

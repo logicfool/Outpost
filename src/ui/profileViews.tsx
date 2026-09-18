@@ -154,7 +154,13 @@ export function LiveCard({ model, onOpen }: { model: AppModel; onOpen(): void })
   const polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
   const game = section?.status === 'ready' ? section.data : undefined;
-  const progress = ownLiveProgress(game, model.chat.selfPresence, model.chat.status === 'ready');
+  const progress = ownLiveProgress(
+    game,
+    model.chat.selfPresence,
+    model.chat.status === 'ready',
+    Date.now(),
+    model.chat.friends,
+  );
   const idle = !game || game.state === 'idle' || game.state === 'offline';
   const error = section?.status === 'error' ? section : game?.detailError;
   return (

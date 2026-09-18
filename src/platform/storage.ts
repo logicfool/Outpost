@@ -1,3 +1,5 @@
+import { validateAimPreset } from '../core/aimSettings';
+import type { AimState } from '../core/aimTypes';
 import { validatePreset } from '../core/presets';
 import { preferences } from '../core/preferences';
 import { mergeSnapshot } from '../core/snapshot';
@@ -25,7 +27,9 @@ async function create(): Promise<Repository> {
     CREATE TABLE IF NOT EXISTS refresh_gates (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, purpose TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,purpose));
     CREATE TABLE IF NOT EXISTS presets (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
     CREATE TABLE IF NOT EXISTS purchases (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
-    PRAGMA user_version = 3;`);
+    CREATE TABLE IF NOT EXISTS aim_state (account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS aim_presets (account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(account_id,id));
+    PRAGMA user_version = 4;`);
   let writing: Promise<unknown> = Promise.resolve();
   const write = <T>(fn: () => Promise<T>): Promise<T> => {
     const next = writing.catch(() => {}).then(fn);
@@ -52,6 +56,63 @@ async function create(): Promise<Repository> {
       )
     ).map((r) => r.item_id);
   return {
+    aimState(id) {
+      return readJson<AimState>('SELECT data FROM aim_state WHERE account_id = ?', uuid(id));
+    },
+    async saveAimState(id, state) {
+      id = uuid(id);
+      if (state.snapshot && state.snapshot.accountId !== id)
+        throw new AppError('ACCOUNT_MISMATCH', 'Aim settings belong to another account.');
+      const data = JSON.stringify(state);
+      if (data.length > 1024 * 1024)
+        throw new AppError('AIM_SIZE', 'Aim cache exceeds its safe limit.');
+      await write(() =>
+        db.runAsync(
+          'INSERT INTO aim_state(account_id,data) VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET data=excluded.data',
+          id,
+          data,
+        ),
+      );
+    },
+    async aimPresets(id) {
+      return (
+        await db.getAllAsync<{ data: string }>(
+          'SELECT data FROM aim_presets WHERE account_id = ? ORDER BY rowid DESC',
+          uuid(id),
+        )
+      ).map((row) => validateAimPreset(JSON.parse(row.data), id));
+    },
+    async saveAimPreset(input) {
+      const p = validateAimPreset(input, input.accountId);
+      await write(async () => {
+        const old = await db.getFirstAsync(
+          'SELECT id FROM aim_presets WHERE account_id=? AND id=?',
+          p.accountId,
+          p.id,
+        );
+        const count = await db.getFirstAsync<{ n: number }>(
+          'SELECT COUNT(*) AS n FROM aim_presets WHERE account_id=?',
+          p.accountId,
+        );
+        if (!old && (count?.n ?? 0) >= 30)
+          throw new AppError('AIM_PRESET_LIMIT', 'Keep up to 30 aim presets per account.');
+        await db.runAsync(
+          'INSERT INTO aim_presets(account_id,id,data) VALUES(?,?,?) ON CONFLICT(account_id,id) DO UPDATE SET data=excluded.data',
+          p.accountId,
+          p.id,
+          JSON.stringify(p),
+        );
+      });
+    },
+    async deleteAimPreset(id, presetId) {
+      await write(() =>
+        db.runAsync(
+          'DELETE FROM aim_presets WHERE account_id=? AND id=?',
+          uuid(id),
+          uuid(presetId),
+        ),
+      );
+    },
     async presets(id) {
       return (
         await db.getAllAsync<{ data: string }>(

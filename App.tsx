@@ -369,10 +369,13 @@ const ScreenSlot = memo(
       'history',
       'settings',
       'busy',
+      'aimState',
+      'aimPresets',
+      'aimLoading',
     ] as const;
     if (keys.some((k) => a.model[k] !== b.model[k])) return false;
     return (
-      !['friends', 'account'].includes(a.tab) ||
+      !['friends', 'account', 'matches'].includes(a.tab) ||
       (a.model.chat === b.model.chat &&
         a.model.savedConversations === b.model.savedConversations &&
         a.model.syncingSavedHistory === b.model.syncingSavedHistory)

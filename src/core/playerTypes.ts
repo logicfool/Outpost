@@ -27,6 +27,7 @@ export interface IdentityEdit {
 }
 
 export interface LivePlayer extends PlayerRef {
+  stats?: import('./liveStats').LiveStats;
   self: boolean;
   teamId: string;
   agent?: string;

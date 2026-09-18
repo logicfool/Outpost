@@ -1,3 +1,4 @@
+import { AimCollectionRows } from './AimCollectionRows';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
 import React, { memo, useDeferredValue, useMemo, useState } from 'react';
@@ -181,6 +182,7 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           last
         />
       </View>
+      <AimCollectionRows model={model} onNavigate={onNavigate} />
       <Text style={S.h2}>Browse collection</Text>
       <View style={group}>
         {CATEGORIES.map((category, index) => (
