@@ -3,6 +3,11 @@ import type { FriendAction, FriendRequest } from '../core/chatTypes';
 import type { PlayerRef } from '../core/playerTypes';
 import { withCachedFriends, observedFriend } from '../core/friendIdentity';
 import { AutoHistoryGate } from '../core/autoHistory';
+import {
+  RosterHistorySync,
+  EMPTY_HISTORY_SYNC,
+  type HistorySyncProgress,
+} from '../core/rosterHistorySync';
 import { notifyChat } from '../platform/notifications';
 import { recordRequest } from '../core/diagnostics';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,8 +46,11 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   const [value, setValue] = useState<{ id?: string; state: ChatState }>({ state: EMPTY_CHAT });
   const [local, setLocal] = useState<LocalState>(emptyLocal);
   const autoGate = useRef(new AutoHistoryGate());
-  const [syncingSavedHistory, setSyncingSavedHistory] = useState(false);
-  const batchSync = useRef(false);
+  const [historySync, setHistorySync] = useState<{ id?: string; progress: HistorySyncProgress }>({
+    progress: EMPTY_HISTORY_SYNC,
+  });
+  const batchSync = useRef<{ id: string; queue: RosterHistorySync } | null>(null);
+  const historyFocused = useRef(true);
   const session = useRef<RiotChat | null>(null),
     active = useRef(account),
     meta = useRef(catalog),
@@ -95,6 +103,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     [refreshLocal],
   );
   const stop = useCallback((clear = false) => {
+    batchSync.current?.queue.stop('Sync paused. Reconnect chat to continue.', true);
     clearTimeout(reconnectTimer.current);
     clearTimeout(localTimer.current);
     epoch.current++;
@@ -288,7 +297,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   connectRef.current = connectChat;
   useEffect(() => {
     autoGate.current.clear();
-    setSyncingSavedHistory(false);
+    batchSync.current?.queue.stop();
+    batchSync.current = null;
+    setHistorySync({ id: account?.puuid, progress: EMPTY_HISTORY_SYNC });
     wanted.current = false;
     attempts.current = 0;
     openSubject.current = undefined;
@@ -299,6 +310,8 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     if (account) void refreshLocal(account);
     return () => {
       wanted.current = false;
+      batchSync.current?.queue.stop();
+      batchSync.current = null;
       stop(true);
       clearTimeout(localTimer.current);
     };
@@ -311,7 +324,24 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         void connectRef.current();
       }
     });
-    return () => subscription.remove();
+    const blur =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('blur', () => {
+            historyFocused.current = false;
+            batchSync.current?.queue.stop('Sync paused while the app is not in focus.', true);
+          })
+        : undefined;
+    const focus =
+      Platform.OS === 'android'
+        ? AppState.addEventListener('focus', () => {
+            historyFocused.current = true;
+          })
+        : undefined;
+    return () => {
+      subscription.remove();
+      blur?.remove();
+      focus?.remove();
+    };
   }, [stop]);
   const disconnectChat = useCallback(() => {
     const closing = session.current,
@@ -488,6 +518,11 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const syncChatHistory = useCallback(
     async (subject: string) => {
+      if (batchSync.current?.queue.progress.status === 'running')
+        throw new AppError('CHAT_HISTORY_BUSY', 'The all-friends history sync is already running.');
+      const a = active.current,
+        generation = epoch.current,
+        connection = session.current;
       if (active.current?.demo) {
         setValue((v) => ({
           ...v,
@@ -508,6 +543,12 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       if (!session.current)
         throw new AppError('CHAT_OFFLINE', 'Connect chat before syncing Riot history.');
       await session.current.requestHistory(subject);
+      if (
+        active.current?.puuid !== a?.puuid ||
+        epoch.current !== generation ||
+        connection !== session.current
+      )
+        throw new AppError('ACCOUNT_CHANGED', 'The chat account changed.');
       await loadChatMessages(subject);
     },
     [loadChatMessages],
@@ -517,7 +558,15 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       const a = active.current,
         connection = session.current,
         generation = epoch.current;
-      if (!a || latest.current.id !== a.puuid || latest.current.state.status !== 'ready') return;
+      if (
+        !a ||
+        latest.current.id !== a.puuid ||
+        latest.current.state.status !== 'ready' ||
+        batchSync.current?.queue.progress.status === 'running'
+      )
+        return;
+      const recent = latest.current.state.archive?.[subject];
+      if (recent?.status === 'ready' && (recent.at ?? 0) > Date.now() - 60000) return;
       return autoGate.current.run(`${a.puuid}:${subject}`, async () => {
         if (
           active.current?.puuid !== a.puuid ||
@@ -532,33 +581,82 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const syncSavedChatHistory = useCallback(async () => {
     const a = active.current,
-      generation = epoch.current;
-    if (!a || latest.current.state.status !== 'ready')
-      throw new AppError('CHAT_OFFLINE', 'Connect chat before syncing saved conversations.');
-    if (batchSync.current)
-      throw new AppError('CHAT_HISTORY_BUSY', 'A saved-history sync is already running.');
-    batchSync.current = true;
-    setSyncingSavedHistory(true);
-    try {
-      const conversations = await (await storeFor(a)).conversations();
-      const friends = new Set(latest.current.state.friends.map((f) => f.subject));
-      for (const c of conversations
-        .filter((c) => c.count > 0 && friends.has(c.subject))
-        .slice(0, 10)) {
-        if (
-          active.current?.puuid !== a.puuid ||
-          generation !== epoch.current ||
-          ['background', 'inactive'].includes(AppState.currentState)
-        )
-          return;
-        await autoSyncChatHistory(c.subject);
-        if (!a.demo) await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    } finally {
-      batchSync.current = false;
-      if (active.current?.puuid === a.puuid) setSyncingSavedHistory(false);
+      generation = epoch.current,
+      connection = session.current;
+    const check = () => {
+      if (
+        !a ||
+        active.current?.puuid !== a.puuid ||
+        generation !== epoch.current ||
+        connection !== session.current
+      )
+        throw new AppError('ACCOUNT_CHANGED', 'The chat account or connection changed.');
+      if (latest.current.id !== a.puuid || latest.current.state.status !== 'ready')
+        throw new AppError('CHAT_OFFLINE', 'Connect chat to sync history.');
+      if (!historyFocused.current || ['background', 'inactive'].includes(AppState.currentState))
+        throw new AppError('CHAT_OFFLINE', 'Keep Outpost open while syncing history.');
+    };
+    check();
+    let job = batchSync.current;
+    if (!job || job.id !== a!.puuid) {
+      const id = a!.puuid;
+      const queue = new RosterHistorySync((progress) => {
+        if (active.current?.puuid === id && batchSync.current?.queue === queue)
+          setHistorySync({ id, progress });
+      });
+      job = { id, queue };
+      batchSync.current = job;
     }
-  }, [storeFor, autoSyncChatHistory]);
+    const options = {
+      check,
+      isFriend: (f: Friend) =>
+        latest.current.state.friends.some((current) => current.subject === f.subject),
+      sync: async (friend: Friend, signal: AbortSignal) => {
+        check();
+        const store = await storeFor(a!);
+        check();
+        const count = a!.demo
+          ? 0
+          : await connection!.requestHistory(friend.subject, {
+              signal,
+              hydrate: openSubject.current === friend.subject,
+            });
+        check();
+        if (signal.aborted) throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
+        const conversations = await store.conversations();
+        check();
+        setLocal((old) => ({
+          ...old,
+          id: a!.puuid,
+          conversations,
+          error: undefined,
+          loading: false,
+        }));
+        if (openSubject.current === friend.subject) await loadChatMessages(friend.subject);
+        check();
+        return count;
+      },
+    };
+    const queue = job.queue;
+    const result = await (['paused', 'cancelled'].includes(queue.progress.status)
+      ? queue.resume(options)
+      : queue.start(
+          latest.current.state.friends.filter((f) => f.subject !== a!.puuid),
+          options,
+        ));
+    if (active.current?.puuid === a!.puuid && batchSync.current?.queue === queue)
+      recordRequest({
+        at: Date.now(),
+        service: 'Chat history sync',
+        method: 'XMPP',
+        code: 'ALL_FRIENDS_' + result.status.toUpperCase(),
+        durationMs: 0,
+      });
+    return result;
+  }, [storeFor, loadChatMessages]);
+  const cancelChatHistorySync = useCallback(() => {
+    batchSync.current?.queue.stop('Sync stopped. Saved messages are kept.');
+  }, []);
   const clearChatHistory = useCallback(
     async (subject?: string) => {
       const a = active.current;
@@ -621,6 +719,9 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     },
     [storeFor, refreshLocal],
   );
+  const chatHistorySync =
+    historySync.id === account?.puuid ? historySync.progress : EMPTY_HISTORY_SYNC;
+  const syncingSavedHistory = chatHistorySync.status === 'running';
   const live = value.id === account?.puuid ? value.state : EMPTY_CHAT;
   const saved = local.id === account?.puuid ? local : emptyLocal;
   const combinedMessages = useMemo(() => {
@@ -649,6 +750,8 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     [live, cachedFriends, combinedMessages, saved.error],
   );
   return {
+    chatHistorySync,
+    cancelChatHistorySync,
     changeFriend,
     cacheMatchFriends,
     cacheFriendProfile,

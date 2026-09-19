@@ -3,7 +3,7 @@ const config: ExpoConfig = {
   owner: 'logicfool',
   name: 'Outpost',
   slug: 'outpost-valorant',
-  version: '0.9.1',
+  version: '0.9.2',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   scheme: 'outpost',
@@ -23,7 +23,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'app.outpost.valorant',
-    versionCode: 23,
+    versionCode: 24,
     allowBackup: false,
 
     blockedPermissions: [

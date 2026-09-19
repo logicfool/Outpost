@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
   dist = path.join(root, 'dist-web'),
-  out = path.join(root, 'docs/validation-0.9.1');
+  out = path.join(root, 'docs/validation-0.9.2');
 const mime = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -133,7 +133,7 @@ try {
       await click('Send');
       await page.getByText('Newest conversation fixture', { exact: true }).waitFor();
       await click('Back from conversation');
-      await page.getByRole('tab', { name: 'Recent', exact: true }).waitFor();
+      await tab('Recent');
       await page.getByText('You: Newest conversation fixture', { exact: true }).waitFor();
       const labels = await page
         .locator('[data-testid^="conversation-row-"]')

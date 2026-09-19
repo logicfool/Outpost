@@ -59,6 +59,9 @@ export class RiotChat {
     {
       friend: Friend;
       timer: ReturnType<typeof setTimeout>;
+      receiving: boolean;
+      signal?: AbortSignal;
+      hydrate: boolean;
       resolve(count: number): void;
       reject(error: AppError): void;
     }
@@ -603,49 +606,87 @@ export class RiotChat {
       },
     });
   }
-  async requestHistory(subject: string): Promise<number> {
+  async requestHistory(
+    subject: string,
+    options: { signal?: AbortSignal; hydrate?: boolean } = {},
+  ): Promise<number> {
     const c = this.credentials,
-      friend = this.roster.get(subject);
+      friend = this.roster.get(subject),
+      signal = options.signal;
+    if (signal?.aborted) throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
     if (this.phase !== 'ready' || !c || !friend || !this.socket)
       throw new AppError(
         'CHAT_OFFLINE',
         'Connect Riot chat and select a current friend to sync server history.',
       );
-    if (
-      this.historyRequests.size >= 2 ||
-      [...this.historyRequests.values()].some((r) => r.friend.subject === subject)
-    )
-      throw new AppError('CHAT_HISTORY_BUSY', 'A history sync is already running.');
-    if ((this.historyTimes.get(subject) ?? 0) > this.now())
+    if (c.expiresAt <= this.now())
+      throw new AppError('SESSION_EXPIRED', 'Reconnect chat to continue syncing history.');
+    if (this.historyRequests.size)
       throw new AppError(
-        'CHAT_COOLDOWN',
-        'Wait 15 seconds before syncing this conversation again.',
+        'CHAT_HISTORY_BUSY',
+        'Another conversation is syncing.',
+        this.now() + 2000,
       );
+    const allowed = this.historyTimes.get(subject) ?? 0;
+    if (allowed > this.now())
+      throw new AppError('CHAT_COOLDOWN', 'Wait before syncing this conversation again.', allowed);
     this.historyTimes.set(subject, this.now() + 15000);
-    const id = `outpost-history-${++this.counter}`;
+    const id = `outpost-history-${++this.counter}`,
+      generation = this.generation;
     this.update({ archive: { ...this.state.archive, [subject]: { status: 'loading' } } });
     return new Promise<number>((resolve, reject) => {
-      const fail = (error: AppError) => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
         this.historyRequests.delete(id);
-        this.update({
-          archive: {
-            ...this.state.archive,
-            [subject]: { status: 'error', message: error.message },
-          },
-        });
+      };
+      const fail = (error: AppError) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (generation === this.generation)
+          this.update({
+            archive: {
+              ...this.state.archive,
+              [subject]: { status: 'error', message: error.message },
+            },
+          });
         reject(error);
       };
+      const abort = () =>
+        fail(
+          new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped. Saved messages are kept.'),
+        );
       const timer = setTimeout(
         () =>
           fail(
             new AppError(
               'CHAT_HISTORY_TIMEOUT',
-              'Riot did not answer the history request. Your saved messages are unchanged.',
+              'Riot did not answer this history request. Saved messages are unchanged.',
             ),
           ),
         20000,
       );
-      this.historyRequests.set(id, { friend, timer, resolve, reject: fail });
+      this.historyRequests.set(id, {
+        friend,
+        timer,
+        reject: fail,
+        receiving: false,
+        signal,
+        hydrate: options.hydrate !== false,
+        resolve: (count) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(count);
+        },
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
       this.sendRaw(
         `<iq type="get" id="${id}"><query xmlns="${ARCHIVE_NS}"><with>${xml(friend.jid)}</with></query></iq>`,
       );
@@ -654,7 +695,7 @@ export class RiotChat {
   private async receiveHistory(node: XmlNode): Promise<void> {
     const request = this.historyRequests.get(node.attrs.id ?? ''),
       c = this.credentials;
-    if (!request || !c) return;
+    if (!request || !c || request.receiving || request.signal?.aborted) return;
     const ownBare = `${c.subject}@${c.domain}`;
     if (
       node.attrs.from &&
@@ -665,29 +706,50 @@ export class RiotChat {
     if (!['result', 'error'].includes(node.attrs.type ?? '')) return;
     const generation = this.generation;
     clearTimeout(request.timer);
-    this.historyRequests.delete(node.attrs.id!);
+    request.receiving = true;
     try {
-      if (node.attrs.type === 'error')
+      if (node.attrs.type === 'error') {
+        const condition = child(node, 'error')?.children.find(
+          (n) => n.ns === 'urn:ietf:params:xml:ns:xmpp-stanzas',
+        )?.name;
+        if (['resource-constraint', 'policy-violation'].includes(condition ?? ''))
+          throw new AppError(
+            'CHAT_HISTORY_RATE_LIMIT',
+            'Riot asked chat history to slow down. Resume later.',
+            this.now() + 60000,
+          );
+        if (['feature-not-implemented', 'service-unavailable'].includes(condition ?? ''))
+          throw new AppError(
+            'CHAT_HISTORY_UNSUPPORTED',
+            'Riot history is unavailable on this connection.',
+          );
         throw new AppError(
           'CHAT_HISTORY_UNAVAILABLE',
-          'Riot did not allow this history request. Local history is still available.',
+          'Riot did not allow this conversation history. Saved messages are kept.',
         );
+      }
       const messages = parseArchiveResult(node, ownBare, request.friend, this.now());
       for (const message of messages) {
+        if (request.signal?.aborted)
+          throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
         if (generation !== this.generation)
           throw new AppError('CHAT_OFFLINE', 'History sync stopped when the connection changed.');
         await this.persistMessage(message);
       }
+      if (request.signal?.aborted)
+        throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
       if (generation !== this.generation)
         throw new AppError('CHAT_OFFLINE', 'The chat connection changed.');
       this.update({
-        messages: {
-          ...this.state.messages,
-          [request.friend.subject]: mergeMessages(
-            this.state.messages[request.friend.subject] ?? [],
-            messages,
-          ),
-        },
+        messages: request.hydrate
+          ? {
+              ...this.state.messages,
+              [request.friend.subject]: mergeMessages(
+                this.state.messages[request.friend.subject] ?? [],
+                messages,
+              ),
+            }
+          : this.state.messages,
         archive: {
           ...this.state.archive,
           [request.friend.subject]: {

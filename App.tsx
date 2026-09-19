@@ -378,7 +378,8 @@ const ScreenSlot = memo(
       !['friends', 'account', 'matches'].includes(a.tab) ||
       (a.model.chat === b.model.chat &&
         a.model.savedConversations === b.model.savedConversations &&
-        a.model.syncingSavedHistory === b.model.syncingSavedHistory)
+        a.model.syncingSavedHistory === b.model.syncingSavedHistory &&
+        a.model.chatHistorySync === b.model.chatHistorySync)
     );
   },
 );

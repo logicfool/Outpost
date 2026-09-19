@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.1');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.2');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -800,7 +800,7 @@ try {
       false,
     );
     assert.equal(await page.getByText(/Assets:|valorant-api\.com/).count(), 0);
-    await page.getByText('Outpost 0.9.1', { exact: true }).scrollIntoViewIfNeeded();
+    await page.getByText('Outpost 0.9.2', { exact: true }).scrollIntoViewIfNeeded();
     await shot('about-clean');
     await tab('Profile');
     assert.equal(await page.getByText('Saved locally', { exact: true }).count(), 0);

@@ -1,6 +1,7 @@
 import { FriendActions } from './FriendActions';
 import { FriendRequestsPanel } from './FriendRequestsPanel';
 import { ChatsPanel } from './ChatsPanel';
+import { ChatDirectoryMemory } from '../core/chatDirectory';
 import { MarketHistoryPanel } from './MarketHistoryPanel';
 import { LiveDataStatus, LiveStatsLine } from './LiveDataStatus';
 import { AimPanel } from './AimPanel';
@@ -567,6 +568,9 @@ export function ExplorerModal({
 }) {
   const route = routes.at(-1),
     props = { model, onNavigate, onBack };
+  const chatViews = useRef(new ChatDirectoryMemory()).current;
+  const chatView =
+    route?.type === 'friends' ? chatViews.forRoute(model.active?.puuid, route) : undefined;
   return (
     <Modal visible={!!route} animationType="slide" onRequestClose={onBack}>
       {route?.type === 'market-history' && <MarketHistoryPanel {...props} />}
@@ -637,7 +641,13 @@ export function ExplorerModal({
           onNavigate={onNavigate}
         />
       )}
-      {route?.type === 'friends' && <ChatsPanel {...props} />}
+      {route?.type === 'friends' && (
+        <ChatsPanel
+          key={`chats:${model.active?.puuid}:${routes.length}`}
+          {...props}
+          view={chatView!}
+        />
+      )}
       {route?.type === 'friend-requests' && <FriendRequestsPanel model={model} onBack={onBack} />}
       {route?.type === 'chat-settings' && (
         <ModalPage>

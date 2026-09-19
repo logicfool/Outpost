@@ -257,3 +257,86 @@ test('live message addressed to a different account is ignored', async (t) => {
   await h.chat.flushPersistence();
   assert.equal(saved.length, 0);
 });
+test('bulk history persists messages without filling every unopened conversation in memory', async (t) => {
+  const saved = [],
+    h = connected(t, { saveMessage: async (m) => saved.push(m) }),
+    task = h.chat.requestHistory(OTHER, { hydrate: false }),
+    id = lastId(h);
+  h.feed(`<iq type="result" id="${id}">${msg(`from="${peer}" to="${own}"`)}</iq>`);
+  assert.equal(await task, 1);
+  assert.equal(saved.length, 1);
+  assert.equal(h.chat.snapshot.messages[OTHER], undefined);
+  assert.equal(h.chat.snapshot.unread[OTHER], undefined);
+});
+test('aborted archive reads ignore late replies and keep existing messages intact', async (t) => {
+  const saved = [],
+    h = connected(t, { saveMessage: async (m) => saved.push(m) }),
+    abort = new AbortController();
+  const task = h.chat.requestHistory(OTHER, { signal: abort.signal }),
+    rejected = assert.rejects(task, code('CHAT_HISTORY_CANCELLED')),
+    id = lastId(h);
+  abort.abort();
+  await rejected;
+  h.feed(`<iq type="result" id="${id}">${msg(`from="${peer}"`)}</iq>`);
+  await h.chat.flushPersistence();
+  assert.equal(saved.length, 0);
+  assert.equal(h.chat.snapshot.status, 'ready');
+});
+test('a pre-cancelled sync cannot write an archive query', async (t) => {
+  const h = connected(t),
+    abort = new AbortController();
+  abort.abort();
+  const before = h.writes.length;
+  await assert.rejects(
+    h.chat.requestHistory(OTHER, { signal: abort.signal }),
+    code('CHAT_HISTORY_CANCELLED'),
+  );
+  assert.equal(h.writes.length, before);
+});
+test('an in-progress database save keeps the archive slot and rejects duplicate IQ processing', async (t) => {
+  let release, entered;
+  const hold = new Promise((r) => (release = r)),
+    started = new Promise((r) => (entered = r));
+  const saved = [];
+  const h = connected(t, {
+      saveMessage: async (m) => {
+        saved.push(m);
+        entered();
+        await hold;
+      },
+    }),
+    task = h.chat.requestHistory(OTHER),
+    id = lastId(h),
+    reply = `<iq type="result" id="${id}">${msg(`from="${peer}"`)}</iq>`;
+  h.feed(reply);
+  await started;
+  h.feed(reply);
+  await assert.rejects(h.chat.requestHistory(OTHER), code('CHAT_HISTORY_BUSY'));
+  assert.equal(saved.length, 1);
+  release();
+  assert.equal(await task, 1);
+});
+test('archive throttling provides a retry deadline without breaking live chat', async (t) => {
+  const h = connected(t),
+    task = h.chat.requestHistory(OTHER),
+    reject = assert.rejects(
+      task,
+      (e) => e.code === 'CHAT_HISTORY_RATE_LIMIT' && e.retryAt > Date.now(),
+    ),
+    id = lastId(h);
+  h.feed(
+    `<iq type="error" id="${id}"><error><resource-constraint xmlns="urn:ietf:params:xml:ns:xmpp-stanzas"/></error></iq>`,
+  );
+  await reject;
+  assert.equal(h.chat.snapshot.status, 'ready');
+});
+test('bulk imports never emit new-message alerts', async (t) => {
+  let alerts = 0;
+  const h = connected(t, { incoming: async () => alerts++ }),
+    task = h.chat.requestHistory(OTHER, { hydrate: false }),
+    id = lastId(h);
+  h.feed(`<iq type="result" id="${id}">${msg(`from="${peer}" to="${own}"`)}</iq>`);
+  await task;
+  assert.equal(alerts, 0);
+  assert.deepEqual(h.chat.snapshot.unread, {});
+});

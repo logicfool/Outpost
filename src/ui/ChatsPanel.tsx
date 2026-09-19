@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChatDirectoryView, ChatFilter } from '../core/chatDirectory';
+import type { ConversationRow } from '../core/conversations';
 import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
@@ -13,14 +15,57 @@ export function ChatsPanel({
   model,
   onBack,
   onNavigate,
+  view,
 }: {
   model: AppModel;
   onBack(): void;
   onNavigate: Navigate;
+  view: ChatDirectoryView;
 }) {
   const { C, S } = useTheme(),
-    [filter, setFilter] = useState<'recent' | 'all' | 'online'>('recent'),
-    [query, setQuery] = useState('');
+    [filter, setFilter] = useState<ChatFilter>(view.filter),
+    [query, setQuery] = useState(view.query);
+  const list = useRef<FlatList<ConversationRow>>(null),
+    initialOffset = useRef({ x: 0, y: view.offset });
+  const restoring = useRef(view.offset > 0),
+    frame = useRef<number | undefined>(undefined),
+    size = useRef({ viewport: 0, content: 0 });
+  const restore = () => {
+    if (!restoring.current || !size.current.viewport || !size.current.content) return;
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const offset = Math.min(
+        initialOffset.current.y,
+        Math.max(0, size.current.content - size.current.viewport),
+      );
+      list.current?.scrollToOffset({ offset, animated: false });
+      view.offset = offset;
+      restoring.current = false;
+    });
+  };
+  useEffect(
+    () => () => {
+      if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
+  const resetScroll = () => {
+    restoring.current = false;
+    if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+    list.current?.scrollToOffset({ offset: 0, animated: false });
+  };
+  const select = (next: ChatFilter) => {
+    view.filter = next;
+    view.offset = 0;
+    setFilter(next);
+    resetScroll();
+  };
+  const search = (next: string) => {
+    view.query = next;
+    view.offset = 0;
+    setQuery(next);
+    resetScroll();
+  };
   const chat = model.chat,
     connected = chat.status === 'ready',
     busy = ['connecting', 'authenticating'].includes(chat.status);
@@ -40,6 +85,21 @@ export function ChatsPanel({
     <ModalPage>
       <ModalHeader title="Chats" closeLabel="Back from friends" onClose={onBack} />
       <FlatList
+        ref={list}
+        testID="chats-directory-list"
+        contentOffset={initialOffset.current}
+        onLayout={(event) => {
+          size.current.viewport = event.nativeEvent.layout.height;
+          restore();
+        }}
+        onContentSizeChange={(_width, height) => {
+          size.current.content = height;
+          restore();
+        }}
+        scrollEventThrottle={100}
+        onScroll={(event) => {
+          if (!restoring.current) view.offset = Math.max(0, event.nativeEvent.contentOffset.y);
+        }}
         data={rows}
         keyExtractor={(r) => r.subject}
         initialNumToRender={12}
@@ -52,7 +112,7 @@ export function ChatsPanel({
           <View style={{ gap: 12, paddingBottom: 10 }}>
             <Tabs
               value={filter}
-              onChange={setFilter}
+              onChange={select}
               items={[
                 { id: 'recent', label: 'Recent' },
                 { id: 'all', label: 'All friends' },
@@ -71,7 +131,7 @@ export function ChatsPanel({
                 placeholder="Search chats"
                 placeholderTextColor={C.subtle}
                 value={query}
-                onChangeText={setQuery}
+                onChangeText={search}
                 style={[S.body, { flex: 1, minHeight: 44 }]}
                 autoCorrect={false}
               />
