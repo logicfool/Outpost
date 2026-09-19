@@ -13,11 +13,13 @@ const { RosterHistorySync } = require('../.test-build/rosterHistorySync.js'),
 const { conversationRows } = require('../.test-build/conversations.js');
 const { ID, OTHER, catalog } = require('./helpers.cjs');
 const peer = (i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`;
-async function harness(t, platform = 'android', backgroundNative = false) {
+async function harness(t, platform = 'android', backgroundNative = false, behavior = {}) {
   let model,
     tree,
     activeId = ID,
-    hold;
+    hold,
+    liveChat;
+  const bootstraps = [];
   const calls = [],
     stores = new Map(),
     events = new Map(),
@@ -77,6 +79,7 @@ async function harness(t, platform = 'android', backgroundNative = false) {
   }
   class Chat {
     constructor(_t, _c, emit, onFriends, _now, hooks) {
+      liveChat = this;
       this.emit = emit;
       this.onFriends = onFriends;
       this.hooks = hooks;
@@ -154,7 +157,11 @@ async function harness(t, platform = 'android', backgroundNative = false) {
         getRuntime: async () => ({
           client: async (id) => ({
             scope: { remember() {} },
-            chatBootstrap: async () => ({ subject: id }),
+            chatBootstrap: async () => {
+              bootstraps.push(id);
+              if (behavior.bootstrap) return behavior.bootstrap(id);
+              return { subject: id };
+            },
           }),
         }),
       };
@@ -204,9 +211,7 @@ async function harness(t, platform = 'android', backgroundNative = false) {
   }
   await act(async () => {
     tree = Renderer.create(React.createElement(Probe, { id: ID }));
-  });
-  await act(async () => {
-    await model.connectChat();
+    for (let i = 0; i < 15; i++) await Promise.resolve();
   });
   t.after(async () => {
     await act(async () => tree.unmount());
@@ -215,8 +220,34 @@ async function harness(t, platform = 'android', backgroundNative = false) {
     get model() {
       return model;
     },
+    bootstraps,
     calls,
     reads,
+    async drop(code = 'CHAT_NETWORK', retryAt) {
+      await act(async () => {
+        liveChat.state = {
+          ...liveChat.state,
+          status: 'error',
+          error: 'fixture connection failure',
+          errorCode: code,
+          retryAt,
+        };
+        liveChat.emit(liveChat.state);
+      });
+    },
+    async advance(ms) {
+      await act(async () => {
+        t.mock.timers.tick(ms);
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      });
+    },
+    async transition(name, value) {
+      await act(async () => {
+        if (name === 'change') app.currentState = value;
+        events.get(name)?.(value);
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      });
+    },
     get maxInFlight() {
       return maxInFlight;
     },
@@ -259,7 +290,7 @@ async function harness(t, platform = 'android', backgroundNative = false) {
         tree.update(React.createElement(Probe, { id }));
       });
       await act(async () => {
-        await model.connectChat();
+        for (let i = 0; i < 15; i++) await Promise.resolve();
       });
     },
     get leaseActive() {
@@ -475,4 +506,67 @@ test('switching accounts terminates the native background lifetime without trans
   assert.equal(h.leaseActive, false);
   assert.equal(h.model.chatHistorySync.status, 'idle');
   assert.equal(h.model.savedConversations.filter((c) => c.count).length, 0);
+});
+test('account opening automatically connects once without entering Friends or Chats', async (t) => {
+  const h = await harness(t);
+  assert.equal(h.model.chat.status, 'ready');
+  assert.deepEqual(h.bootstraps, [ID]);
+  await act(async () => {
+    h.model.resumeChat();
+    h.model.resumeChat();
+  });
+  assert.deepEqual(h.bootstraps, [ID]);
+  await h.event('blur');
+  await h.event('focus');
+  assert.deepEqual(h.bootstraps, [ID]);
+});
+test('selecting a new signed-in account automatically establishes only its own chat', async (t) => {
+  const h = await harness(t);
+  await h.switch(OTHER);
+  assert.deepEqual(h.bootstraps, [ID, OTHER]);
+  assert.equal(h.model.chat.status, 'ready');
+});
+test('foreground transitions cannot bypass a chat Retry-After deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1700000000000 });
+  const h = await harness(t);
+  const deadline = Date.now() + 180000;
+  await h.drop('RATE_LIMIT', deadline);
+  assert.equal(h.model.chat.retryAt, deadline);
+  await h.transition('change', 'background');
+  await h.advance(1000);
+  await h.transition('change', 'active');
+  await h.advance(178999);
+  assert.equal(h.bootstraps.length, 1);
+  await h.advance(1);
+  assert.equal(h.bootstraps.length, 2);
+  assert.equal(h.model.chat.status, 'ready');
+});
+test('transient disconnect automatically reconnects but repeated screen activity does not hammer bootstrap', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1700000000000 });
+  const h = await harness(t);
+  await h.drop();
+  const at = h.model.chat.retryAt;
+  await act(async () => {
+    for (let i = 0; i < 20; i++) h.model.resumeChat();
+  });
+  assert.equal(h.bootstraps.length, 1);
+  await h.advance(at - Date.now());
+  assert.equal(h.bootstraps.length, 2);
+  assert.equal(h.model.chat.status, 'ready');
+});
+test('automatic connection waits for an unfinished bootstrap instead of starting duplicate sessions', async (t) => {
+  let resolve;
+  const wait = new Promise((r) => (resolve = r));
+  const h = await harness(t, 'android', false, { bootstrap: () => wait });
+  assert.equal(h.model.chat.status, 'connecting');
+  await act(async () => {
+    h.model.resumeChat();
+    h.model.resumeChat();
+  });
+  assert.equal(h.bootstraps.length, 1);
+  await act(async () => {
+    resolve({ subject: ID });
+    for (let i = 0; i < 15; i++) await Promise.resolve();
+  });
+  assert.equal(h.model.chat.status, 'ready');
 });

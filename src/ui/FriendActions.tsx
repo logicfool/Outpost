@@ -1,3 +1,4 @@
+import { ChatConnectionNotice } from './ChatConnectionNotice';
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import type { AppModel } from '../state/useApp';
@@ -115,18 +116,7 @@ export function FriendActions({ model, player }: { model: AppModel; player: Play
           onPress={() => setConfirm('add')}
         />
       )}
-      {!connected && (
-        <Button
-          title={
-            ['connecting', 'authenticating'].includes(model.chat.status)
-              ? 'Connecting friends...'
-              : 'Connect friends'
-          }
-          secondary
-          disabled={['connecting', 'authenticating'].includes(model.chat.status)}
-          onPress={() => void model.connectChat()}
-        />
-      )}
+      <ChatConnectionNotice chat={model.chat} />
       {(error || operation?.message) && (
         <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
           {error || operation?.message}

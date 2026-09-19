@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
   dist = path.join(root, 'dist-web'),
-  out = path.join(root, 'docs/validation-0.9.3');
+  out = path.join(root, 'docs/validation-0.9.4');
 const mime = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -160,21 +160,24 @@ try {
       await click('Back from conversation');
     },
   );
-  await check('recent chats stay newest-first offline and after app restart', async () => {
-    await click('Disconnect chat');
-    await page.getByText('You: Newest conversation fixture', { exact: true }).waitFor();
-    await click('Open conversation with Kestrel');
-    assert.equal(await button('Send').isDisabled(), true);
-    await click('Back from conversation');
-    await click('Back from friends');
-    await page.reload();
-    await click('Try the demo');
-    await tab('Friends');
-    await click('Open chats');
-    await page.getByText('You: Newest conversation fixture', { exact: true }).waitFor();
-    const rows = page.locator('[data-testid^="conversation-row-"]');
-    assert.equal(await rows.first().getAttribute('aria-label'), 'Open conversation with Kestrel');
-  });
+  await check(
+    'recent chats stay newest-first after automatic connection and app restart',
+    async () => {
+      assert.equal(await button('Disconnect chat').count(), 0);
+      await page.getByText('You: Newest conversation fixture', { exact: true }).waitFor();
+      await click('Open conversation with Kestrel');
+      assert.equal(await button('Reconnect chat').count(), 0);
+      await click('Back from conversation');
+      await click('Back from friends');
+      await page.reload();
+      await click('Try the demo');
+      await tab('Friends');
+      await click('Open chats');
+      await page.getByText('You: Newest conversation fixture', { exact: true }).waitFor();
+      const rows = page.locator('[data-testid^="conversation-row-"]');
+      assert.equal(await rows.first().getAttribute('aria-label'), 'Open conversation with Kestrel');
+    },
+  );
   await check('recent chat rows fit narrow phones without clipping', async () => {
     for (const width of [320, 430]) {
       await page.setViewportSize({ width, height: 844 });

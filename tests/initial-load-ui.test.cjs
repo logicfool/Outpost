@@ -39,7 +39,15 @@ function goodSnapshot(id = ID, at = Date.now()) {
 }
 async function harness(t, options = {}) {
   const accounts = [session(ID).account, session(OTHER).account],
-    counts = { sync: [], history: 0, accounts: 0, permission: 0, notices: 0, background: 0 },
+    counts = {
+      sync: [],
+      history: 0,
+      accounts: 0,
+      permission: 0,
+      notices: 0,
+      background: 0,
+      chatResume: 0,
+    },
     listeners = new Map(),
     stamps = new Map();
   if (options.alreadyPrompted) stamps.set('notification.permission.prompted.v1', 'true');
@@ -99,6 +107,9 @@ async function harness(t, options = {}) {
     sessionHealth: async () => ({}),
   };
   const social = {
+    resumeChat: () => {
+      counts.chatResume++;
+    },
     chat: { ...EMPTY_CHAT, status: 'ready' },
     connectChat: async () => {},
     disconnectChat() {},
@@ -473,4 +484,10 @@ test('a first load completing while Android is blurred does not prompt over anot
   await h.focus(true);
   assert.equal(h.counts.permission, 1);
   assert.equal(h.counts.sync.length, 1);
+});
+test('app opening restores chat even when every notification preference is disabled', async (t) => {
+  const h = await harness(t);
+  assert.equal(h.model().settings.chatAlerts, false);
+  assert.ok(h.counts.chatResume >= 1);
+  assert.equal(h.counts.permission, 0);
 });

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.3');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.4');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -108,7 +108,8 @@ try {
   });
   await check('live game opens ten-player roster and another player profile', async () => {
     await click('View live game details');
-    await page.getByText('10 players returned.', { exact: false }).waitFor();
+    await page.getByTestId('live-roster').waitFor();
+    assert.equal(await page.locator('[data-testid^="live-player-"]').count(), 10);
     await page.getByRole('button', { name: 'View Lumen profile', exact: true }).waitFor();
     await page.getByRole('button', { name: 'View You profile', exact: true }).waitFor();
     await shot('live-roster');
@@ -201,7 +202,9 @@ try {
     'live round score and match skins are available from the current roster',
     async () => {
       await click('View live game details');
-      await page.getByRole('dialog').getByText('Round 13 · 7 - 5', { exact: true }).waitFor();
+      await page.getByTestId('live-match-hero').getByText('Round 13', { exact: true }).waitFor();
+      await page.getByTestId('live-match-hero').getByText('7', { exact: true }).waitFor();
+      await page.getByTestId('live-match-hero').getByText('5', { exact: true }).waitFor();
       await click('Match skins');
       await page
         .getByText('Equipped cosmetics, not the weapon currently held.', { exact: true })
@@ -257,8 +260,10 @@ try {
   await check('friends support presence filters, conversations and profile links', async () => {
     await tab('Friends');
     await click('Open chats');
-    if (await page.getByRole('button', { name: 'Connect Riot chat', exact: true }).isVisible())
-      await click('Connect Riot chat');
+    assert.equal(
+      await page.getByRole('button', { name: 'Connect Riot chat', exact: true }).count(),
+      0,
+    );
     await tab('Online');
     await page
       .getByRole('button', { name: /^Open conversation with / })
@@ -439,47 +444,56 @@ try {
     await shot('settings-system-light');
     await tab('Light');
   });
-  await check('saved messages survive app restart without connecting to Riot', async () => {
-    await tab('Friends');
-    await click('Open chats');
-    if (await page.getByRole('button', { name: 'Disconnect chat', exact: true }).isVisible())
-      await click('Disconnect chat');
-    await tab('Recent');
-    await page
-      .getByRole('button', { name: /^Open conversation with / })
-      .first()
-      .click();
-    await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
-    await shot('saved-chat-offline-light');
-    assert.equal(await page.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
-    await click('Reconnect chat');
-    await page
-      .getByRole('button', { name: 'View chat participant profile', exact: true })
-      .waitFor();
-    await click('Conversation settings');
-    await click('Sync this conversation now');
-    await page.getByText('History synced.', { exact: true }).waitFor();
-    await click('Back from chat settings');
-    await click('Conversation settings');
-    await click('Delete saved conversation');
-    await click('Keep messages');
-    await click('Back from chat settings');
-    await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
-    await click('Conversation settings');
-    await click('Delete saved conversation');
-    await click('Delete local messages');
-    await page.getByText('Local messages deleted.', { exact: true }).waitFor();
-    await click('Back from chat settings');
-    await page.getByText('No messages saved yet', { exact: true }).waitFor();
-    await click('Back from conversation');
-    await click('Back from friends');
-  });
+  await check(
+    'saved messages survive restart with automatic chat and no connection controls',
+    async () => {
+      await tab('Friends');
+      await click('Open chats');
+      assert.equal(
+        await page.getByRole('button', { name: 'Disconnect chat', exact: true }).count(),
+        0,
+      );
+      await tab('Recent');
+      await page
+        .getByRole('button', { name: /^Open conversation with / })
+        .first()
+        .click();
+      await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
+      await shot('saved-chat-auto-light');
+      await page
+        .getByRole('button', { name: 'View chat participant profile', exact: true })
+        .waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: 'Reconnect chat', exact: true }).count(),
+        0,
+      );
+      await click('Conversation settings');
+      await click('Sync this conversation now');
+      await page.getByText('History synced.', { exact: true }).waitFor();
+      await click('Back from chat settings');
+      await click('Conversation settings');
+      await click('Delete saved conversation');
+      await click('Keep messages');
+      await click('Back from chat settings');
+      await page.getByText('Hello from the Outpost demo 🦊', { exact: true }).waitFor();
+      await click('Conversation settings');
+      await click('Delete saved conversation');
+      await click('Delete local messages');
+      await page.getByText('Local messages deleted.', { exact: true }).waitFor();
+      await click('Back from chat settings');
+      await page.getByText('No messages saved yet', { exact: true }).waitFor();
+      await click('Back from conversation');
+      await click('Back from friends');
+    },
+  );
   await check(
     'dedicated Friends tab uses compact square portraits and separates chat navigation',
     async () => {
       await tab('Friends');
-      if (await page.getByRole('button', { name: 'Connect friends', exact: true }).isVisible())
-        await click('Connect friends');
+      assert.equal(
+        await page.getByRole('button', { name: 'Connect friends', exact: true }).count(),
+        0,
+      );
       await page.getByText('VALORANT - 2', { exact: true }).waitFor();
       const row = page.getByRole('button', { name: 'View Lumen profile', exact: true });
       await row.waitFor();

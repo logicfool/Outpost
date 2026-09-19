@@ -48,7 +48,7 @@ export function normalizeLive(
     const tier = nullableNumber(p.CompetitiveTier),
       meta = tierMeta(catalog, tier);
     players.set(subject, {
-      stats: normalizeLiveStats(p, state === 'in_game'),
+      stats: normalizeLiveStats(p, state === 'in_game') ?? players.get(subject)?.stats,
       subject,
       self: subject === self,
       teamId: text(p.TeamID),

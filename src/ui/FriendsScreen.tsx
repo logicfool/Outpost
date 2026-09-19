@@ -1,3 +1,4 @@
+import { ChatConnectionNotice } from './ChatConnectionNotice';
 import { Skeleton } from './Skeleton';
 import { useFriendPortraits } from '../state/useFriendPortraits';
 import { useNavInset } from './NavInsets';
@@ -126,12 +127,6 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
     search = useDeferredValue(query);
   const connected = model.chat.status === 'ready',
     busy = ['connecting', 'authenticating'].includes(model.chat.status);
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    if (model.chat.status === 'disconnected') void model.connectChat();
-  }, [model.chat.status, model.connectChat]);
   const sections = useMemo(
     () => friendSections(model.chat.friends, model.savedConversations, connected, search),
     [model.chat.friends, model.savedConversations, connected, search],
@@ -256,28 +251,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
               style={{ color: C.ink, flex: 1, minWidth: 0, paddingVertical: 8 }}
             />
           </View>
-          {!connected && (
-            <View style={{ gap: 8 }}>
-              {busy ? (
-                <View style={S.row}>
-                  <ActivityIndicator color={C.accent} size="small" />
-                  <Text style={S.small}>Connecting to Riot…</Text>
-                </View>
-              ) : (
-                <>
-                  <Text style={S.small}>
-                    {model.chat.error ??
-                      'Saved friends are shown until a live connection is available.'}
-                  </Text>
-                  <Button
-                    secondary
-                    title="Connect friends"
-                    onPress={() => void model.connectChat()}
-                  />
-                </>
-              )}
-            </View>
-          )}
+          <ChatConnectionNotice chat={model.chat} />
         </View>
       }
       ListEmptyComponent={
@@ -289,7 +263,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
               ? 'No matching friends.'
               : connected
                 ? 'No friends returned by Riot.'
-                : 'Connect to load your friends.'}
+                : 'Friends will appear when the connection returns.'}
           </Text>
         )
       }

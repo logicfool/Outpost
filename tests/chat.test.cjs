@@ -532,3 +532,55 @@ test('a mismatched roster puuid cannot redirect an incoming request to someone e
   );
   assert.equal(h.chat.snapshot.friendRequests.length, 0);
 });
+test('active push traffic keeps chat alive without periodic history or redundant pings', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1700000000000 });
+  const h = harness(t);
+  h.start();
+  const initial = h.writes.length;
+  for (let i = 0; i < 5; i++) {
+    t.mock.timers.tick(30000);
+    h.feed(
+      `<message from="${OTHER}@ap1.pvp.net/client" id="push-${i}"><body>Incoming ${i}</body></message>`,
+    );
+  }
+  assert.equal(h.chat.snapshot.messages[OTHER].length, 5);
+  assert.equal(h.writes.length, initial);
+  assert.equal(h.chat.snapshot.status, 'ready');
+});
+test('idle connection sends one ping after a minute and does not request chat history', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1700000000000 });
+  const h = harness(t);
+  h.start();
+  const initial = h.writes.length;
+  t.mock.timers.tick(59999);
+  assert.equal(h.writes.length, initial);
+  t.mock.timers.tick(1);
+  assert.equal(h.writes.length, initial + 1);
+  assert.match(h.writes.at(-1), /urn:xmpp:ping/);
+  const id = /id="([^"]+)"/.exec(h.writes.at(-1))[1];
+  h.feed(`<iq from="ap1.pvp.net" type="result" id="${id}"/>`);
+  t.mock.timers.tick(30000);
+  assert.equal(h.chat.snapshot.status, 'ready');
+  assert.equal(h.writes.length, initial + 1);
+});
+test('an unanswered idle keepalive closes the stale socket instead of sending repeated pings', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: 1700000000000 });
+  const h = harness(t);
+  h.start();
+  t.mock.timers.tick(60000);
+  t.mock.timers.tick(30000);
+  assert.equal(h.writes.filter((x) => x.includes('urn:xmpp:ping')).length, 1);
+  assert.equal(h.chat.snapshot.status, 'error');
+  assert.equal(h.chat.snapshot.errorCode, 'CHAT_NETWORK');
+  assert.equal(h.closes, 1);
+});
+test('server resource-constraint asks the automatic reconnect scheduler to wait', (t) => {
+  const h = harness(t);
+  h.start();
+  const now = Date.now();
+  h.feed(
+    '<stream:error><resource-constraint xmlns="urn:ietf:params:xml:ns:xmpp-streams"/></stream:error>',
+  );
+  assert.equal(h.chat.snapshot.errorCode, 'RATE_LIMIT');
+  assert.ok(h.chat.snapshot.retryAt >= now + 60000);
+});

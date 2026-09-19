@@ -56,6 +56,7 @@ for (const platform of ['android', 'ios'])
             View: 'View',
           };
         if (name === '@expo/vector-icons') return { Feather: 'Icon' };
+        if (name === './ChatConnectionNotice') return { ChatConnectionNotice: 'ConnectionNotice' };
         if (name === './theme')
           return { useTheme: () => ({ C: {}, S: { content: {}, body: {}, small: {} } }) };
         if (name === './components')

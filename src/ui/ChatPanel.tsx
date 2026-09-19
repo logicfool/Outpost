@@ -1,3 +1,4 @@
+import { ChatConnectionNotice } from './ChatConnectionNotice';
 import { Skeleton } from './Skeleton';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -205,20 +206,9 @@ export function ChatPanel({
         <IconButton icon="x" label="Back from conversation" onPress={onBack} />
       </View>
       <KeyboardAvoidingView style={S.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {model.chat.status !== 'ready' && (
-          <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
-            <Button
-              title={
-                ['connecting', 'authenticating'].includes(model.chat.status)
-                  ? 'Connecting…'
-                  : 'Reconnect chat'
-              }
-              secondary
-              disabled={['connecting', 'authenticating'].includes(model.chat.status)}
-              onPress={() => void model.connectChat()}
-            />
-          </View>
-        )}
+        <View style={{ paddingHorizontal: 16 }}>
+          <ChatConnectionNotice chat={model.chat} />
+        </View>
         {archive?.status === 'error' && (
           <Text style={[S.small, { paddingHorizontal: 16, paddingVertical: 6, color: C.gold }]}>
             {archive.message}

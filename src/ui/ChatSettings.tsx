@@ -91,7 +91,9 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
         onPress={() => void sync()}
         icon="refresh-cw"
       />
-      {model.chat.status !== 'ready' && <Text style={S.small}>Connect chat to sync.</Text>}
+      {model.chat.status !== 'ready' && (
+        <Text style={S.small}>Chat reconnects automatically before history sync.</Text>
+      )}
       {!subject && <Text style={S.small}>Checks every friend, one at a time.</Text>}
       {!subject && <HistoryBackgroundOption model={model} />}
       {!subject && progress.status !== 'idle' && (

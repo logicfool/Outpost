@@ -1,3 +1,4 @@
+import { ChatConnectionNotice } from './ChatConnectionNotice';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatDirectoryView, ChatFilter } from '../core/chatDirectory';
 import type { ConversationRow } from '../core/conversations';
@@ -136,27 +137,7 @@ export function ChatsPanel({
                 autoCorrect={false}
               />
             </View>
-            {connected && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Disconnect chat"
-                onPress={model.disconnectChat}
-                style={{ alignSelf: 'flex-end', padding: 6 }}
-              >
-                <Text style={S.small}>Disconnect</Text>
-              </Pressable>
-            )}
-            {!connected && (
-              <>
-                <Text style={S.small}>{chat.error ?? 'Saved messages are available offline.'}</Text>
-                <Button
-                  title={busy ? 'Connecting...' : 'Connect Riot chat'}
-                  secondary
-                  disabled={busy}
-                  onPress={() => void model.connectChat()}
-                />
-              </>
-            )}
+            <ChatConnectionNotice chat={chat} />
             {chat.storageError && (
               <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
                 {chat.storageError}

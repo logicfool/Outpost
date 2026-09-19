@@ -73,10 +73,8 @@ export function useApp() {
   snapshotRef.current = snapshot;
   const social = useSocial(active, catalog, settings.backgroundChatHistory !== false);
   useEffect(() => {
-    if (settings.chatAlerts && active && !active.demo && Platform.OS !== 'web') {
-      void social.connectChat();
-    }
-  }, [active?.puuid, settings.chatAlerts]);
+    if (active) social.resumeChat();
+  }, [active?.puuid, linkRevision, social.resumeChat]);
   const actions = useActions(
     active,
     catalog,
@@ -652,8 +650,10 @@ export function useApp() {
       setMessage('Game cache cleared. Saved accounts and chats are kept.');
     } catch (error) {
       setMessage(safeError(error).message);
+    } finally {
+      if (activeRef.current) social.resumeChat();
     }
-  }, []);
+  }, [social.disconnectChat, social.resumeChat]);
   const matchDetail = useCallback(
     async (id: string, subject?: string): Promise<MatchDetail> => {
       const account = activeRef.current;

@@ -12,17 +12,39 @@ export function normalizeLiveStats(
   inGame: boolean,
   now = Date.now(),
 ): LiveStats | undefined {
-  if (!inGame) return;
-  const p = object(player),
-    raw = object(p.Stats ?? p.MatchStats ?? p.stats ?? p.matchStats);
-  const values = ['Kills', 'Deaths', 'Assists'].map((key) => raw[key] ?? raw[key.toLowerCase()]);
-  if (values.some((v) => typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1000))
+  if (!inGame || !Number.isFinite(now)) return;
+  const p = object(player);
+  for (const candidate of [p.Stats, p.MatchStats, p.stats, p.matchStats]) {
+    const raw = object(candidate),
+      values = ['Kills', 'Deaths', 'Assists'].map((key) => raw[key] ?? raw[key.toLowerCase()]);
+    if (values.some((v) => typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1000))
+      continue;
+    return {
+      kills: values[0] as number,
+      deaths: values[1] as number,
+      assists: values[2] as number,
+      observedAt: now,
+      source: 'current-match',
+    };
+  }
+}
+export function freshLiveStats(
+  stats: LiveStats | undefined,
+  now = Date.now(),
+): LiveStats | undefined {
+  if (
+    !stats ||
+    stats.source !== 'current-match' ||
+    !Number.isFinite(stats.observedAt) ||
+    now - stats.observedAt > 180000 ||
+    stats.observedAt - now > 60000
+  )
     return;
-  return {
-    kills: values[0] as number,
-    deaths: values[1] as number,
-    assists: values[2] as number,
-    observedAt: now,
-    source: 'current-match',
-  };
+  if (
+    [stats.kills, stats.deaths, stats.assists].some(
+      (v) => !Number.isInteger(v) || v < 0 || v > 1000,
+    )
+  )
+    return;
+  return stats;
 }

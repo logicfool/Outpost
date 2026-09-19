@@ -36,6 +36,7 @@ export function LiveStatsLine({ stats }: { stats?: LiveStats }) {
   const { C, S } = useTheme();
   const fresh =
     stats && Date.now() - stats.observedAt <= 180000 && Date.now() >= stats.observedAt - 60000;
+  if (!fresh) return null;
   return (
     <Text
       testID="live-kda-value"
@@ -46,7 +47,7 @@ export function LiveStatsLine({ stats }: { stats?: LiveStats }) {
       }
       style={[S.small, { color: fresh ? C.ink : C.subtle, fontVariant: ['tabular-nums'] }]}
     >
-      {fresh ? `K/D/A ${stats.kills} / ${stats.deaths} / ${stats.assists}` : 'K/D/A - / - / -'}
+      {fresh ? `K/D/A ${stats.kills} / ${stats.deaths} / ${stats.assists}` : ''}
     </Text>
   );
 }

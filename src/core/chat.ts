@@ -49,6 +49,7 @@ export class RiotChat {
   private heartbeat?: ReturnType<typeof setInterval>;
   private expiry?: ReturnType<typeof setTimeout>;
   private lastInput = 0;
+  private probe?: { id: string; at: number };
   private lastSend = -Infinity;
   private openConversation?: string;
   private counter = 0;
@@ -121,7 +122,7 @@ export class RiotChat {
     detailedDiagnosticEvent('xmpp-out', { stanza: value });
     void this.socket.write(value).catch(() => {
       if (epoch === this.generation)
-        this.fail('The chat connection could not send data. Reconnect to retry.');
+        this.fail('The chat connection could not send data. Reconnecting automatically.');
     });
   }
   start(credentials: ChatBootstrap) {
@@ -138,14 +139,13 @@ export class RiotChat {
         if (epoch === this.generation) this.receive(node);
       },
       () => {
-        if (epoch === this.generation)
-          this.fail('Riot returned an invalid chat stream. Reconnect to retry.');
+        if (epoch === this.generation) this.fail('Riot returned an invalid chat stream.');
       },
     );
     this.update({ status: 'connecting', error: undefined, errorCode: undefined });
     this.timer = setTimeout(() => {
       if (epoch === this.generation)
-        this.fail('Chat connection timed out. Check your network and reconnect.');
+        this.fail('Chat connection timed out. Retrying automatically.');
     }, 25000);
     try {
       this.socket = this.transport(credentials, {
@@ -171,7 +171,7 @@ export class RiotChat {
         },
         close: () => {
           if (epoch === this.generation)
-            this.fail('Riot chat disconnected. Tap Reconnect to continue.');
+            this.fail('Riot chat disconnected. Reconnecting automatically.');
         },
       });
     } catch (e) {
@@ -192,20 +192,42 @@ export class RiotChat {
     const name = node.name,
       type = node.attrs.type,
       id = node.attrs.id;
-    if (name === 'failure' || (node.name === 'error' && node.ns === NS.stream)) {
+    if (node.name === 'error' && node.ns === NS.stream) {
+      const limited = !!child(node, 'resource-constraint');
       this.fail(
-        'Riot rejected or closed the chat session. Reconnect your account if it persists.',
-        'CHAT_AUTH',
+        limited
+          ? 'Riot asked chat to slow down. Retrying later.'
+          : 'Riot closed the chat connection.',
+        limited ? 'RATE_LIMIT' : 'CHAT_NETWORK',
+        limited ? this.now() + 60000 : undefined,
       );
       return;
     }
+    if (name === 'failure' && node.ns === NS.sasl) {
+      this.fail('Riot rejected chat authorization.', 'CHAT_AUTH');
+      return;
+    }
+    if (
+      this.probe &&
+      name === 'iq' &&
+      id === this.probe.id &&
+      ['result', 'error'].includes(type ?? '') &&
+      (!node.attrs.from || node.attrs.from === c.domain)
+    ) {
+      this.probe = undefined;
+      return;
+    }
+
     if (name === 'features' && node.ns === NS.stream && this.phase === 'features') {
       const mechanisms = child(node, 'mechanisms', NS.sasl);
       if (
         !mechanisms ||
         !children(mechanisms, 'mechanism').some((m) => m.text === 'X-Riot-RSO-PAS')
       ) {
-        this.fail('Riot chat authentication changed. No chat credentials were submitted.');
+        this.fail(
+          'Riot chat authentication changed. No chat credentials were submitted.',
+          'CHAT_PROTOCOL',
+        );
         return;
       }
       this.phase = 'auth';
@@ -232,7 +254,7 @@ export class RiotChat {
       const bind = child(node, 'bind'),
         jid = parseJid(bind ? (child(bind, 'jid')?.text ?? '') : '');
       if (type !== 'result' || !jid || jid.bare !== `${c.subject}@${c.domain}`) {
-        this.fail('Riot returned an unexpected chat identity.');
+        this.fail('Riot returned an unexpected chat identity.', 'CHAT_IDENTITY');
         return;
       }
       this.phase = 'session';
@@ -261,7 +283,7 @@ export class RiotChat {
       type === 'error' &&
       ['outpost-roster', 'outpost-entitlements'].includes(id ?? '')
     ) {
-      this.fail('Riot denied friends or chat access for this session.');
+      this.fail('Riot denied friends or chat access for this session.', 'CHAT_AUTH');
       return;
     }
     if (
@@ -356,13 +378,20 @@ export class RiotChat {
     const epoch = this.generation;
     this.heartbeat = setInterval(() => {
       if (epoch !== this.generation) return;
-      if (this.now() - this.lastInput > 150000)
-        this.fail('Chat stopped responding. Reconnect to refresh friends and messages.');
-      else
-        this.sendRaw(
-          `<iq type="get" id="outpost-ping-${++this.counter}" to="${xml(this.credentials!.domain)}"><ping xmlns="urn:xmpp:ping"/></iq>`,
-        );
-    }, 45000);
+      const now = this.now();
+      if (this.probe && this.lastInput >= this.probe.at) this.probe = undefined;
+      if (this.probe) {
+        if (now - this.probe.at >= 30000)
+          this.fail('Chat stopped responding. Reconnecting automatically.');
+        return;
+      }
+      if (now - this.lastInput < 60000) return;
+      const id = `outpost-ping-${++this.counter}`;
+      this.probe = { id, at: now };
+      this.sendRaw(
+        `<iq type="get" id="${id}" to="${xml(this.credentials!.domain)}"><ping xmlns="urn:xmpp:ping"/></iq>`,
+      );
+    }, 30000);
     this.expiry = setTimeout(
       () => {
         if (epoch === this.generation)
@@ -620,7 +649,7 @@ export class RiotChat {
         'Connect Riot chat and select a current friend to sync server history.',
       );
     if (c.expiresAt <= this.now())
-      throw new AppError('SESSION_EXPIRED', 'Reconnect chat to continue syncing history.');
+      throw new AppError('SESSION_EXPIRED', 'Chat is renewing automatically before history sync.');
     if (this.historyRequests.size)
       throw new AppError(
         'CHAT_HISTORY_BUSY',
@@ -779,7 +808,7 @@ export class RiotChat {
   private async sendMessage(subject: string, value: string): Promise<void> {
     if (this.credentials && this.credentials.expiresAt <= this.now()) {
       this.fail('Chat session renewal is needed.', 'SESSION_EXPIRED');
-      throw new AppError('SESSION_EXPIRED', 'Reconnect to renew chat.');
+      throw new AppError('SESSION_EXPIRED', 'Your chat session is renewing automatically.');
     }
     const body = messageBody(value),
       friend = this.roster.get(subject);
@@ -848,7 +877,10 @@ export class RiotChat {
     if (!['add', 'accept', 'decline'].includes(action))
       throw new AppError('FRIEND_ACTION', 'Unknown friend action.');
     if (this.phase !== 'ready' || !c || !this.socket || c.expiresAt <= this.now())
-      throw new AppError('CHAT_OFFLINE', 'Connect friends before changing a request.');
+      throw new AppError(
+        'CHAT_OFFLINE',
+        'Friends are reconnecting automatically. Try the request once connected.',
+      );
     const incoming = this.requests.get(subject);
     if (action !== 'add' && incoming?.direction !== 'incoming')
       throw new AppError('FRIEND_REQUEST_CHANGED', 'This incoming request is no longer available.');
@@ -967,9 +999,9 @@ export class RiotChat {
       `<iq id="${query}" type="get"><query xmlns="jabber:iq:riotgames:roster" last_state="true"/></iq>`,
     );
   }
-  private fail(message: string, code = 'CHAT_NETWORK') {
+  private fail(message: string, code = 'CHAT_NETWORK', retryAt?: number) {
     this.disconnect();
-    this.update({ status: 'error', error: message, errorCode: code });
+    this.update({ status: 'error', error: message, errorCode: code, retryAt });
   }
   markRead(subject?: string) {
     this.openConversation = subject;
@@ -1003,6 +1035,7 @@ export class RiotChat {
         if (m.state === 'sending')
           void this.persistMessage({ ...m, state: 'failed' }).catch(() => {});
     this.generation++;
+    this.probe = undefined;
     this.phase = 'closed';
     this.openConversation = undefined;
     clearTimeout(this.timer);

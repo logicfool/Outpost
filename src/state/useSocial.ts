@@ -1,3 +1,4 @@
+import { ChatReconnect } from '../core/chatReconnect';
 import {
   startHistoryBackground,
   type HistoryBackgroundLease,
@@ -74,10 +75,10 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
   const epoch = useRef(0),
     wanted = useRef(false),
     pending = useRef(false),
-    attempts = useRef(0),
     openSubject = useRef<string | undefined>(undefined);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     localTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const connectionBudget = useRef(new ChatReconnect());
   const connectRef = useRef<() => Promise<void>>(async () => {});
   const storeFor = useCallback(
     (a: Account) => (a.demo ? Promise.resolve(demoChatStorage) : openChatStorage(a.puuid)),
@@ -116,7 +117,8 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     [refreshLocal],
   );
   const stop = useCallback((clear = false) => {
-    batchSync.current?.queue.stop('Sync paused. Reconnect chat to continue.', true);
+    batchSync.current?.queue.stop('Sync paused while chat reconnects.', true);
+    connectionBudget.current.suspend();
     const lease = backgroundLease.current;
     backgroundLease.current = null;
     void lease?.finish('paused');
@@ -142,6 +144,25 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     latest.current = next;
     setValue(next);
   }, []);
+  const scheduleReconnect = useCallback(() => {
+    clearTimeout(reconnectTimer.current);
+    const id = active.current?.puuid;
+    if (
+      !id ||
+      !wanted.current ||
+      connectionBudget.current.blocked ||
+      AppState.currentState !== 'active'
+    )
+      return;
+    const delay = Math.min(
+      2147480000,
+      Math.max(1000, connectionBudget.current.notBefore - Date.now()),
+    );
+    reconnectTimer.current = setTimeout(() => {
+      if (active.current?.puuid === id && wanted.current && AppState.currentState === 'active')
+        void connectRef.current();
+    }, delay);
+  }, []);
   const connectChat = useCallback(async () => {
     const a = active.current;
     if (
@@ -151,7 +172,12 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
         ['ready', 'connecting', 'authenticating'].includes(latest.current.state.status))
     )
       return;
-    wanted.current = true;
+    if (AppState.currentState === 'background' || !wanted.current) return;
+    if (connectionBudget.current.blocked) return;
+    if (connectionBudget.current.notBefore > Date.now()) {
+      scheduleReconnect();
+      return;
+    }
     clearTimeout(reconnectTimer.current);
     const stamp = ++epoch.current;
     pending.current = true;
@@ -169,40 +195,32 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
           code: state.errorCode ?? state.status.toUpperCase(),
           durationMs: 0,
         });
-      latest.current = { id: a.puuid, state };
-      setValue(latest.current);
       if (state.status === 'ready') {
-        attempts.current = 0;
+        connectionBudget.current.ready();
+        state = { ...state, retryAt: undefined };
         if (autoResume.current && AppState.currentState === 'active') {
           autoResume.current = false;
           setTimeout(() => void syncRef.current().catch(() => {}), 0);
         }
+      } else if (state.status === 'error') {
+        const previousState = latest.current.state;
+        if (previousState.status !== 'error' || previousState.errorCode !== state.errorCode) {
+          const retryAt = connectionBudget.current.failed(state.errorCode, state.retryAt);
+          state = { ...state, retryAt };
+          if (retryAt !== undefined) scheduleReconnect();
+        } else state = { ...state, retryAt: previousState.retryAt };
       }
-      if (
-        state.status === 'error' &&
-        wanted.current &&
-        AppState.currentState === 'active' &&
-        [
-          'CHAT_NETWORK',
-          'SESSION_EXPIRED',
-          'RENEWAL_WAIT',
-          'AUTH_UNAVAILABLE',
-          'SERVICE_UNAVAILABLE',
-          'NETWORK',
-          'TIMEOUT',
-          'RATE_LIMIT',
-        ].includes(state.errorCode ?? '') &&
-        attempts.current < 6
-      ) {
-        clearTimeout(reconnectTimer.current);
-        const delay = Math.max(
-          Math.min(300000, 10000 * 2 ** attempts.current++),
-          (state.retryAt ?? 0) - Date.now(),
-        );
-        reconnectTimer.current = setTimeout(() => void connectRef.current(), delay);
-      }
+      latest.current = { id: a.puuid, state };
+      setValue(latest.current);
     };
-    publish({ ...previous, status: 'connecting', selfPresence: undefined, error: undefined });
+    publish({
+      ...previous,
+      status: 'connecting',
+      selfPresence: undefined,
+      error: undefined,
+      errorCode: undefined,
+      retryAt: undefined,
+    });
     try {
       const store = await storeFor(a);
       if (stamp !== epoch.current) return;
@@ -317,7 +335,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     } finally {
       if (stamp === epoch.current) pending.current = false;
     }
-  }, [storeFor, refreshLocal, scheduleLocal]);
+  }, [storeFor, refreshLocal, scheduleLocal, scheduleReconnect]);
   connectRef.current = connectChat;
   useEffect(() => {
     autoResume.current = false;
@@ -326,13 +344,18 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     batchSync.current = null;
     setHistorySync({ id: account?.puuid, progress: EMPTY_HISTORY_SYNC });
     wanted.current = false;
-    attempts.current = 0;
+    connectionBudget.current.reset();
+    connectionBudget.current.credentials(account?.expiresAt);
     openSubject.current = undefined;
     stop(true);
     clearTimeout(localTimer.current);
     setLocal({ ...emptyLocal, id: account?.puuid, loading: !!account });
     setValue({ id: account?.puuid, state: EMPTY_CHAT });
-    if (account) void refreshLocal(account);
+    if (account) {
+      wanted.current = true;
+      void refreshLocal(account);
+      if (AppState.currentState !== 'background') void connectRef.current();
+    }
     return () => {
       wanted.current = false;
       batchSync.current?.queue.stop();
@@ -354,7 +377,6 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
           stop();
         }, 500);
       } else if (state === 'active' && wanted.current) {
-        attempts.current = 0;
         session.current?.markRead(openSubject.current);
         const account = active.current,
           subject = openSubject.current;
@@ -373,6 +395,16 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
       subscription.remove();
     };
   }, [stop, storeFor]);
+  useEffect(() => {
+    connectionBudget.current.credentials(account?.expiresAt);
+    if (account && wanted.current && AppState.currentState === 'active') void connectRef.current();
+  }, [account?.expiresAt]);
+  const resumeChat = useCallback(() => {
+    if (active.current) {
+      wanted.current = true;
+      void connectRef.current();
+    }
+  }, []);
   const disconnectChat = useCallback(() => {
     const closing = session.current,
       a = active.current;
@@ -476,7 +508,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
         return;
       }
       if (!session.current)
-        throw new AppError('CHAT_OFFLINE', 'Connect chat before sending a message.');
+        throw new AppError('CHAT_OFFLINE', 'Chat is reconnecting. Your draft is kept.');
       await session.current.send(subject, body);
     },
     [loadChatMessages],
@@ -485,7 +517,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     const a = active.current,
       stamp = epoch.current;
     if (!a || latest.current.id !== a.puuid || latest.current.state.status !== 'ready')
-      throw new AppError('CHAT_OFFLINE', 'Connect friends before changing requests.');
+      throw new AppError('CHAT_OFFLINE', 'Friends are reconnecting automatically.');
     const subject = validFriendTarget(player, a.puuid);
     if (a.demo) {
       const previous = latest.current.state,
@@ -519,7 +551,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
       return;
     }
     const connection = session.current;
-    if (!connection) throw new AppError('CHAT_OFFLINE', 'Connect friends first.');
+    if (!connection) throw new AppError('CHAT_OFFLINE', 'Friends are reconnecting automatically.');
     if (action === 'add') {
       const client = await (await getRuntime()).client(a.puuid);
       const known = client.scope.player(subject);
@@ -580,7 +612,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
         return;
       }
       if (!session.current)
-        throw new AppError('CHAT_OFFLINE', 'Connect chat before syncing Riot history.');
+        throw new AppError('CHAT_OFFLINE', 'Chat is reconnecting automatically.');
       await session.current.requestHistory(subject);
       if (
         active.current?.puuid !== a?.puuid ||
@@ -634,7 +666,10 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
       )
         throw new AppError('ACCOUNT_CHANGED', 'The chat account or connection changed.');
       if (latest.current.id !== a.puuid || latest.current.state.status !== 'ready')
-        throw new AppError('CHAT_OFFLINE', 'Connect chat to sync history.');
+        throw new AppError(
+          'CHAT_OFFLINE',
+          'Chat is reconnecting. History sync will be available once connected.',
+        );
     };
     accountCheck();
     autoResume.current = false;
@@ -758,18 +793,25 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
       wanted.current = false;
       const closing = session.current;
       stop(true);
-      await closing?.flushPersistence();
-      const store = await storeFor(a);
-      await store.clear(subject);
-      if (active.current?.puuid === a.puuid) {
-        setLocal((old) => ({
-          ...old,
-          messages: subject
-            ? Object.fromEntries(Object.entries(old.messages).filter(([id]) => id !== subject))
-            : {},
-          cursors: {},
-        }));
-        await refreshLocal(a, store);
+      try {
+        await closing?.flushPersistence();
+        const store = await storeFor(a);
+        await store.clear(subject);
+        if (active.current?.puuid === a.puuid) {
+          setLocal((old) => ({
+            ...old,
+            messages: subject
+              ? Object.fromEntries(Object.entries(old.messages).filter(([id]) => id !== subject))
+              : {},
+            cursors: {},
+          }));
+          await refreshLocal(a, store);
+        }
+      } finally {
+        if (active.current?.puuid === a.puuid) {
+          wanted.current = true;
+          void connectRef.current();
+        }
       }
     },
     [storeFor, stop, refreshLocal],
@@ -855,6 +897,7 @@ export function useSocial(account: Account | null, catalog: Catalog, backgroundE
     savedConversations: saved.conversations,
     historyCursors: saved.cursors,
     historyLoading: saved.loading,
+    resumeChat,
     connectChat,
     disconnectChat,
     prepareChatRemoval,

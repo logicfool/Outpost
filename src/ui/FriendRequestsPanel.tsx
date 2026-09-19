@@ -1,3 +1,4 @@
+import { ChatConnectionNotice } from './ChatConnectionNotice';
 import React, { useMemo, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import type { AppModel } from '../state/useApp';
@@ -44,17 +45,7 @@ export function FriendRequestsPanel({ model, onBack }: { model: AppModel; onBack
                 },
               ]}
             />
-            {!connected && (
-              <>
-                <Text style={S.small}>Connect to check the latest requests.</Text>
-                <Button
-                  title={busy ? 'Connecting...' : 'Connect friends'}
-                  secondary
-                  disabled={busy}
-                  onPress={() => void model.connectChat()}
-                />
-              </>
-            )}
+            <ChatConnectionNotice chat={model.chat} />
           </View>
         }
         renderItem={({ item }) => (
@@ -83,7 +74,7 @@ export function FriendRequestsPanel({ model, onBack }: { model: AppModel; onBack
               detail={
                 connected
                   ? 'Requests update through your Riot chat connection.'
-                  : 'Reconnect to check.'
+                  : 'Requests update when the connection returns.'
               }
               icon="user-plus"
             />
