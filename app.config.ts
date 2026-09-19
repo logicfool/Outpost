@@ -3,7 +3,7 @@ const config: ExpoConfig = {
   owner: 'logicfool',
   name: 'Outpost',
   slug: 'outpost-valorant',
-  version: '0.9.2',
+  version: '0.9.3',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   scheme: 'outpost',
@@ -23,7 +23,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'app.outpost.valorant',
-    versionCode: 24,
+    versionCode: 25,
     allowBackup: false,
 
     blockedPermissions: [
@@ -56,6 +56,7 @@ const config: ExpoConfig = {
     'expo-background-task',
     'expo-status-bar',
     'expo-video',
+    './plugins/with-history-sync.cjs',
   ],
   web: { bundler: 'metro', name: 'Outpost demo' },
   extra: {

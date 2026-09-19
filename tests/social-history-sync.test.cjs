@@ -13,16 +13,27 @@ const { RosterHistorySync } = require('../.test-build/rosterHistorySync.js'),
 const { conversationRows } = require('../.test-build/conversations.js');
 const { ID, OTHER, catalog } = require('./helpers.cjs');
 const peer = (i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`;
-async function harness(t, platform = 'android') {
+async function harness(t, platform = 'android', backgroundNative = false) {
   let model,
     tree,
     activeId = ID,
     hold;
   const calls = [],
     stores = new Map(),
-    events = new Map();
+    events = new Map(),
+    reads = [];
   let inFlight = 0,
-    maxInFlight = 0;
+    maxInFlight = 0,
+    leaseActive = false,
+    nativeStop;
+  const leases = [];
+  const app = {
+    currentState: 'active',
+    addEventListener: (name, fn) => {
+      events.set(name, fn);
+      return { remove: () => events.delete(name) };
+    },
+  };
   const friends = Array.from({ length: 15 }, (_, i) => ({
     subject: peer(i),
     jid: peer(i) + '@jp1.pvp.net',
@@ -41,7 +52,9 @@ async function harness(t, platform = 'android') {
       async save(m) {
         messages.set(m.subject + ':' + m.id, m);
       },
-      async markRead() {},
+      async markRead(subject) {
+        reads.push({ id, subject });
+      },
       async messages(subject) {
         return { messages: [...messages.values()].filter((m) => m.subject === subject) };
       },
@@ -123,17 +136,7 @@ async function harness(t, platform = 'android') {
   }
   const load = (name) => {
     if (name === 'react') return React;
-    if (name === 'react-native')
-      return {
-        Platform: { OS: platform },
-        AppState: {
-          currentState: 'active',
-          addEventListener: (name, fn) => {
-            events.set(name, fn);
-            return { remove: () => events.delete(name) };
-          },
-        },
-      };
+    if (name === 'react-native') return { Platform: { OS: platform }, AppState: app };
     if (name === '../core/chat') return { RiotChat: Chat };
     if (name === '../core/rosterHistorySync')
       return {
@@ -157,6 +160,26 @@ async function harness(t, platform = 'android') {
       };
     if (name === '../platform/chatStorage') return { openChatStorage: async (id) => store(id) };
     if (name === '../platform/demoChatStorage') return { demoChatStorage: store('demo') };
+    if (name === '../platform/historySyncBackground')
+      return {
+        startHistoryBackground: async (guard, stop) => {
+          guard();
+          nativeStop = stop;
+          leaseActive = backgroundNative;
+          const lease = {
+            supported: backgroundNative,
+            active: () => leaseActive,
+            update: (p) => leases.push(p.status),
+            check: async () => {
+              if (!leaseActive) throw new AppError('SYNC_STOPPED', 'Stopped');
+            },
+            finish: async () => {
+              leaseActive = false;
+            },
+          };
+          return lease;
+        },
+      };
     if (name === '../platform/notifications')
       return { notifyChat: async () => assert.fail('History imports must not notify') };
     if (name === '../platform/secure') return { randomHex: () => 'fixture' };
@@ -193,6 +216,7 @@ async function harness(t, platform = 'android') {
       return model;
     },
     calls,
+    reads,
     get maxInFlight() {
       return maxInFlight;
     },
@@ -238,9 +262,25 @@ async function harness(t, platform = 'android') {
         await model.connectChat();
       });
     },
-    async event(name, value) {
+    get leaseActive() {
+      return leaseActive;
+    },
+    async notificationStop() {
       await act(async () => {
+        leaseActive = false;
+        nativeStop?.('Sync stopped from the notification.');
+      });
+    },
+    async event(name, value, wait = 550) {
+      await act(async () => {
+        if (name === 'change') app.currentState = value;
         events.get(name)?.(value);
+        await new Promise((r) => setTimeout(r, wait));
+      });
+    },
+    async wait() {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 600));
       });
     },
   };
@@ -297,20 +337,19 @@ test('switching accounts stops the old scan and cannot copy progress or messages
   assert.equal(h.calls.filter((c) => c.id === OTHER).length, 15);
   assert.equal(h.model.chatHistorySync.checked, 15);
 });
-test('Android focus loss pauses a scan without disconnecting chat and resume continues safely', async (t) => {
+test('Android Modal window blur and focus do not pause the account-wide scan', async (t) => {
   const h = await harness(t),
     blocked = h.block(1),
     run = await h.start();
   await blocked.started;
   await h.event('blur');
+  assert.equal(h.model.chatHistorySync.status, 'running');
+  assert.equal(h.model.chat.status, 'ready');
+  await h.event('focus');
+  blocked.release();
   await act(async () => {
     await run.task;
   });
-  assert.equal(h.model.chatHistorySync.status, 'paused');
-  assert.equal(h.model.chat.status, 'ready');
-  blocked.release();
-  await h.event('focus');
-  await h.sync();
   assert.equal(h.model.chatHistorySync.checked, 15);
 });
 test('opening a conversation during bulk sync does not start an automatic competing request', async (t) => {
@@ -327,4 +366,113 @@ test('opening a conversation during bulk sync does not start an automatic compet
     await run.task;
   });
   blocked.release();
+});
+test('Android with an active native service continues syncing across real background changes', async (t) => {
+  const h = await harness(t, 'android', true),
+    blocked = h.block(2),
+    run = await h.start();
+  await blocked.started;
+  await h.event('change', 'background');
+  assert.equal(h.model.chatHistorySync.status, 'running');
+  assert.equal(h.model.chat.status, 'ready');
+  assert.equal(h.leaseActive, true);
+  blocked.release();
+  await act(async () => {
+    await run.task;
+  });
+  assert.equal(h.model.chatHistorySync.checked, 15);
+  assert.equal(h.leaseActive, false);
+});
+test('notification Stop aborts the pending request and keeps imported messages', async (t) => {
+  const h = await harness(t, 'android', true),
+    blocked = h.block(3),
+    run = await h.start();
+  await blocked.started;
+  await h.notificationStop();
+  await act(async () => {
+    await run.task;
+  });
+  assert.equal(h.model.chatHistorySync.status, 'paused');
+  assert.equal(h.calls.length, 4);
+  assert.equal(h.model.savedConversations.filter((c) => c.count).length, 1);
+  blocked.release();
+});
+test('iOS inactive transitions do not pause an in-app scan', async (t) => {
+  const h = await harness(t, 'ios'),
+    blocked = h.block(1),
+    run = await h.start();
+  await blocked.started;
+  await h.event('change', 'inactive');
+  assert.equal(h.model.chatHistorySync.status, 'running');
+  await h.event('change', 'active');
+  blocked.release();
+  await act(async () => {
+    await run.task;
+  });
+  assert.equal(h.model.chatHistorySync.checked, 15);
+});
+test('foreground-only fallback pauses on real background and resumes on return', async (t) => {
+  const h = await harness(t, 'ios'),
+    blocked = h.block(1),
+    run = await h.start();
+  await blocked.started;
+  await h.event('change', 'background');
+  await act(async () => {
+    await run.task;
+  });
+  assert.equal(h.model.chatHistorySync.status, 'paused');
+  assert.equal(h.model.chat.status, 'disconnected');
+  blocked.release();
+  await h.event('change', 'active');
+  assert.equal(h.model.chatHistorySync.status, 'complete');
+  assert.equal(h.model.chatHistorySync.checked, 15);
+});
+test('foreground fallback remembers resume intent when a reply arrives during background debounce', async (t) => {
+  const h = await harness(t, 'ios'),
+    blocked = h.block(1),
+    run = await h.start();
+  await blocked.started;
+  await h.event('change', 'background', 0);
+  blocked.release();
+  await act(async () => {
+    await run.task;
+  });
+  assert.equal(h.model.chatHistorySync.status, 'paused');
+  await h.wait();
+  await h.event('change', 'active');
+  assert.equal(h.model.chatHistorySync.status, 'complete');
+  assert.equal(h.model.chatHistorySync.checked, 15);
+});
+test('opening or rehydrating a chat while background sync runs does not mark messages read', async (t) => {
+  const h = await harness(t, 'android', true),
+    blocked = h.block(1),
+    run = await h.start();
+  await blocked.started;
+  await h.event('change', 'background');
+  const before = h.reads.length;
+  await act(async () => {
+    h.model.markChatRead(peer(1));
+    await Promise.resolve();
+  });
+  assert.equal(h.reads.length, before);
+  await h.cancel();
+  await act(async () => {
+    await run.task;
+  });
+  blocked.release();
+});
+test('switching accounts terminates the native background lifetime without transferring its progress', async (t) => {
+  const h = await harness(t, 'android', true),
+    blocked = h.block(1),
+    run = await h.start();
+  await blocked.started;
+  assert.equal(h.leaseActive, true);
+  await h.switch(OTHER);
+  await act(async () => {
+    await run.task;
+  });
+  blocked.release();
+  assert.equal(h.leaseActive, false);
+  assert.equal(h.model.chatHistorySync.status, 'idle');
+  assert.equal(h.model.savedConversations.filter((c) => c.count).length, 0);
 });

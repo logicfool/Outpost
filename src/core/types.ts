@@ -288,6 +288,7 @@ export interface Settings {
   allowPurchases?: boolean;
   theme?: import('./theme').ThemePreference;
   autoChatHistory?: boolean;
+  backgroundChatHistory?: boolean;
   autoplayVideos?: boolean;
   videoSound?: boolean;
   defaultsVersion?: number;
@@ -303,6 +304,7 @@ export const DEFAULT_SETTINGS: Settings = {
   allowPurchases: false,
   theme: 'navy',
   autoChatHistory: true,
+  backgroundChatHistory: true,
   autoplayVideos: true,
   videoSound: true,
   defaultsVersion: 2,

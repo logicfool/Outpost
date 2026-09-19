@@ -71,7 +71,7 @@ export function useApp() {
   const appFocused = useRef(true);
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
-  const social = useSocial(active, catalog);
+  const social = useSocial(active, catalog, settings.backgroundChatHistory !== false);
   useEffect(() => {
     if (settings.chatAlerts && active && !active.demo && Platform.OS !== 'web') {
       void social.connectChat();
@@ -615,6 +615,18 @@ export function useApp() {
     },
     [settings],
   );
+  const setBackgroundChatHistory = useCallback(
+    async (enabled: boolean) => {
+      const next = { ...settings, backgroundChatHistory: enabled };
+      setSettings(next);
+      try {
+        await (await getRuntime()).repository.saveSettings(next);
+      } catch {
+        setMessage('Background chat sync preference could not be saved.');
+      }
+    },
+    [settings],
+  );
   const setAutoChatHistory = useCallback(
     async (enabled: boolean) => {
       const next = { ...settings, autoChatHistory: enabled };
@@ -1114,6 +1126,7 @@ export function useApp() {
     ensureCatalog,
     setTheme,
     setAutoChatHistory,
+    setBackgroundChatHistory,
     setAutoplayVideos,
     setVideoSound,
     savedMarkets,

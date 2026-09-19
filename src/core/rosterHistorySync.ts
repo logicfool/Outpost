@@ -150,6 +150,7 @@ export class RosterHistorySync {
                 }
                 if (
                   [
+                    'SYNC_STOPPED',
                     'CHAT_OFFLINE',
                     'ACCOUNT_CHANGED',
                     'SESSION_EXPIRED',

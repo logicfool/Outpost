@@ -2,7 +2,7 @@ node_modules/
 .expo/
 .test-build/
 dist/
-android/
+/android/
 ios/
 .env*
 *.log

@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
   dist = path.join(root, 'dist-web'),
-  out = path.join(root, 'docs/validation-0.9.2');
+  out = path.join(root, 'docs/validation-0.9.3');
 const mime = {
   '.html': 'text/html',
   '.js': 'application/javascript',

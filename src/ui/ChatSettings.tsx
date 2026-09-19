@@ -1,3 +1,4 @@
+import { HistoryBackgroundOption } from './HistoryBackgroundOption';
 import React, { useEffect, useRef, useState } from 'react';
 import { Text, View, Switch } from 'react-native';
 import type { AppModel } from '../state/useApp';
@@ -18,7 +19,8 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
     };
   }, []);
   const progress = model.chatHistorySync,
-    running = model.syncingSavedHistory;
+    running = model.syncingSavedHistory,
+    starting = model.historySyncStarting;
   const resumable =
     ['paused', 'cancelled'].includes(progress.status) && progress.checked < progress.total;
   const erase = async () => {
@@ -39,7 +41,7 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
     }
   };
   const sync = async () => {
-    if (locked.current || running) return;
+    if (locked.current || running || starting) return;
     locked.current = true;
     setResult(undefined);
     if (subject) setWorking(true);
@@ -77,18 +79,21 @@ export function ChatSettings({ model, subject }: { model: AppModel; subject?: st
             ? working
               ? 'Syncing history...'
               : 'Sync this conversation now'
-            : running
-              ? 'Syncing all friends...'
-              : resumable
-                ? 'Resume history sync'
-                : 'Sync all chat history'
+            : starting
+              ? 'Preparing background sync...'
+              : running
+                ? 'Syncing all friends...'
+                : resumable
+                  ? 'Resume history sync'
+                  : 'Sync all chat history'
         }
-        disabled={working || running || model.chat.status !== 'ready'}
+        disabled={working || running || starting || model.chat.status !== 'ready'}
         onPress={() => void sync()}
         icon="refresh-cw"
       />
       {model.chat.status !== 'ready' && <Text style={S.small}>Connect chat to sync.</Text>}
       {!subject && <Text style={S.small}>Checks every friend, one at a time.</Text>}
+      {!subject && <HistoryBackgroundOption model={model} />}
       {!subject && progress.status !== 'idle' && (
         <View testID="all-friends-sync-progress" style={{ gap: 8 }}>
           <View style={S.between}>

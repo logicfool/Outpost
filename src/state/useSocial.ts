@@ -1,3 +1,7 @@
+import {
+  startHistoryBackground,
+  type HistoryBackgroundLease,
+} from '../platform/historySyncBackground';
 import { validFriendTarget } from '../core/friendRequests';
 import type { FriendAction, FriendRequest } from '../core/chatTypes';
 import type { PlayerRef } from '../core/playerTypes';
@@ -42,7 +46,7 @@ type LocalState = {
   loading: boolean;
 };
 const emptyLocal: LocalState = { conversations: [], messages: {}, cursors: {}, loading: false };
-export function useSocial(account: Account | null, catalog: Catalog) {
+export function useSocial(account: Account | null, catalog: Catalog, backgroundEnabled = true) {
   const [value, setValue] = useState<{ id?: string; state: ChatState }>({ state: EMPTY_CHAT });
   const [local, setLocal] = useState<LocalState>(emptyLocal);
   const autoGate = useRef(new AutoHistoryGate());
@@ -50,7 +54,16 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     progress: EMPTY_HISTORY_SYNC,
   });
   const batchSync = useRef<{ id: string; queue: RosterHistorySync } | null>(null);
-  const historyFocused = useRef(true);
+  const backgroundLease = useRef<HistoryBackgroundLease | null>(null),
+    backgroundWanted = useRef(backgroundEnabled);
+  backgroundWanted.current = backgroundEnabled;
+  const [historyBackground, setHistoryBackground] = useState<{ active: boolean; note?: string }>({
+    active: false,
+  });
+  const [historySyncStarting, setHistorySyncStarting] = useState(false),
+    starting = useRef(false);
+  const autoResume = useRef(false),
+    syncRef = useRef<() => Promise<unknown>>(async () => {});
   const session = useRef<RiotChat | null>(null),
     active = useRef(account),
     meta = useRef(catalog),
@@ -104,6 +117,10 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const stop = useCallback((clear = false) => {
     batchSync.current?.queue.stop('Sync paused. Reconnect chat to continue.', true);
+    const lease = backgroundLease.current;
+    backgroundLease.current = null;
+    void lease?.finish('paused');
+    setHistoryBackground({ active: false });
     clearTimeout(reconnectTimer.current);
     clearTimeout(localTimer.current);
     epoch.current++;
@@ -154,7 +171,13 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         });
       latest.current = { id: a.puuid, state };
       setValue(latest.current);
-      if (state.status === 'ready') attempts.current = 0;
+      if (state.status === 'ready') {
+        attempts.current = 0;
+        if (autoResume.current && AppState.currentState === 'active') {
+          autoResume.current = false;
+          setTimeout(() => void syncRef.current().catch(() => {}), 0);
+        }
+      }
       if (
         state.status === 'error' &&
         wanted.current &&
@@ -271,7 +294,8 @@ export function useSocial(account: Account | null, catalog: Catalog) {
           saveMessage: async (message) => {
             await store.save(message);
             if (stamp === epoch.current && active.current?.puuid === a.puuid) {
-              if (openSubject.current === message.subject) await store.markRead(message.subject);
+              if (openSubject.current === message.subject && AppState.currentState === 'active')
+                await store.markRead(message.subject);
               scheduleLocal(a, store);
             }
           },
@@ -296,6 +320,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   }, [storeFor, refreshLocal, scheduleLocal]);
   connectRef.current = connectChat;
   useEffect(() => {
+    autoResume.current = false;
     autoGate.current.clear();
     batchSync.current?.queue.stop();
     batchSync.current = null;
@@ -317,35 +342,41 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     };
   }, [account?.puuid, stop, refreshLocal]);
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') stop();
-      else if (wanted.current) {
+      clearTimeout(timer);
+      if (state === 'background') {
+        session.current?.markRead(undefined);
+        if (backgroundLease.current?.active()) return;
+        autoResume.current = batchSync.current?.queue.progress.status === 'running';
+        timer = setTimeout(() => {
+          if (AppState.currentState !== 'background' || backgroundLease.current?.active()) return;
+          stop();
+        }, 500);
+      } else if (state === 'active' && wanted.current) {
         attempts.current = 0;
+        session.current?.markRead(openSubject.current);
+        const account = active.current,
+          subject = openSubject.current;
+        if (account && subject)
+          void storeFor(account)
+            .then(async (store) => {
+              if (active.current?.puuid === account.puuid && AppState.currentState === 'active')
+                await store.markRead(subject);
+            })
+            .catch(() => {});
         void connectRef.current();
       }
     });
-    const blur =
-      Platform.OS === 'android'
-        ? AppState.addEventListener('blur', () => {
-            historyFocused.current = false;
-            batchSync.current?.queue.stop('Sync paused while the app is not in focus.', true);
-          })
-        : undefined;
-    const focus =
-      Platform.OS === 'android'
-        ? AppState.addEventListener('focus', () => {
-            historyFocused.current = true;
-          })
-        : undefined;
     return () => {
+      clearTimeout(timer);
       subscription.remove();
-      blur?.remove();
-      focus?.remove();
     };
-  }, [stop]);
+  }, [stop, storeFor]);
   const disconnectChat = useCallback(() => {
     const closing = session.current,
       a = active.current;
+    autoResume.current = false;
     wanted.current = false;
     stop();
     const stamp = epoch.current;
@@ -363,6 +394,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
       });
   }, [stop, refreshLocal]);
   const prepareChatRemoval = useCallback(async () => {
+    autoResume.current = false;
     wanted.current = false;
     const closing = session.current;
     stop(true);
@@ -504,13 +536,20 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   const markChatRead = useCallback(
     (subject?: string) => {
       openSubject.current = subject;
-      session.current?.markRead(subject);
+      const visible = AppState.currentState === 'active';
+      session.current?.markRead(visible ? subject : undefined);
       const a = active.current;
-      if (a && subject)
+      if (a && subject && visible)
         void storeFor(a)
           .then(async (store) => {
-            await store.markRead(subject);
-            scheduleLocal(a, store);
+            if (
+              active.current?.puuid === a.puuid &&
+              openSubject.current === subject &&
+              AppState.currentState === 'active'
+            ) {
+              await store.markRead(subject);
+              scheduleLocal(a, store);
+            }
           })
           .catch(() => {});
     },
@@ -518,7 +557,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
   );
   const syncChatHistory = useCallback(
     async (subject: string) => {
-      if (batchSync.current?.queue.progress.status === 'running')
+      if (starting.current || batchSync.current?.queue.progress.status === 'running')
         throw new AppError('CHAT_HISTORY_BUSY', 'The all-friends history sync is already running.');
       const a = active.current,
         generation = epoch.current,
@@ -562,6 +601,7 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         !a ||
         latest.current.id !== a.puuid ||
         latest.current.state.status !== 'ready' ||
+        starting.current ||
         batchSync.current?.queue.progress.status === 'running'
       )
         return;
@@ -580,10 +620,12 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     [syncChatHistory],
   );
   const syncSavedChatHistory = useCallback(async () => {
+    if (starting.current || batchSync.current?.queue.progress.status === 'running')
+      throw new AppError('CHAT_HISTORY_BUSY', 'A history sync is already running.');
     const a = active.current,
       generation = epoch.current,
       connection = session.current;
-    const check = () => {
+    const accountCheck = () => {
       if (
         !a ||
         active.current?.puuid !== a.puuid ||
@@ -593,74 +635,126 @@ export function useSocial(account: Account | null, catalog: Catalog) {
         throw new AppError('ACCOUNT_CHANGED', 'The chat account or connection changed.');
       if (latest.current.id !== a.puuid || latest.current.state.status !== 'ready')
         throw new AppError('CHAT_OFFLINE', 'Connect chat to sync history.');
-      if (!historyFocused.current || ['background', 'inactive'].includes(AppState.currentState))
-        throw new AppError('CHAT_OFFLINE', 'Keep Outpost open while syncing history.');
     };
-    check();
-    let job = batchSync.current;
-    if (!job || job.id !== a!.puuid) {
-      const id = a!.puuid;
-      const queue = new RosterHistorySync((progress) => {
-        if (active.current?.puuid === id && batchSync.current?.queue === queue)
-          setHistorySync({ id, progress });
-      });
-      job = { id, queue };
-      batchSync.current = job;
+    accountCheck();
+    autoResume.current = false;
+    starting.current = true;
+    setHistorySyncStarting(true);
+    let lease: HistoryBackgroundLease | undefined;
+    try {
+      let job = batchSync.current;
+      if (!job || job.id !== a!.puuid) {
+        const id = a!.puuid;
+        const queue = new RosterHistorySync((progress) => {
+          if (active.current?.puuid === id && batchSync.current?.queue === queue) {
+            setHistorySync({ id, progress });
+            backgroundLease.current?.update(progress);
+          }
+        });
+        job = { id, queue };
+        batchSync.current = job;
+      }
+      const queue = job.queue;
+      lease = a!.demo
+        ? undefined
+        : await startHistoryBackground(
+            accountCheck,
+            (reason) => {
+              if (batchSync.current?.queue === queue) queue.stop(reason, true);
+            },
+            backgroundWanted.current,
+          );
+      accountCheck();
+      backgroundLease.current = lease ?? null;
+      setHistoryBackground({ active: lease?.active() ?? false, note: lease?.note });
+      const check = () => {
+        accountCheck();
+        if (lease?.supported && !lease.active())
+          throw new AppError('SYNC_STOPPED', 'History sync was stopped.');
+        if (AppState.currentState === 'background' && !lease?.active())
+          throw new AppError('CHAT_OFFLINE', 'Return to Outpost to continue syncing.');
+      };
+      check();
+      lease?.update(queue.progress);
+      const options = {
+        check,
+        isFriend: (friend: Friend) =>
+          latest.current.state.friends.some((f) => f.subject === friend.subject),
+        sync: async (friend: Friend, signal: AbortSignal) => {
+          check();
+          if (lease?.supported) await lease.check();
+          check();
+          const store = await storeFor(a!);
+          check();
+          const count = a!.demo
+            ? 0
+            : await connection!.requestHistory(friend.subject, {
+                signal,
+                hydrate: openSubject.current === friend.subject,
+              });
+          check();
+          if (signal.aborted) throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
+          const conversations = await store.conversations();
+          check();
+          setLocal((old) => ({
+            ...old,
+            id: a!.puuid,
+            conversations,
+            error: undefined,
+            loading: false,
+          }));
+          if (openSubject.current === friend.subject) await loadChatMessages(friend.subject);
+          check();
+          return count;
+        },
+      };
+      starting.current = false;
+      setHistorySyncStarting(false);
+      const result = await (['paused', 'cancelled'].includes(queue.progress.status)
+        ? queue.resume(options)
+        : queue.start(
+            latest.current.state.friends.filter((f) => f.subject !== a!.puuid),
+            options,
+          ));
+      if (active.current?.puuid === a!.puuid && batchSync.current?.queue === queue)
+        recordRequest({
+          at: Date.now(),
+          service: 'Chat history sync',
+          method: 'XMPP',
+          code: 'ALL_FRIENDS_' + result.status.toUpperCase(),
+          durationMs: 0,
+        });
+      lease?.update(result);
+      await lease?.finish(result.status);
+      return result;
+    } finally {
+      starting.current = false;
+      setHistorySyncStarting(false);
+      if (lease) {
+        await lease.finish(batchSync.current?.queue.progress.status ?? 'paused');
+        if (backgroundLease.current === lease) {
+          backgroundLease.current = null;
+          setHistoryBackground((previous) => ({ ...previous, active: false }));
+        }
+      }
+      if (
+        active.current?.puuid === a?.puuid &&
+        generation === epoch.current &&
+        AppState.currentState === 'background'
+      )
+        stop();
     }
-    const options = {
-      check,
-      isFriend: (f: Friend) =>
-        latest.current.state.friends.some((current) => current.subject === f.subject),
-      sync: async (friend: Friend, signal: AbortSignal) => {
-        check();
-        const store = await storeFor(a!);
-        check();
-        const count = a!.demo
-          ? 0
-          : await connection!.requestHistory(friend.subject, {
-              signal,
-              hydrate: openSubject.current === friend.subject,
-            });
-        check();
-        if (signal.aborted) throw new AppError('CHAT_HISTORY_CANCELLED', 'History sync stopped.');
-        const conversations = await store.conversations();
-        check();
-        setLocal((old) => ({
-          ...old,
-          id: a!.puuid,
-          conversations,
-          error: undefined,
-          loading: false,
-        }));
-        if (openSubject.current === friend.subject) await loadChatMessages(friend.subject);
-        check();
-        return count;
-      },
-    };
-    const queue = job.queue;
-    const result = await (['paused', 'cancelled'].includes(queue.progress.status)
-      ? queue.resume(options)
-      : queue.start(
-          latest.current.state.friends.filter((f) => f.subject !== a!.puuid),
-          options,
-        ));
-    if (active.current?.puuid === a!.puuid && batchSync.current?.queue === queue)
-      recordRequest({
-        at: Date.now(),
-        service: 'Chat history sync',
-        method: 'XMPP',
-        code: 'ALL_FRIENDS_' + result.status.toUpperCase(),
-        durationMs: 0,
-      });
-    return result;
-  }, [storeFor, loadChatMessages]);
+  }, [storeFor, loadChatMessages, stop]);
+  syncRef.current = syncSavedChatHistory;
   const cancelChatHistorySync = useCallback(() => {
+    autoResume.current = false;
     batchSync.current?.queue.stop('Sync stopped. Saved messages are kept.');
   }, []);
   const clearChatHistory = useCallback(
     async (subject?: string) => {
       const a = active.current;
       if (!a) return;
+      autoResume.current = false;
       wanted.current = false;
       const closing = session.current;
       stop(true);
@@ -750,6 +844,8 @@ export function useSocial(account: Account | null, catalog: Catalog) {
     [live, cachedFriends, combinedMessages, saved.error],
   );
   return {
+    historyBackground,
+    historySyncStarting,
     chatHistorySync,
     cancelChatHistorySync,
     changeFriend,

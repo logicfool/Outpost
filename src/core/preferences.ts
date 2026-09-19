@@ -19,6 +19,7 @@ export function preferences(raw: unknown): Settings {
     'chatAlerts',
     'notificationPreviews',
     'autoChatHistory',
+    'backgroundChatHistory',
     'autoplayVideos',
     'allowPurchases',
   ] as const) {
