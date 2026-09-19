@@ -23,7 +23,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'app.outpost.valorant',
-    versionCode: 22,
+    versionCode: 23,
     allowBackup: false,
 
     blockedPermissions: [

@@ -18,7 +18,6 @@ let active = false,
   dropped = 0,
   failures = 0,
   totalBytes = 0;
-let networkSequence = 0;
 let redactor = new DiagnosticRedactor();
 let entries: Entry[] = [];
 const listeners = new Set<() => void>();
@@ -159,7 +158,7 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
     };
     try {
       const headers = scrub.headers(init.headers ?? {});
-      request = {
+      request = scrub.value({
         requestId,
         url: scrub.url(url),
         method: init.method ?? 'GET',
@@ -173,7 +172,7 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
             : init.body
               ? { omitted: 'Non-text request body is not inspected.' }
               : null,
-      };
+      });
       keep('http-request', { request, startedAt: begin });
     } catch {
       failures++;
@@ -183,7 +182,7 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
       const response = await fetcher(url, init),
         receivedAt = Date.now();
       try {
-        const info = {
+        const info = scrub.value({
           url: scrub.url(response.url || url),
           status: response.status,
           statusText: response.statusText,
@@ -192,7 +191,7 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
           headers: scrub.headers(response.headers),
           receivedAt,
           headerDurationMs: receivedAt - begin,
-        };
+        });
         keep('http-response', { request, response: info, startedAt: begin });
         const mime = response.headers.get('content-type') ?? '';
         if (/^(image|video|audio)\//i.test(mime) || /application\/octet-stream/i.test(mime))
@@ -218,8 +217,8 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
         else {
           try {
             const copy = response.clone();
-            const work = readTraceBody(copy).then(
-              async (body) => {
+            const work = readTraceBody(copy)
+              .then(async (body) => {
                 if (g !== generation) return;
                 const safeBody = await scrub.bodyAsync(body, url);
                 if (g !== generation) return;
@@ -237,16 +236,15 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
                 } catch {
                   failures++;
                 }
-              },
-              (error) => {
+              })
+              .catch((error) => {
                 keep('http-body', {
                   request,
                   response: info,
                   body: { omitted: scrub.text(String(error?.message ?? 'Body unavailable')) },
                   durationMs: Date.now() - begin,
                 });
-              },
-            );
+              });
             pending.add(work);
             void work.finally(() => pending.delete(work)).catch(() => {});
           } catch {
