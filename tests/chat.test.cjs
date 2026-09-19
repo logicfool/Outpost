@@ -584,3 +584,12 @@ test('server resource-constraint asks the automatic reconnect scheduler to wait'
   assert.equal(h.chat.snapshot.errorCode, 'RATE_LIMIT');
   assert.ok(h.chat.snapshot.retryAt >= now + 60000);
 });
+test('offline send and archive errors never ask for a manual chat connection', async (t) => {
+  const h = harness(t),
+    expected = (error) =>
+      error.code === 'CHAT_OFFLINE' &&
+      /reconnecting/i.test(error.message) &&
+      !/connect (to )?riot chat/i.test(error.message);
+  await assert.rejects(async () => h.chat.send(OTHER, 'Draft kept'), expected);
+  await assert.rejects(async () => h.chat.requestHistory(OTHER), expected);
+});

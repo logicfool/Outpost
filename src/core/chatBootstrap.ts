@@ -28,7 +28,10 @@ export function parseChatBootstrap(
   const { host, domain, port } = chatRouting(configRaw, affinity);
   const expiresAt = Math.min(session.account.expiresAt, number(claims.exp) * 1000);
   if (expiresAt < now + 30000)
-    throw new AppError('SESSION_EXPIRED', 'The chat session has expired. Reconnect to renew it.');
+    throw new AppError(
+      'SESSION_EXPIRED',
+      'The chat session has expired. Renewal will be retried automatically.',
+    );
   return {
     subject: session.account.puuid,
     host,

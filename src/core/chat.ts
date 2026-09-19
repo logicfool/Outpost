@@ -129,7 +129,7 @@ export class RiotChat {
     this.disconnect(!!this.owner && this.owner !== credentials.subject);
     this.owner = credentials.subject;
     if (credentials.expiresAt <= this.now() + 30000)
-      throw new AppError('SESSION_EXPIRED', 'Renew the Riot session before connecting chat.');
+      throw new AppError('SESSION_EXPIRED', 'The chat session is renewing automatically.');
     this.credentials = credentials;
     const epoch = ++this.generation;
     this.phase = 'features';
@@ -646,7 +646,7 @@ export class RiotChat {
     if (this.phase !== 'ready' || !c || !friend || !this.socket)
       throw new AppError(
         'CHAT_OFFLINE',
-        'Connect Riot chat and select a current friend to sync server history.',
+        'Chat is reconnecting. History sync is available once the friend list is ready.',
       );
     if (c.expiresAt <= this.now())
       throw new AppError('SESSION_EXPIRED', 'Chat is renewing automatically before history sync.');
@@ -815,7 +815,7 @@ export class RiotChat {
     if (this.phase !== 'ready' || !this.socket || !friend)
       throw new AppError(
         'CHAT_OFFLINE',
-        'Connect to Riot chat and choose a friend before sending.',
+        'Chat is reconnecting. Your draft is kept until the friend list is ready.',
       );
     if (this.now() - this.lastSend < 1000)
       throw new AppError('CHAT_COOLDOWN', 'Wait a second before sending another message.');
