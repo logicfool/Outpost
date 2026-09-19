@@ -155,9 +155,19 @@ export class HttpClient {
         if (response.status === 400) {
           let semanticCode = '';
           try {
-            const body = await response.json();
-            semanticCode = String(body?.errorCode ?? '');
+            const body = parseJsonBody(
+              await readBoundedText(response, 65536),
+              response.headers.get('content-type') ?? '',
+            );
+            semanticCode = String((body as { errorCode?: unknown })?.errorCode ?? '');
           } catch {}
+          if (['MATCH_HISTORY_INVALID_INDICES', 'MMR_INVALID_INDICES'].includes(semanticCode))
+            throw new AppError(
+              'HISTORY_RANGE',
+              'The requested history range was rejected. Your existing matches are unchanged.',
+              undefined,
+              400,
+            );
           if (semanticCode === 'PLAYER_DOES_NOT_EXIST' || semanticCode === 'RESOURCE_NOT_FOUND')
             throw new AppError('PLAYER_ABSENT', 'No live session was returned.', undefined, 400);
         }

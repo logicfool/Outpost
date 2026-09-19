@@ -436,7 +436,7 @@ export class RiotClient {
       start > 1000 ||
       !Number.isInteger(count) ||
       count < 1 ||
-      count > 50
+      count > 20
     )
       throw new AppError('PAGINATION', 'The requested match range is invalid.');
     this.scope.player(subject);

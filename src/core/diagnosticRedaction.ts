@@ -1,3 +1,4 @@
+import { drainNow, drainCooperatively } from './cooperative';
 import { Buffer } from 'buffer';
 import { decodeAimDocument, encodeAimDocument } from './aimCodec';
 export const REDACTED = '[REDACTED]';
@@ -65,25 +66,33 @@ const bytes = (text: string) => Buffer.byteLength(text, 'utf8');
 
 export class DiagnosticRedactor {
   private secrets = new Set<string>();
-  private nodes = 0;
-  private learning = 0;
+  private encodedSecrets = new Map<string, string>();
+
   private remember(value: unknown): void {
     if (typeof value !== 'string' || value.length < 4 || value.length > 32768 || value === REDACTED)
       return;
-    if (!this.secrets.has(value) && this.secrets.size >= 160)
-      this.secrets.delete(this.secrets.values().next().value!);
+    if (!this.secrets.has(value) && this.secrets.size >= 160) {
+      const oldest = this.secrets.values().next().value!;
+      this.secrets.delete(oldest);
+      this.encodedSecrets.delete(oldest);
+    }
     this.secrets.add(value);
     const bearer = /^(?:Bearer|Basic)\s+(.+)$/i.exec(value);
     if (bearer?.[1]) this.secrets.add(bearer[1]);
   }
-  private learnSecret(value: unknown, depth = 0): void {
-    if (depth > 16 || ++this.learning > 80000) return;
+  private *learnSecret(
+    value: unknown,
+    state: { learning: number },
+    depth = 0,
+  ): Generator<void, void> {
+    if (depth > 16 || ++state.learning > 80000) return;
+    yield;
     if (typeof value === 'string') {
       this.remember(value);
       return;
     }
     if (Array.isArray(value)) {
-      for (const item of value.slice(0, 20000)) this.learnSecret(item, depth + 1);
+      for (const item of value.slice(0, 20000)) yield* this.learnSecret(item, state, depth + 1);
       return;
     }
     if (value && typeof value === 'object')
@@ -91,13 +100,17 @@ export class DiagnosticRedactor {
         if (
           !['sub', 'domain', 'path', 'expires', 'samesite', 'max-age'].includes(key.toLowerCase())
         )
-          this.learnSecret(item, depth + 1);
+          yield* this.learnSecret(item, state, depth + 1);
       }
   }
   private replaceKnown(text: string): string {
     for (const value of this.secrets) {
       if (text.includes(value)) text = text.split(value).join(REDACTED);
-      const encoded = encodeURIComponent(value);
+      let encoded = this.encodedSecrets.get(value);
+      if (encoded === undefined) {
+        encoded = encodeURIComponent(value);
+        this.encodedSecrets.set(value, encoded);
+      }
       if (encoded !== value && text.includes(encoded)) text = text.split(encoded).join(REDACTED);
     }
     return text
@@ -107,10 +120,11 @@ export class DiagnosticRedactor {
       )
       .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, REDACTED);
   }
-  private learn(value: unknown, depth = 0): void {
-    if (++this.learning > 80000 || depth > 20 || !value || typeof value !== 'object') return;
+  private *learn(value: unknown, state: { learning: number }, depth = 0): Generator<void, void> {
+    if (++state.learning > 80000 || depth > 20 || !value || typeof value !== 'object') return;
+    yield;
     if (Array.isArray(value)) {
-      for (const item of value.slice(0, 20000)) this.learn(item, depth + 1);
+      for (const item of value.slice(0, 20000)) yield* this.learn(item, state, depth + 1);
       return;
     }
     const record = value as Record<string, unknown>;
@@ -118,12 +132,13 @@ export class DiagnosticRedactor {
       typeof record.name === 'string' &&
       /^(?:[^:]+:)?(?:auth|rso_token|pas_token|token|password|secret)$/i.test(record.name)
     ) {
-      this.learnSecret(record.text, depth + 1);
-      this.learnSecret(record.children, depth + 1);
+      yield* this.learnSecret(record.text, state, depth + 1);
+      yield* this.learnSecret(record.children, state, depth + 1);
     }
-    for (const [key, item] of Object.entries(value).slice(0, 10000))
-      if (secretKey(key)) this.learnSecret(item, depth + 1);
-      else this.learn(item, depth + 1);
+    for (const [key, item] of Object.entries(value).slice(0, 10000)) {
+      if (secretKey(key)) yield* this.learnSecret(item, state, depth + 1);
+      else yield* this.learn(item, state, depth + 1);
+    }
   }
   headers(input: HeadersInit | Headers): Record<string, string> {
     const rows = [...new Headers(input).entries()];
@@ -248,13 +263,20 @@ export class DiagnosticRedactor {
     return this.replaceKnown(text);
   }
   value(input: unknown): unknown {
-    this.nodes = 0;
-    this.learning = 0;
-    this.learn(input);
-    return this.walk(input, 0);
+    return drainNow(this.valueSteps(input));
   }
-  private walk(input: unknown, depth: number): unknown {
-    if (++this.nodes > 80000 || depth > 24) return '[OMITTED: inspection limit]';
+  private *valueSteps(input: unknown): Generator<void, unknown> {
+    const state = { nodes: 0, learning: 0 };
+    yield* this.learn(input, state);
+    return yield* this.walk(input, 0, state);
+  }
+  private *walk(
+    input: unknown,
+    depth: number,
+    state: { nodes: number; learning: number },
+  ): Generator<void, unknown> {
+    if (++state.nodes > 80000 || depth > 24) return '[OMITTED: inspection limit]';
+    yield;
     if (input === null || typeof input === 'boolean' || typeof input === 'number') return input;
     if (typeof input === 'string') {
       if (bytes(input) > TRACE_BODY_LIMIT) return '[OMITTED: string exceeds 2 MiB]';
@@ -262,8 +284,8 @@ export class DiagnosticRedactor {
       if (/^[\[{]/.test(trimmed))
         try {
           const parsed = JSON.parse(trimmed);
-          this.learn(parsed);
-          return JSON.stringify(this.walk(parsed, depth + 1));
+          yield* this.learn(parsed, state);
+          return JSON.stringify(yield* this.walk(parsed, depth + 1, state));
         } catch {}
       if (/^https?:\/\//i.test(trimmed)) return this.url(trimmed);
       if (
@@ -275,8 +297,8 @@ export class DiagnosticRedactor {
           const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
           if (/^\s*[\[{]/.test(decoded)) {
             const parsed = JSON.parse(decoded);
-            this.learn(parsed);
-            const safe = this.walk(parsed, depth + 1);
+            yield* this.learn(parsed, state);
+            const safe = yield* this.walk(parsed, depth + 1, state);
             return JSON.stringify(parsed) === JSON.stringify(safe)
               ? this.text(input)
               : Buffer.from(JSON.stringify(safe)).toString('base64');
@@ -285,7 +307,9 @@ export class DiagnosticRedactor {
       return this.text(input);
     }
     if (Array.isArray(input)) {
-      const result = input.slice(0, 20000).map((item) => this.walk(item, depth + 1));
+      const result: unknown[] = [];
+      for (const item of input.slice(0, 20000))
+        result.push(yield* this.walk(item, depth + 1, state));
       if (input.length > 20000)
         result.push({
           diagnosticOmission: `${input.length - 20000} array entries exceed the inspection limit`,
@@ -297,18 +321,18 @@ export class DiagnosticRedactor {
     if (obj.type === 'Ares.PlayerSettings' && typeof obj.data === 'string') {
       try {
         const decoded = decodeAimDocument(obj).data;
-        this.learn(decoded);
-        const safe = this.walk(decoded, depth + 1) as Record<string, unknown>;
+        yield* this.learn(decoded, state);
+        const safe = (yield* this.walk(decoded, depth + 1, state)) as Record<string, unknown>;
         const encoded =
           JSON.stringify(decoded) === JSON.stringify(safe)
             ? obj.data
             : encodeAimDocument(safe).data;
+        const fields: [string, unknown][] = [];
+        for (const [k, v] of Object.entries(obj))
+          if (k !== 'data')
+            fields.push([k, secretKey(k) ? REDACTED : yield* this.walk(v, depth + 1, state)]);
         return {
-          ...Object.fromEntries(
-            Object.entries(obj)
-              .filter(([k]) => k !== 'data')
-              .map(([k, v]) => [k, secretKey(k) ? REDACTED : this.walk(v, depth + 1)]),
-          ),
+          ...Object.fromEntries(fields),
           data: encoded,
           decodedData: safe,
           diagnosticRepresentation:
@@ -326,19 +350,41 @@ export class DiagnosticRedactor {
     const credentialNode =
       typeof obj.name === 'string' &&
       /^(?:[^:]+:)?(?:auth|rso_token|pas_token|token|password|secret)$/i.test(obj.name);
-    return Object.fromEntries(
-      Object.entries(obj).map(([key, value]) => [
+    const fields: [string, unknown][] = [];
+    for (const [key, value] of Object.entries(obj))
+      fields.push([
         this.text(key),
         secretKey(key) || (credentialNode && (key === 'text' || key === 'children'))
           ? REDACTED
-          : this.walk(value, depth + 1),
-      ]),
-    );
+          : yield* this.walk(value, depth + 1, state),
+      ]);
+    return Object.fromEntries(fields);
   }
   body(
     text: string,
     url = '',
   ): { text?: string; parsed?: unknown; bytes: number; omitted?: string; representation: string } {
+    return drainNow(this.bodySteps(text, url));
+  }
+  bodyAsync(
+    text: string,
+    url = '',
+  ): Promise<{
+    text?: string;
+    parsed?: unknown;
+    bytes: number;
+    omitted?: string;
+    representation: string;
+  }> {
+    return drainCooperatively(this.bodySteps(text, url));
+  }
+  private *bodySteps(
+    text: string,
+    url: string,
+  ): Generator<
+    void,
+    { text?: string; parsed?: unknown; bytes: number; omitted?: string; representation: string }
+  > {
     const size = bytes(text);
     if (size > TRACE_BODY_LIMIT)
       return {
@@ -359,12 +405,15 @@ export class DiagnosticRedactor {
         !Array.isArray(raw) &&
         raw.type === undefined &&
         typeof raw.data === 'string';
-      const parsed = this.value(inferredAim ? { ...raw, type: 'Ares.PlayerSettings' } : raw);
+      const parsed = yield* this.valueSteps(
+        inferredAim ? { ...raw, type: 'Ares.PlayerSettings' } : raw,
+      );
       if (inferredAim && parsed && typeof parsed === 'object') {
         delete (parsed as Record<string, unknown>).type;
         (parsed as Record<string, unknown>).diagnosticTypeSource =
           'Ares.PlayerSettings inferred from request route';
       }
+      yield;
       return {
         bytes: size,
         text: JSON.stringify(parsed),

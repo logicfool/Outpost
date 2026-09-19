@@ -194,6 +194,7 @@ export class Runtime {
     await this.aim().markLogin(uuid(id));
   }
   async loadCatalog(force = false, allowNetwork = true): Promise<Catalog> {
+    if (!allowNetwork && Object.keys(this.catalog.items).length) return this.catalog;
     if (this.catalogFlight) return this.catalogFlight;
     const work = async () => {
       const cached = Object.keys(this.catalog.items).length
@@ -623,7 +624,8 @@ export class Runtime {
       );
       let next: Snapshot;
       try {
-        await this.loadCatalog(reason === 'manual');
+        const hasMetadata = Object.keys(this.catalog.items).length > 0;
+        if (!hasMetadata) await this.loadCatalog();
         const client = await this.client(id);
         next = await client.snapshot(previous, snapshotPlan(previous, reason, this.now()));
         if (next.matches.status === 'ready' && !next.matches.warning)
@@ -984,12 +986,12 @@ export class Runtime {
         rows = cached;
       try {
         for (let page = 0; page < 2 && rows.length < count && cursor < 1000; page++) {
-          const incoming = await client.matchHistory(cursor, 50, subject);
+          const incoming = await client.matchHistory(cursor, 20, subject);
           guard();
           await this.repository.saveArchivedMatches(id, subject, incoming);
           guard();
           cursor += incoming.length;
-          exhausted = incoming.length < 50 || cursor >= 1000;
+          exhausted = incoming.length < 20 || cursor >= 1000;
           rows = await this.repository.archivedMatches(id, subject, start, count);
           guard();
           if (exhausted) break;

@@ -219,15 +219,24 @@ export function diagnosticFetcher(fetcher: (url: string, init: RequestInit) => P
           try {
             const copy = response.clone();
             const work = readTraceBody(copy).then(
-              (body) => {
-                keep('http-body', {
-                  request,
-                  response: info,
-                  body: scrub.body(body, url),
-                  startedAt: begin,
-                  finishedAt: Date.now(),
-                  durationMs: Date.now() - begin,
-                });
+              async (body) => {
+                if (g !== generation) return;
+                const safeBody = await scrub.bodyAsync(body, url);
+                if (g !== generation) return;
+
+                try {
+                  append('http-body', {
+                    requestId,
+                    request,
+                    response: info,
+                    body: safeBody,
+                    startedAt: begin,
+                    finishedAt: Date.now(),
+                    durationMs: Date.now() - begin,
+                  });
+                } catch {
+                  failures++;
+                }
               },
               (error) => {
                 keep('http-body', {

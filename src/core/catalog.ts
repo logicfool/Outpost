@@ -1,3 +1,4 @@
+import { drainCooperatively } from './cooperative';
 import type { Catalog, CatalogItem, ItemKind, JsonObject } from './types';
 import { EMPTY_CATALOG } from './types';
 import {
@@ -46,6 +47,22 @@ export function buildCatalog(
   responses: Partial<Record<CatalogPath, unknown>>,
   now = Date.now(),
 ): Catalog {
+  const steps = catalogSteps(responses, now);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+export function buildCatalogAsync(
+  responses: Partial<Record<CatalogPath, unknown>>,
+  now = Date.now(),
+): Promise<Catalog> {
+  return drainCooperatively(catalogSteps(responses, now));
+}
+function* catalogSteps(
+  responses: Partial<Record<CatalogPath, unknown>>,
+  now: number,
+): Generator<void, Catalog> {
   const catalog: Catalog = {
     ...EMPTY_CATALOG,
     items: Object.create(null),
@@ -81,6 +98,7 @@ export function buildCatalog(
         defaultSkinId: text(weapon.defaultSkinUuid) || undefined,
       };
     for (const rawSkin of array(weapon.skins)) {
+      yield;
       const skin = object(rawSkin),
         levels = array(skin.levels).map(object),
         chromas = array(skin.chromas).map(object);
@@ -147,6 +165,7 @@ export function buildCatalog(
   ];
   for (const [path, kind] of categories)
     for (const raw of dataList(responses[path])) {
+      yield;
       const entry = object(raw);
       if (path === 'agents' && entry.isPlayableCharacter === false) continue;
       const item: CatalogItem = {
@@ -190,35 +209,39 @@ export function buildCatalog(
           ),
         });
     }
-  for (const raw of dataList(responses.bundles)) {
+
+  const keys = new Map<string, Set<string>>(),
+    names = new Map<string, Set<string>>();
+  for (const item of Object.values(catalog.items)) {
+    if (item.kind !== 'skin') continue;
+    for (const [map, key] of [
+      [keys, item.collectionKey],
+      [names, item.collectionName?.trim()],
+    ] as const) {
+      if (key) {
+        const set = map.get(key) ?? new Set<string>();
+        set.add(item.canonicalId);
+        map.set(key, set);
+      }
+    }
+  }
+  const bundleRows = dataList(responses.bundles),
+    counts = new Map<string, number>();
+  for (const raw of bundleRows) {
+    const name = text(object(raw).displayName).trim();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  for (const raw of bundleRows) {
+    yield;
     const e = object(raw),
       asset = text(e.assetPath).split('/').at(-1) ?? '';
     const collectionKey = /^StorefrontItem_(.+?)(?:_?ThemeBundle|_?Bundle)_DataAsset$/i
       .exec(asset)?.[1]
       ?.replace(/_$/, '')
       .toLowerCase();
-    let itemIds = collectionKey
-      ? [
-          ...new Set(
-            Object.values(catalog.items)
-              .filter((i) => i.kind === 'skin' && i.collectionKey === collectionKey)
-              .map((i) => i.canonicalId),
-          ),
-        ]
-      : [];
+    let itemIds = collectionKey ? [...(keys.get(collectionKey) ?? [])] : [];
     const display = text(e.displayName).trim();
-    if (
-      !itemIds.length &&
-      dataList(responses.bundles).filter((v) => text(object(v).displayName).trim() === display)
-        .length === 1
-    )
-      itemIds = [
-        ...new Set(
-          Object.values(catalog.items)
-            .filter((i) => i.kind === 'skin' && i.collectionName?.trim() === display)
-            .map((i) => i.canonicalId),
-        ),
-      ];
+    if (!itemIds.length && counts.get(display) === 1) itemIds = [...(names.get(display) ?? [])];
     catalog.bundles[text(e.uuid)] = {
       name: text(e.displayName),
       image: safeImage(e.displayIcon),
@@ -266,6 +289,7 @@ export function buildCatalog(
     };
   }
   for (const raw of dataList(responses.contracts)) {
+    yield;
     const e = object(raw),
       content = object(e.content);
     const levels: { xp: number; rewardId?: string; rewardAmount?: number; rewardType?: string }[] =
@@ -407,7 +431,7 @@ export class CatalogClient {
           }
         }),
       );
-      const fresh = buildCatalog(Object.fromEntries(entries));
+      const fresh = await buildCatalogAsync(Object.fromEntries(entries));
       fresh.failedPaths = failed;
       return mergeCatalog(previous, fresh);
     });

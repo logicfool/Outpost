@@ -456,6 +456,7 @@ const makeStyles = (C: Palette) =>
       shadowOffset: { width: 0, height: 3 },
       shadowRadius: 12,
       elevation: 5,
+      zIndex: 20,
     },
     navItem: { flex: 1, alignItems: 'center', gap: 4, minHeight: 48, justifyContent: 'center' },
     navLabel: { color: C.subtle, fontSize: 10, fontWeight: '500', flexShrink: 1 },

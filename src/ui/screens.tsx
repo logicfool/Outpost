@@ -1,3 +1,4 @@
+import { usePullRefresh } from '../state/usePullRefresh';
 import { useLivePolling } from '../state/useLivePolling';
 import { BackupPanel } from './BackupPanel';
 import { Skeleton, MATCH_ROW_MIN_HEIGHT } from './Skeleton';
@@ -113,6 +114,7 @@ const resultLabel = (result?: MatchDetail['result']) =>
         : 'Unknown';
 const fill = { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } as const;
 function Page({ model, children }: { model: AppModel; children: React.ReactNode }) {
+  const pull = usePullRefresh(model.refresh, model.active?.puuid);
   const { C, S, isDark } = useTheme();
   const navInset = useNavInset();
 
@@ -121,8 +123,8 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
       contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
-          refreshing={model.busy}
-          onRefresh={() => void model.refresh()}
+          refreshing={pull.refreshing}
+          onRefresh={pull.refresh}
           tintColor={C.accent}
         />
       }
@@ -306,6 +308,7 @@ const DailyOffer = memo(function DailyOffer({
   );
 });
 export function StoreScreen({ model, onItem, onNavigate }: Props) {
+  const pull = usePullRefresh(model.refresh, model.active?.puuid);
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles),
     navInset = useNavInset();
@@ -496,8 +499,8 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
       contentContainerStyle={[S.content, { gap: 0, paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
-          refreshing={model.busy}
-          onRefresh={() => void model.refresh()}
+          refreshing={pull.refreshing}
+          onRefresh={pull.refresh}
           tintColor={C.accent}
         />
       }
@@ -1573,7 +1576,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
             loading={polling.busy}
             onOpen={() => onNavigate({ type: 'live' })}
           />
-          <SectionHeader title="Match history" detail="Saved locally" />
+          <SectionHeader title="Match history" />
           {queues.length > 2 && (
             <Tabs
               value={queues.includes(filter) ? filter : 'all'}
@@ -1599,9 +1602,9 @@ export function MatchesScreen({ model, onNavigate }: Props) {
               <Button
                 title="Load older matches"
                 secondary
-                disabled={model.busy || loadingOlder}
+                disabled={loadingOlder}
                 onPress={() => {
-                  if (model.busy || loadingOlder) return;
+                  if (loadingOlder) return;
                   setLoadingOlder(true);
                   void model.moreMatches().finally(() => setLoadingOlder(false));
                 }}
@@ -1877,14 +1880,12 @@ export function AccountScreen({ model, onLink }: Props) {
         )}
         <SectionHeader title="About" />
         <View style={S.card}>
-          <Text style={S.body}>
-            Unofficial VALORANT companion. Not endorsed by Riot Games. Assets: valorant-api.com.
-          </Text>
+          <Text style={S.body}>Unofficial VALORANT companion. Not endorsed by Riot Games.</Text>
           <Text style={S.body}>
             Sessions are saved securely. Chats are encrypted on this device. Sign out ends the saved
             Riot web session; Remove locally only deletes local data.
           </Text>
-          <Text style={S.small}>Outpost 0.9.0</Text>
+          <Text style={S.small}>Outpost 0.9.1</Text>
         </View>
       </Page>
       <Modal

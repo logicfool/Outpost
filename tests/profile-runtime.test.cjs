@@ -260,3 +260,48 @@ test('history endpoint Retry-After survives repeated explicit pagination', async
   await assert.rejects(h.runtime.historyPage(ID, ID, 100, 40), (e) => e.code === 'LOCAL_COOLDOWN');
   assert.equal(h.calls.history, 1);
 });
+test('realistic 87-match archive appends through 20/40/80/87 without invalid ranges or duplicates', async (t) => {
+  const h = await fixture(t);
+  h.db.exec('DELETE FROM match_summaries');
+  const rows = Array.from({ length: 87 }, (_, i) =>
+      summary(`aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`, h.now - i * 1000),
+    ),
+    requests = [];
+  h.client.matchHistory = async (start, count) => {
+    assert.equal(count, 20, 'Riot rejects the old 50-entry batch');
+    requests.push([start, start + count]);
+    return rows.slice(start, start + count);
+  };
+  await h.repo.saveArchivedMatches(ID, ID, rows.slice(0, 20));
+  let visible = rows.slice(0, 20);
+  for (let n = 0; n < 4; n++) {
+    const next = await h.runtime.historyPage(ID, ID, visible.length);
+    visible = [...new Map([...visible, ...next].map((m) => [m.id, m])).values()];
+    h.advance(60001);
+  }
+  assert.equal(visible.length, 87);
+  assert.deepEqual(
+    visible.map((r) => r.id),
+    rows.map((r) => r.id),
+  );
+  assert.deepEqual(requests, [
+    [0, 20],
+    [20, 40],
+    [40, 60],
+    [60, 80],
+    [80, 100],
+  ]);
+  assert.equal((await h.repo.refreshGate(ID, 'history:' + ID)).historyExhausted, true);
+});
+test('loading older matches keeps existing previews and a failed page never marks history exhausted', async (t) => {
+  const h = await fixture(t);
+  await h.repo.saveArchivedReport(ID, ID, report());
+  const before = await h.repo.archivedMatches(ID, ID);
+  h.client.matchHistory = async () => {
+    throw new AppError('HISTORY_RANGE', 'Invalid range', undefined, 400);
+  };
+  await assert.rejects(h.runtime.historyPage(ID, ID, before.length));
+  const after = await h.repo.archivedMatches(ID, ID);
+  assert.deepEqual(after, before);
+  assert.notEqual((await h.repo.refreshGate(ID, 'history:' + ID)).historyExhausted, true);
+});

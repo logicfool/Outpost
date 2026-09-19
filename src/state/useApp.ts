@@ -1,3 +1,4 @@
+import { yieldToUI } from '../core/cooperative';
 import { livePollInterval } from '../core/refreshPolicy';
 import { validateBackupData, type BackupData } from '../core/backup';
 import { mergeMatchSummaries, observedMarkets } from '../core/matchArchive';
@@ -171,6 +172,14 @@ export function useApp() {
       setSnapshot((previous) => mergeSnapshot(previous, next));
       setCatalog(runtime.catalog);
       setBusy(false);
+
+      void yieldToUI()
+        .then(() => runtime.loadCatalog())
+        .then((meta) => {
+          if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+            setCatalog(meta);
+        })
+        .catch(() => {});
       const [historyResult, accountsResult] = await Promise.allSettled([
         runtime.repository.history(account.puuid),
         runtime.repository.accounts(),
@@ -688,7 +697,6 @@ export function useApp() {
     const account = activeRef.current;
     if (!account || account.demo || snapshot?.matches.status !== 'ready') return;
     const stamp = epoch.current;
-    setBusy(true);
     try {
       const runtime = await getRuntime(),
         next = await runtime.historyPage(
@@ -718,8 +726,6 @@ export function useApp() {
       );
     } catch (error) {
       if (epoch.current === stamp) setMessage(safeError(error).message);
-    } finally {
-      if (epoch.current === stamp) setBusy(false);
     }
   }, [snapshot]);
   const refreshProfile = useCallback(async (): Promise<Snapshot | null> => {

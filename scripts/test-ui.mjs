@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.0');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.1');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -799,6 +799,12 @@ try {
       await page.getByRole('switch', { name: 'Allow VP purchases', exact: true }).isChecked(),
       false,
     );
+    assert.equal(await page.getByText(/Assets:|valorant-api\.com/).count(), 0);
+    await page.getByText('Outpost 0.9.1', { exact: true }).scrollIntoViewIfNeeded();
+    await shot('about-clean');
+    await tab('Profile');
+    assert.equal(await page.getByText('Saved locally', { exact: true }).count(), 0);
+    await tab('Settings');
     await shot('settings-clean');
   });
   assert.equal(errors.length, 0, JSON.stringify(errors));

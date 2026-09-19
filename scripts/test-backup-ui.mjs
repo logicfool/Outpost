@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
   dist = path.join(root, 'dist-web'),
-  out = path.join(root, 'docs/validation-0.9.0');
+  out = path.join(root, 'docs/validation-0.9.1');
 const mime = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -196,15 +196,13 @@ try {
       await click('Back from saved stores');
     },
   );
-  await check(
-    'Profile removes the redundant refresh button and labels its persistent history',
-    async () => {
-      await tab('Profile');
-      assert.equal(await button('Refresh live game').count(), 0);
-      await page.getByText('Saved locally', { exact: true }).waitFor();
-      await shot('profile-saved-history');
-    },
-  );
+  await check('Profile keeps history caching without extra local-storage wording', async () => {
+    await tab('Profile');
+    assert.equal(await button('Refresh live game').count(), 0);
+    assert.equal(await page.getByText('Saved locally', { exact: true }).count(), 0);
+    await page.getByText('Match history', { exact: true }).waitFor();
+    await shot('profile-saved-history');
+  });
   await check('new video previews start audible and mute preference survives restart', async () => {
     await tab('Store');
     await click('View Reaver Vandal');

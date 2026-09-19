@@ -566,3 +566,30 @@ test('interactive sign-in requirement is not a one-minute automatic login loop',
   s.refreshIssue = { code: 'REAUTH_REQUIRED', message: 'Challenge' };
   assert.equal(nextAutomaticAt(s, null, f.now), s.store.data.dailyExpiresAt + 2000);
 });
+test('manual account refresh does not wait for or force a full public catalogue download', async () => {
+  const f = fixture();
+  f.snapshots.set(ID, f.gameSnapshot());
+  f.runtime.catalog = makeDemo().catalog;
+  f.runtime.loadCatalog = async () => {
+    throw Error('A manual account refresh must reuse available metadata');
+  };
+  const result = await f.runtime.sync(ID, 'manual');
+  assert.equal(result.store.status, 'ready');
+  assert.equal(f.calls.snapshots, 1);
+  assert.equal(result.refreshIssue, undefined);
+});
+test('in-flight optional catalogue maintenance does not block a cached account refresh', async () => {
+  const f = fixture();
+  f.runtime.catalog = makeDemo().catalog;
+  f.snapshots.set(ID, f.gameSnapshot());
+  f.runtime.catalogFlight = new Promise(() => {});
+  f.runtime.loadCatalog = async () => f.runtime.catalogFlight;
+  const result = await Promise.race([
+    f.runtime.sync(ID, 'manual'),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(Error('Refresh waited for metadata')), 1000),
+    ),
+  ]);
+  assert.equal(result.wallet.status, 'ready');
+  assert.equal(f.calls.snapshots, 1);
+});

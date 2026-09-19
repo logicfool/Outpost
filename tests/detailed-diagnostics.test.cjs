@@ -190,3 +190,38 @@ test('concurrent requests have separate trace identifiers and non-secret fetch m
   }
   assert.match(report.coverage.bodies, /explicitly marked/);
 });
+test('clearing capture during cooperative body redaction discards the entire old body', async () => {
+  d.startDetailedDiagnostics();
+  const { DiagnosticRedactor } = require('../.test-build/diagnosticRedaction.js'),
+    original = DiagnosticRedactor.prototype.bodyAsync;
+  let entered, release;
+  const started = new Promise((r) => (entered = r)),
+    blocked = new Promise((r) => (release = r));
+  DiagnosticRedactor.prototype.bodyAsync = async function (...args) {
+    entered();
+    await blocked;
+    return original.apply(this, args);
+  };
+  try {
+    const request = await d.diagnosticFetcher(
+      async () =>
+        new Response(
+          JSON.stringify({ password: 'synthetic-old-secret', record: 'previous account detail' }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    )('https://example.test/previous-account', {});
+    await request.text();
+    await started;
+    d.clearDetailedDiagnostics();
+    d.startDetailedDiagnostics();
+    release();
+    await d.flushDetailedDiagnostics();
+    const output = JSON.stringify(d.detailedDiagnosticReport({}, []));
+    assert.ok(!output.includes('previous account detail'));
+    assert.ok(!output.includes('synthetic-old-secret'));
+    assert.equal(d.diagnosticCaptureStatus().count, 0);
+  } finally {
+    release?.();
+    DiagnosticRedactor.prototype.bodyAsync = original;
+  }
+});

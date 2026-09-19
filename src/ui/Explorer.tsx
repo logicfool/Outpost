@@ -227,7 +227,9 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
         refreshControl={
           <RefreshControl
             refreshing={checking && !!data}
-            onRefresh={() => setVersion((v) => v + 1)}
+            onRefresh={() => {
+              if (!checking) setVersion((v) => v + 1);
+            }}
             tintColor={C.accent}
           />
         }
