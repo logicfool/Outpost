@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
-import type { AimEdit, AimPreset, Sensitivity } from '../core/aimTypes';
+import type { AimEdit, AimPreset, AimSnapshot, Sensitivity } from '../core/aimTypes';
 import {
   defaultCrosshair,
   importCrosshairCode,
@@ -54,6 +54,7 @@ export function AimPanel({
     [importName, setImportName] = useState('Imported crosshair');
   const [sensi, setSensi] = useState(sensitivityText(snapshot?.sensitivity)),
     dirty = useRef(false),
+    editVersion = useRef(0),
     sensRevision = useRef(snapshot?.revision ?? '');
   const [confirm, setConfirm] = useState<AimEdit>(),
     [closed, setClosed] = useState(false),
@@ -63,6 +64,12 @@ export function AimPanel({
     [busy, setBusy] = useState(false);
   const alive = useRef(true),
     lock = useRef(false);
+  const [discardRefresh, setDiscardRefresh] = useState(false);
+  const adoptSensitivity = (next: AimSnapshot) => {
+    dirty.current = false;
+    setSensi(sensitivityText(next.sensitivity));
+    sensRevision.current = next.revision;
+  };
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -74,7 +81,10 @@ export function AimPanel({
       setSensi(sensitivityText(snapshot?.sensitivity));
       sensRevision.current = snapshot?.revision ?? '';
     }
-  }, [snapshot?.revision]);
+  }, [snapshot?.revision, snapshot?.fetchedAt]);
+  useEffect(() => {
+    void model.syncAim('auto').catch(() => {});
+  }, [model.active?.puuid, model.syncAim]);
   const run = async (work: () => Promise<void>) => {
     if (lock.current) return;
     lock.current = true;
@@ -90,10 +100,22 @@ export function AimPanel({
       if (alive.current) setBusy(false);
     }
   };
-  const refresh = () =>
+  const refreshFromRiot = () =>
     void run(async () => {
-      await model.syncAim('manual');
+      const at = editVersion.current,
+        result = await model.syncAim('manual');
+      if (!alive.current) return;
+      setDiscardRefresh(false);
+      if (result.error) {
+        setError(result.error.message);
+        return;
+      }
+      if (result.snapshot && at === editVersion.current) adoptSensitivity(result.snapshot);
     });
+  const refresh = () => {
+    if (dirty.current) setDiscardRefresh(true);
+    else refreshFromRiot();
+  };
   const editCrosshair = (profile: Crosshair, index?: number) => {
     setError('');
     setMessage('');
@@ -164,7 +186,7 @@ export function AimPanel({
         setError(result.error.message);
         return;
       }
-      dirty.current = false;
+      if (result.snapshot) adoptSensitivity(result.snapshot);
       setEditor(undefined);
       setMessage(
         model.active?.demo
@@ -173,7 +195,11 @@ export function AimPanel({
       );
     });
   const back = () => {
-    if (busy) return;
+    if (busy && confirm) return;
+    if (discardRefresh) {
+      setDiscardRefresh(false);
+      return;
+    }
     if (confirm) {
       setConfirm(undefined);
       return;
@@ -213,6 +239,34 @@ export function AimPanel({
       onClose={back}
     />
   );
+  if (discardRefresh)
+    return (
+      <ModalPage>
+        {header}
+        <View style={S.content}>
+          <Text style={S.h2}>Refresh from Riot?</Text>
+          <Text style={S.body}>
+            Unsaved sensitivity edits will be discarded. Saved presets stay unchanged.
+          </Text>
+          <Button
+            title={busy ? 'Checking Riot...' : 'Discard edits and refresh'}
+            disabled={busy}
+            onPress={refreshFromRiot}
+          />
+          <Button
+            title="Keep editing sensitivity"
+            secondary
+            disabled={busy}
+            onPress={() => setDiscardRefresh(false)}
+          />
+          {error && (
+            <Text accessibilityRole="alert" style={[S.small, { color: C.gold }]}>
+              {error}
+            </Text>
+          )}
+        </View>
+      </ModalPage>
+    );
   if (confirm)
     return (
       <ModalPage>
@@ -556,10 +610,24 @@ export function AimPanel({
                   <SensitivityFields
                     value={sensi}
                     onChange={(value) => {
+                      editVersion.current++;
                       dirty.current = true;
                       setSensi(value);
                     }}
                   />
+                  {dirty.current && (
+                    <View style={{ gap: 6 }}>
+                      <Text style={[S.small, { color: C.gold }]}>Unsaved sensitivity edits</Text>
+                      {snapshot && (
+                        <Button
+                          secondary
+                          title="Use Riot sensitivity"
+                          disabled={busy || model.aimLoading}
+                          onPress={() => adoptSensitivity(snapshot)}
+                        />
+                      )}
+                    </View>
+                  )}
                   <Text style={S.small}>
                     Mouse DPI is a hardware setting and is not changed here.
                   </Text>

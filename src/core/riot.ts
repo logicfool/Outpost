@@ -236,6 +236,7 @@ export class RiotClient {
           `${origin}${path}`,
           {
             method,
+            ...(ttlMs === 0 ? { cache: 'no-store' as const } : {}),
             ...(encoded !== undefined ? { body: encoded } : {}),
             headers: {
               Authorization: `Bearer ${this.session.accessToken}`,
@@ -244,9 +245,21 @@ export class RiotClient {
               'X-Riot-ClientPlatform': PLATFORM,
               'Content-Type': 'application/json',
               Accept: 'application/json',
+              ...(ttlMs === 0 ? { 'Cache-Control': 'no-cache, no-store', Pragma: 'no-cache' } : {}),
             },
           },
-          policy,
+          {
+            ...policy,
+            ...(host === 'glz' ? { priority: 'interactive' as const } : {}),
+            beforeDispatch: async () => {
+              if (!this.isActive())
+                throw new AppError(
+                  this.disposed ? 'SESSION_REMOVED' : 'SESSION_EXPIRED',
+                  'The account changed before sending this request.',
+                );
+              await policy.beforeDispatch?.();
+            },
+          },
         )
         .catch(async (error) => {
           if (safeError(error).status === 401) await this.rejectSession();
@@ -274,10 +287,10 @@ export class RiotClient {
       return this.catalog;
     }
   }
-  async rank(subject = this.session.account.puuid) {
+  async rank(subject = this.session.account.puuid, fresh = false) {
     this.scope.player(subject);
     const [result, catalog] = await Promise.all([
-      this.read(`/mmr/v1/players/${uuid(subject)}`, 60000, 'GET', undefined, subject),
+      this.read(`/mmr/v1/players/${uuid(subject)}`, fresh ? 0 : 60000, 'GET', undefined, subject),
       this.rankCatalog(),
     ]);
     return normalizeRank(result.data, catalog);
@@ -304,6 +317,10 @@ export class RiotClient {
           this.aliases.set(id, { ...alias, until: Date.now() + 10 * 60000 });
         }
       } catch {}
+    return this.knownNames(players);
+  }
+  private knownNames<T extends PlayerRef>(players: T[]): T[] {
+    const self = this.session.account;
     return players.map((player) => {
       if (player.subject === self.puuid)
         return { ...player, name: self.gameName, tag: self.tagLine };
@@ -315,25 +332,35 @@ export class RiotClient {
     });
   }
   private lastLive?: LiveGame;
-  async liveGame(): Promise<LiveGame> {
+  async liveGame(fresh = false): Promise<LiveGame> {
     if (
+      !fresh &&
       this.lastLive?.observedAt &&
       Date.now() - this.lastLive.observedAt < livePollInterval(this.lastLive)
     )
       return this.lastLive;
     return this.cache.get('live-result', 0, async () => {
-      const game = await this.fetchLiveGame();
+      const game = await this.fetchLiveGame(fresh);
       this.lastLive = game;
       return game;
     });
   }
-  private async fetchLiveGame(): Promise<LiveGame> {
+  private async fetchLiveGame(fresh = false): Promise<LiveGame> {
     const id = this.session.account.puuid;
     for (const mode of ['core-game', 'pregame'] as const) {
       let matchId: string;
       try {
         const current = object(
-          (await this.read(`/${mode}/v1/players/${id}`, 5000, 'GET', undefined, id, 'glz')).data,
+          (
+            await this.read(
+              `/${mode}/v1/players/${id}`,
+              fresh ? 0 : 5000,
+              'GET',
+              undefined,
+              id,
+              'glz',
+            )
+          ).data,
         );
         matchId = uuid(current.MatchID);
       } catch (error) {
@@ -345,14 +372,33 @@ export class RiotClient {
       try {
         const detail = await this.read(
           `/${mode}/v1/matches/${matchId}`,
-          5000,
+          fresh ? 0 : 5000,
           'GET',
           undefined,
           id,
           'glz',
         );
         const game = normalizeLive(detail.data, state, matchId, id, this.catalog);
-        game.players = await this.resolveNames(game.players ?? []);
+        const players = game.players ?? [],
+          names = this.resolveNames(players);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          game.players = await Promise.race([
+            names,
+            new Promise<typeof players>((resolve) => {
+              timer = setTimeout(() => resolve(this.knownNames(players)), 200);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+        void names
+          .then((resolved) => {
+            if (!this.isActive() || this.lastLive !== game) return;
+            for (const player of resolved) this.scope.remember(player);
+            this.lastLive = { ...game, players: resolved };
+          })
+          .catch(() => {});
         for (const player of game.players) this.scope.remember(player);
         return game;
       } catch (error) {
@@ -429,6 +475,7 @@ export class RiotClient {
     start = 0,
     count = 20,
     subject = this.session.account.puuid,
+    fresh = false,
   ): Promise<MatchSummary[]> {
     if (
       !Number.isInteger(start) ||
@@ -443,10 +490,16 @@ export class RiotClient {
     const id = uuid(subject),
       query = `startIndex=${start}&endIndex=${start + count}`;
     const [history, updates] = await Promise.all([
-      this.read(`/match-history/v1/history/${id}?${query}`, 60000, 'GET', undefined, id),
+      this.read(
+        `/match-history/v1/history/${id}?${query}`,
+        fresh ? 0 : 60000,
+        'GET',
+        undefined,
+        id,
+      ),
       this.read(
         `/mmr/v1/players/${id}/competitiveupdates?${query}&queue=competitive`,
-        60000,
+        fresh ? 0 : 60000,
         'GET',
         undefined,
         id,
@@ -505,7 +558,12 @@ export class RiotClient {
       .json(
         aimOrigin(this.session.account.region) + '/playerPref/v3/getPreference/Ares.PlayerSettings',
         {
-          headers: await this.aimHeaders(),
+          headers: {
+            ...(await this.aimHeaders()),
+            'Cache-Control': 'no-cache, no-store',
+            Pragma: 'no-cache',
+          },
+          cache: 'no-store',
         },
         {
           aimSettings: true,
@@ -924,10 +982,11 @@ export class RiotClient {
         pick(plan.store, previous?.wallet, async () =>
           normalizeWallet((await this.read(`/store/v1/wallet/${id}`)).data),
         ),
-        pick(plan.account, previous?.rank, () => this.rank()),
+        pick(plan.account, previous?.rank, () => this.rank(id, plan.fresh)),
         pick(plan.account, previous?.xp, async () => {
           const progress = object(
-            object((await this.read(`/account-xp/v1/players/${id}`, 60000)).data).Progress,
+            object((await this.read(`/account-xp/v1/players/${id}`, plan.fresh ? 0 : 60000)).data)
+              .Progress,
           );
           return {
             level: requiredNumber(progress.Level, 'account level'),
@@ -936,7 +995,7 @@ export class RiotClient {
         }),
         pick(plan.account, previous?.progression, async () =>
           normalizeProgression(
-            (await this.read(`/contracts/v1/contracts/${id}`, 60000)).data,
+            (await this.read(`/contracts/v1/contracts/${id}`, plan.fresh ? 0 : 60000)).data,
             this.catalog,
           ),
         ),
@@ -959,7 +1018,7 @@ export class RiotClient {
         }),
         pick(plan.account, previous?.loadout, () => this.loadout()),
         pick(plan.live, previous?.liveGame, () => this.liveGame()),
-        pick(plan.account, previous?.matches, () => this.matchHistory()),
+        pick(plan.account, previous?.matches, () => this.matchHistory(0, 20, id, plan.fresh)),
       ]);
     return {
       accountId: id,

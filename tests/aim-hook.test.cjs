@@ -183,13 +183,13 @@ test('aim auto-sync waits for initial account data and never gates login', async
   await h.advance(60000);
   assert.equal(h.syncs.length, 1);
 });
-test('cached settings require pull refresh rather than daily or foreground polling', async (t) => {
+test('cached settings revalidate once on account opening without starting a background poll', async (t) => {
   const h = await harness(t, { cached: true });
   await h.advance(100000);
   await h.foreground();
-  assert.equal(h.syncs.length, 0);
-  await h.invoke((m) => m.syncAim('manual'));
   assert.equal(h.syncs.length, 1);
+  await h.invoke((m) => m.syncAim('manual'));
+  assert.equal(h.syncs.length, 2);
 });
 test('first auto-sync waits for foreground when app is backgrounded', async (t) => {
   const h = await harness(t, { background: true });

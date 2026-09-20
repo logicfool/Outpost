@@ -1,6 +1,7 @@
 import { AppError, safeError, uuid } from './validation';
 import { aimSnapshot, prepareAimDocument, validateAimEdit, aimEditMatches } from './aimSettings';
 import {
+  AIM_MANUAL_READ_INTERVAL,
   AIM_READ_INTERVAL,
   type AimDocument,
   type AimEdit,
@@ -46,16 +47,60 @@ export class AimService {
     guard: () => void = () => {},
   ): Promise<AimState> {
     id = uuid(id);
+    guard();
     const writing = this.writes.get(id);
-    if (writing) return writing;
+    if (writing) {
+      const result = await writing;
+      guard();
+      return result;
+    }
     const old = this.reads.get(id);
-    if (old) return old;
+    if (old) {
+      const result = await old;
+      guard();
+      if (
+        reason === 'auto' ||
+        (!!result.snapshot &&
+          !result.error &&
+          this.now() - result.snapshot.fetchedAt < AIM_MANUAL_READ_INTERVAL)
+      )
+        return result;
+
+      if (this.reads.get(id) === old) this.reads.delete(id);
+      return this.sync(id, reason, guard);
+    }
     const work = (async () => {
       guard();
       let state = (await this.store.aimState(id)) ?? {};
       guard();
-      if (state.nextReadAt && state.nextReadAt > this.now()) return state;
-      if (reason === 'auto' && state.snapshot && !state.pending && !state.needsSync) return state;
+      const checkedAt = Math.max(
+        state.attemptedAt ?? 0,
+        state.lastApplyAt ?? 0,
+        state.snapshot?.fetchedAt ?? 0,
+      );
+      const healthy = !!state.snapshot && !state.pending && !state.error;
+      const notBefore =
+        reason === 'manual' && healthy
+          ? Math.min(state.nextReadAt ?? 0, checkedAt + AIM_MANUAL_READ_INTERVAL)
+          : (state.nextReadAt ?? 0);
+      if (notBefore > this.now())
+        return reason === 'manual' && !state.error
+          ? {
+              ...state,
+              error: {
+                code: 'AIM_READ_WAIT',
+                message: 'Checked recently. Pull again after the short cooldown.',
+                retryAt: notBefore,
+              },
+            }
+          : state;
+      if (
+        reason === 'auto' &&
+        healthy &&
+        !state.needsSync &&
+        this.now() - state.snapshot!.fetchedAt < AIM_READ_INTERVAL
+      )
+        return state;
       state = { ...state, attemptedAt: this.now(), nextReadAt: this.now() + AIM_READ_INTERVAL };
       await this.store.saveAimState(id, state);
       guard();

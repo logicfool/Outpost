@@ -59,7 +59,8 @@ export function useAim(
   const [loading, setLoading] = useState(false),
     [hydrated, setHydrated] = useState(false);
   const stateVersion = useRef(0),
-    presetVersion = useRef(0);
+    presetVersion = useRef(0),
+    operations = useRef(0);
   const current = useRef({ account, selection }),
     generation = useRef(0),
     tried = useRef('');
@@ -85,6 +86,7 @@ export function useAim(
       pv = presetVersion.current;
     setHydrated(false);
     setValue({ id: account?.puuid, state: {}, presets: [] });
+    operations.current = 0;
     setLoading(false);
     tried.current = '';
     if (!account) return;
@@ -145,6 +147,7 @@ export function useAim(
   const syncAim = useCallback(async (reason: 'auto' | 'manual' = 'manual') => {
     const l = lease(),
       g = generation.current;
+    operations.current++;
     setLoading(true);
     try {
       const state = l.account.demo
@@ -162,6 +165,7 @@ export function useAim(
     } catch (reason) {
       l.check();
       if (g === generation.current) {
+        stateVersion.current++;
         const e = safeError(reason);
         setValue((v) => ({
           ...v,
@@ -170,7 +174,10 @@ export function useAim(
       }
       throw reason;
     } finally {
-      if (g === generation.current) setLoading(false);
+      if (g === generation.current) {
+        operations.current = Math.max(0, operations.current - 1);
+        setLoading(operations.current > 0);
+      }
     }
   }, []);
   useEffect(() => {
@@ -182,11 +189,7 @@ export function useAim(
       tried.current === `${account.puuid}:${revision}`
     )
       return;
-    if (
-      value.id !== account.puuid ||
-      (value.state.snapshot && !value.state.needsSync && !value.state.pending)
-    )
-      return;
+    if (value.id !== account.puuid) return;
     const key = `${account.puuid}:${revision}`;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const start = () => {
@@ -261,6 +264,7 @@ export function useAim(
   const applyAim = useCallback(async (edit: AimEdit, gameClosed: boolean) => {
     const l = lease(),
       g = generation.current;
+    operations.current++;
     setLoading(true);
     try {
       let state: AimState;
@@ -308,7 +312,10 @@ export function useAim(
       }
       return state;
     } finally {
-      if (g === generation.current) setLoading(false);
+      if (g === generation.current) {
+        operations.current = Math.max(0, operations.current - 1);
+        setLoading(operations.current > 0);
+      }
     }
   }, []);
   const acceptAimServerState = useCallback(async () => {

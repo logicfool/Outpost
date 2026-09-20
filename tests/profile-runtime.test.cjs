@@ -30,7 +30,13 @@ async function fixture(t) {
     },
     snapshot: async (previous, plan) => {
       calls.profile++;
-      assert.deepEqual(plan, { store: false, account: true, collection: false, live: false });
+      assert.deepEqual(plan, {
+        store: false,
+        account: true,
+        collection: false,
+        live: false,
+        fresh: true,
+      });
       const next = clone(previous);
       next.matches = { status: 'ready', fetchedAt: now, data: [summary(MATCH, now)] };
       next.xp = { status: 'ready', fetchedAt: now, data: { level: 51, xp: 12 } };
@@ -93,7 +99,7 @@ async function fixture(t) {
     },
   };
 }
-test('current game polls at five seconds, while idle state remains once a minute', async (t) => {
+test('current game polls at five seconds, while visible idle discovery checks every fifteen seconds', async (t) => {
   const h = await fixture(t),
     first = await h.runtime.live(ID);
   assert.equal(first.data.nextCheckAt - h.now, 5000);
@@ -105,7 +111,7 @@ test('current game polls at five seconds, while idle state remains once a minute
   h.advance(5000);
   h.idle();
   const idle = await h.runtime.live(ID);
-  assert.equal(idle.data.nextCheckAt - h.now, 60000);
+  assert.equal(idle.data.nextCheckAt - h.now, 15000);
   h.advance(5000);
   await h.runtime.live(ID);
   assert.equal(h.calls.live, 3);
@@ -138,7 +144,7 @@ test('failed live polling obeys Retry-After rather than continuing at five secon
   await h.runtime.live(ID);
   assert.equal(h.calls.live, 1);
 });
-test('a match ending queues Profile reconciliation without resetting the request budget', async (t) => {
+test('a match ending requests earlier Profile reconciliation after the short minimum gap', async (t) => {
   const h = await fixture(t);
   await h.runtime.live(ID);
   await h.runtime.profile(ID);
@@ -150,7 +156,7 @@ test('a match ending queues Profile reconciliation without resetting the request
   assert.equal(gate.postMatchId, MATCH);
   assert.equal(gate.notBefore, due);
   await h.runtime.profile(ID);
-  assert.equal(h.calls.profile, 1);
+  assert.equal(h.calls.profile, 2);
   h.advance(60000);
   await h.runtime.profile(ID);
   assert.equal((await h.repo.refreshGate(ID, 'profile')).postMatchId, undefined);
@@ -304,4 +310,83 @@ test('loading older matches keeps existing previews and a failed page never mark
   const after = await h.repo.archivedMatches(ID, ID);
   assert.deepEqual(after, before);
   assert.notEqual((await h.repo.refreshGate(ID, 'history:' + ID)).historyExhausted, true);
+});
+
+test('manual Profile pull bypasses the healthy one-minute cache and preserves old matches', async (t) => {
+  const h = await fixture(t);
+  await h.runtime.profile(ID);
+  h.advance(5001);
+  h.client.snapshot = async (previous, plan) => {
+    h.calls.profile++;
+    assert.equal(plan.fresh, true);
+    return {
+      ...clone(previous),
+      xp: { status: 'ready', fetchedAt: h.now, data: { level: 52, xp: 123 } },
+      matches: { status: 'ready', fetchedAt: h.now, data: [summary(OTHER, h.now)] },
+    };
+  };
+  const result = await h.runtime.profile(ID, 'manual');
+  assert.equal(h.calls.profile, 2);
+  assert.equal(result.xp.data.level, 52);
+  assert.ok(result.matches.data.some((m) => m.id === OTHER));
+  assert.ok(result.matches.data.some((m) => m.id === MATCH));
+  await h.runtime.profile(ID, 'manual');
+  assert.equal(h.calls.profile, 2);
+  h.advance(5001);
+  await h.runtime.profile(ID, 'manual');
+  assert.equal(h.calls.profile, 3);
+});
+test('manual current-game pull bypasses idle cache after five seconds and asks client for fresh data', async (t) => {
+  const h = await fixture(t);
+  h.idle();
+  await h.runtime.live(ID);
+  h.advance(5001);
+  let fresh;
+  h.client.liveGame = async (value) => {
+    fresh = value;
+    h.calls.live++;
+    return { state: 'agent_select', matchId: MATCH, observedAt: h.now };
+  };
+  const next = await h.runtime.live(ID, 'manual');
+  assert.equal(next.data.state, 'agent_select');
+  assert.equal(fresh, true);
+  assert.equal(h.calls.live, 2);
+  await h.runtime.live(ID, 'manual');
+  assert.equal(h.calls.live, 2);
+});
+test('manual Profile refresh cannot skip an upstream Retry-After or erase cached Profile data', async (t) => {
+  const h = await fixture(t);
+  h.client.snapshot = async (previous) => {
+    h.calls.profile++;
+    return {
+      ...previous,
+      rank: { status: 'error', code: 'RATE_LIMIT', message: 'Wait', retryAt: h.now + 120000 },
+    };
+  };
+  await h.runtime.profile(ID);
+  h.advance(5001);
+  const cached = await h.runtime.profile(ID, 'manual');
+  assert.equal(h.calls.profile, 1);
+  assert.equal(cached.profileIssue.code, 'RATE_LIMIT');
+  h.advance(115001);
+  await h.runtime.profile(ID, 'manual');
+  assert.equal(h.calls.profile, 2);
+});
+test('manual live refresh also retains server backoff and concurrent requests stay single-flight', async (t) => {
+  const h = await fixture(t);
+  h.rateLimit();
+  await h.runtime.live(ID);
+  h.advance(5001);
+  await Promise.all([h.runtime.live(ID, 'manual'), h.runtime.live(ID, 'manual')]);
+  assert.equal(h.calls.live, 1);
+});
+test('five-second live schedule includes network time rather than adding five more seconds afterward', async (t) => {
+  const h = await fixture(t);
+  h.client.liveGame = async () => {
+    h.calls.live++;
+    h.advance(2500);
+    return { state: 'in_game', matchId: MATCH, observedAt: h.now };
+  };
+  const sample = await h.runtime.live(ID);
+  assert.equal(sample.data.nextCheckAt - h.now, 2500);
 });

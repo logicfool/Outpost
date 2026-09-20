@@ -213,11 +213,11 @@ test('automatic reset reuses collection less than a day old, while manual refres
   assert.equal(snapshotPlan(s, 'manual', f.now).collection, true);
   assert.equal(snapshotPlan(s, 'auto', f.now + DAY_MS).collection, true);
 });
-test('live discovery is sampled at most once per sixty seconds, including idle', async () => {
+test('visible idle discovery is sampled once per fifteen seconds across runtimes', async () => {
   const f = fixture();
   f.snapshots.set(ID, f.gameSnapshot());
   await f.runtime.live(ID);
-  f.advance(59999);
+  f.advance(14999);
   await f.runtime.live(ID);
   await f.create().live(ID);
   assert.equal(f.calls.live, 1);

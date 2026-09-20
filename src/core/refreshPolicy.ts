@@ -5,10 +5,12 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 export const LIVE_POLL_MS = 60_000;
 export const ACTIVE_GAME_POLL_MS = 5_000;
 export const PROFILE_POLL_MS = 60_000;
+export const MANUAL_PROFILE_MS = 5_000;
+export const LIVE_IDLE_VISIBLE_MS = 15_000;
 export function livePollInterval(game?: LiveGame): number {
   return game && ['in_game', 'agent_select'].includes(game.state)
     ? ACTIVE_GAME_POLL_MS
-    : LIVE_POLL_MS;
+    : LIVE_IDLE_VISIBLE_MS;
 }
 export const MANUAL_COOLDOWN_MS = 60_000;
 export const RESET_GRACE_MS = 2_000;
@@ -31,12 +33,21 @@ export interface RefreshGateState {
   equipment?: Section<import('./matchTypes').LiveEquipment>;
   matchId?: string;
 }
+export function refreshDeadline(gate: RefreshGateState | null, reason: RefreshReason): number {
+  if (!gate) return 0;
+  if (gate.postMatchId && !gate.postMatchAttempts && gate.failures === 0)
+    return Math.min(gate.notBefore, gate.attemptedAt + MANUAL_PROFILE_MS);
+  return reason === 'manual' && gate.failures === 0
+    ? Math.min(gate.notBefore, gate.attemptedAt + MANUAL_PROFILE_MS)
+    : gate.notBefore;
+}
 export interface SnapshotPlan {
   store: boolean;
   account: boolean;
   collection: boolean;
   live: boolean;
   missingOnly?: boolean;
+  fresh?: boolean;
 }
 export const FULL_SNAPSHOT: SnapshotPlan = {
   store: true,
@@ -88,6 +99,7 @@ export function snapshotPlan(
     collection: manual || collectionDue,
     live: false,
     ...(missingOnly ? { missingOnly: true } : {}),
+    ...(manual ? { fresh: true } : {}),
   };
 }
 export function failureDelay(failures: number, floor = LIVE_POLL_MS): number {

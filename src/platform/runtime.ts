@@ -1,3 +1,4 @@
+import { refreshDeadline } from '../core/refreshPolicy';
 import { mergeSnapshot } from '../core/snapshot';
 import { livePollInterval, PROFILE_POLL_MS, completedLiveTransition } from '../core/refreshPolicy';
 import { CredentialQueue } from '../core/credentialQueue';
@@ -746,9 +747,14 @@ export class Runtime {
     }
   }
   private profileFlights = new Map<string, Promise<Snapshot | null>>();
-  async profile(id: string): Promise<Snapshot | null> {
+  async profile(id: string, reason: 'auto' | 'manual' = 'auto'): Promise<Snapshot | null> {
+    id = uuid(id);
     const flight = this.profileFlights.get(id);
-    if (flight) return flight;
+    if (flight) {
+      const result = await flight;
+      if (result || reason === 'auto') return result;
+      return this.profile(id, reason);
+    }
     const generation = this.generations.get(id) ?? 0;
     const guard = () => {
       if (
@@ -763,8 +769,23 @@ export class Runtime {
       guard();
       const gate = await this.repository.refreshGate(id, 'profile');
       guard();
-      const now = this.now();
-      if ((gate?.notBefore ?? 0) > now) return null;
+      const now = this.now(),
+        deadline = refreshDeadline(gate, reason);
+      if (deadline > now) {
+        recordRequest({
+          at: now,
+          service: 'Profile refresh',
+          method: 'SYNC',
+          code: gate?.failures ? 'PROFILE_BACKOFF_WAIT' : 'PROFILE_RECENT_RESULT',
+          durationMs: 0,
+        });
+        if (reason === 'manual') {
+          const cached = await this.repository.snapshot(id);
+          guard();
+          return cached ? { ...cached, profileNextCheckAt: deadline } : null;
+        }
+        return null;
+      }
       const previous = await this.repository.snapshot(id);
       guard();
       if (!previous) return null;
@@ -780,7 +801,13 @@ export class Runtime {
       try {
         next = await (
           await this.client(id)
-        ).snapshot(previous, { store: false, account: true, collection: false, live: false });
+        ).snapshot(previous, {
+          store: false,
+          account: true,
+          collection: false,
+          live: false,
+          fresh: true,
+        });
       } catch (reason) {
         const e = safeError(reason);
         next = {
@@ -1034,22 +1061,39 @@ export class Runtime {
     }
   }
 
-  async live(id: string): Promise<Section<LiveGame>> {
+  async live(id: string, reason: 'auto' | 'manual' = 'auto'): Promise<Section<LiveGame>> {
+    id = uuid(id);
     const flight = this.liveFlights.get(id);
-    if (flight) return flight;
+    if (flight) {
+      const result = await flight;
+      if (
+        reason === 'auto' ||
+        result.status !== 'ready' ||
+        this.now() - (result.data.observedAt ?? 0) < 5000
+      )
+        return result;
+      return this.live(id, reason);
+    }
     const generation = this.generations.get(id) ?? 0;
     const run = async (): Promise<Section<LiveGame>> => {
       const gate = await this.repository.refreshGate(id, 'live');
       const now = this.now();
-      if ((gate?.notBefore ?? 0) > now)
-        return (
-          gate?.sample ?? {
-            status: 'error',
-            code: 'LOCAL_COOLDOWN',
-            message: 'The next live check is scheduled.',
-            retryAt: gate!.notBefore,
-          }
-        );
+      const deadline =
+        gate?.failures === 0 && gate.sample?.status === 'ready'
+          ? Math.min(
+              refreshDeadline(gate, reason),
+              gate.attemptedAt + livePollInterval(gate.sample.data),
+            )
+          : refreshDeadline(gate, reason);
+      if (deadline > now)
+        return gate?.sample?.status === 'ready'
+          ? { ...gate.sample, data: { ...gate.sample.data, nextCheckAt: deadline } }
+          : (gate?.sample ?? {
+              status: 'error',
+              code: 'LOCAL_COOLDOWN',
+              message: 'The next live check is scheduled.',
+              retryAt: gate!.notBefore,
+            });
       await this.repository.saveRefreshGate(id, 'live', {
         attemptedAt: now,
         notBefore:
@@ -1061,7 +1105,7 @@ export class Runtime {
       try {
         sample = {
           status: 'ready',
-          data: await (await this.client(id)).liveGame(),
+          data: await (await this.client(id)).liveGame(true),
           fetchedAt: this.now(),
         };
       } catch (reason) {
@@ -1076,10 +1120,10 @@ export class Runtime {
       const error = sample.status === 'error' ? sample : sample.data.detailError;
       const failures = error ? (gate?.failures ?? 0) + 1 : 0;
       const notBefore = Math.max(
-        this.now() +
-          (error
-            ? failureDelay(failures)
-            : livePollInterval(sample.status === 'ready' ? sample.data : undefined)),
+        error
+          ? this.now() + failureDelay(failures)
+          : now + livePollInterval(sample.status === 'ready' ? sample.data : undefined),
+        this.now() + 1000,
         error?.retryAt ?? 0,
       );
       sample =

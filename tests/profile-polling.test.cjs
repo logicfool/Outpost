@@ -30,6 +30,8 @@ async function fixture(
         return { remove: () => set.delete(fn) };
       },
     };
+  const reasons = [],
+    liveReasons = [];
   let calls = 0,
     profileCalls = 0,
     releaseProfile,
@@ -38,11 +40,13 @@ async function fixture(
   const waiting = new Promise((resolve) => (releaseProfile = resolve));
   const model = {
     active: { puuid: 'fixture' },
-    refreshProfile: async () => {
+    refreshProfile: async (reason) => {
+      reasons.push(reason);
       profileCalls++;
       return slowProfile ? waiting : null;
     },
-    refreshLive: async () => {
+    refreshLive: async (reason) => {
+      liveReasons.push(reason);
       calls++;
       return { status: 'ready', data: { nextCheckAt: Date.now() + interval } };
     },
@@ -54,7 +58,7 @@ async function fixture(
         : n === 'react-native'
           ? { AppState: app, Platform: { OS: platform } }
           : n === '../core/refreshPolicy'
-            ? { LIVE_POLL_MS: 60000, PROFILE_POLL_MS: 60000 }
+            ? require('../.test-build/refreshPolicy.js')
             : (() => {
                 throw Error(n);
               })();
@@ -82,6 +86,8 @@ async function fixture(
     t.mock.timers.reset();
   });
   return {
+    reasons,
+    liveReasons,
     get calls() {
       return calls;
     },
@@ -174,5 +180,30 @@ test('pull-to-refresh invokes both independent lanes and settles the manual indi
   await h.pull();
   assert.equal(h.calls, 2);
   assert.equal(h.profileCalls, 2);
+  assert.equal(h.reasons.at(-1), 'manual');
+  assert.equal(h.liveReasons.at(-1), 'manual');
+  assert.equal(h.refreshing, false);
+});
+test('a pull during slow automatic Profile work stays pending and forwards manual intent once', async (t) => {
+  const h = await fixture(t, 'android', 5000, true, true);
+  await h.pull();
+  assert.equal(h.refreshing, true);
+  await h.pull();
+  assert.equal(h.profileCalls, 1);
+  h.releaseProfile();
+  await h.advance(0);
+  await h.advance(0);
+  assert.equal(h.profileCalls, 2);
+  assert.equal(h.reasons.at(-1), 'manual');
+  assert.equal(h.refreshing, false);
+});
+test('backgrounding cancels a queued manual follow-up without discarding the current read', async (t) => {
+  const h = await fixture(t, 'ios', 5000, true, true);
+  await h.pull();
+  await h.emit('change', 'background');
+  h.releaseProfile();
+  await h.advance(0);
+  await h.advance(0);
+  assert.equal(h.profileCalls, 1);
   assert.equal(h.refreshing, false);
 });

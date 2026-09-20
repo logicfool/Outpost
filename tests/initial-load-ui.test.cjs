@@ -41,6 +41,8 @@ async function harness(t, options = {}) {
   const accounts = [session(ID).account, session(OTHER).account],
     counts = {
       sync: [],
+      aim: [],
+      profile: [],
       history: 0,
       accounts: 0,
       permission: 0,
@@ -103,6 +105,10 @@ async function harness(t, options = {}) {
       counts.sync.push({ id, reason });
       return options.sync ? options.sync(id, reason) : goodSnapshot(id);
     },
+    profile: async (id) => {
+      counts.profile.push(id);
+      return options.profile ? options.profile(id) : goodSnapshot(id);
+    },
     clearCache: async () => {},
     sessionHealth: async () => ({}),
   };
@@ -142,6 +148,16 @@ async function harness(t, options = {}) {
     cancelResetNotifications: async () => {},
     cancelAllNotifications: async () => {},
   };
+  const aim = {
+    aimState: {},
+    aimPresets: [],
+    aimLoading: false,
+    syncAim: async (reason) => {
+      const id = rendered?.active?.puuid;
+      counts.aim.push({ id, reason });
+      return options.aim ? options.aim(id, reason) : {};
+    },
+  };
   const load = (name) => {
     if (name === 'react') return React;
     if (name === 'react-native') return native;
@@ -164,8 +180,7 @@ async function harness(t, options = {}) {
       );
       return mod.exports;
     }
-    if (name === './useAim')
-      return { useAim: () => ({ aimState: {}, aimPresets: [], aimLoading: false }) };
+    if (name === './useAim') return { useAim: () => aim };
     if (name === './useActions') return { useActions: () => ({}) };
     if (name === './useSocial') return { useSocial: () => social };
     if (name.endsWith('/runtime')) return { getRuntime: async () => runtime };

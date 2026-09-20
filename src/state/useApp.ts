@@ -243,8 +243,16 @@ export function useApp() {
       if (epoch.current === stamp) setBusy(false);
     }
   }, []);
-  const refresh = useCallback(() => syncAccount('manual'), [syncAccount]);
-  const refreshAutomatic = useCallback(() => syncAccount('auto'), [syncAccount]);
+  const refresh = useCallback(async () => {
+    await Promise.allSettled([syncAccount('manual'), aim.syncAim('manual')]);
+  }, [syncAccount, aim.syncAim]);
+  const refreshAutomatic = useCallback(async () => {
+    const id = activeRef.current?.puuid,
+      stamp = epoch.current;
+    await syncAccount('auto');
+    if (id && id === activeRef.current?.puuid && stamp === epoch.current)
+      void aim.syncAim('auto').catch(() => {});
+  }, [syncAccount, aim.syncAim]);
   const notificationSettled = useCallback(
     async (accountId: string, granted: boolean) => {
       const current = activeRef.current;
@@ -740,57 +748,83 @@ export function useApp() {
       if (epoch.current === stamp) setMessage(safeError(error).message);
     }
   }, [snapshot]);
-  const refreshProfile = useCallback(async (): Promise<Snapshot | null> => {
-    const account = activeRef.current;
-    if (!account) return null;
-    const stamp = epoch.current;
-    if (account.demo) return snapshotRef.current;
-    const runtime = await getRuntime(),
-      profile = await runtime.profile(account.puuid);
-    if (stamp !== epoch.current || activeRef.current?.puuid !== account.puuid) return null;
-    if (profile)
-      setSnapshot((previous) =>
-        previous?.accountId === account.puuid ? mergeSnapshot(previous, profile) : profile,
-      );
-    return profile;
-  }, []);
-  const liveFlight = useRef<{ id: string; work: Promise<Section<LiveGame>> } | null>(null);
-  const refreshLive = useCallback(async (): Promise<Section<LiveGame>> => {
-    const account = activeRef.current;
-    if (!account) return { status: 'error', code: 'NO_ACCOUNT', message: 'Select an account.' };
-    if (liveFlight.current?.id === account.puuid) return liveFlight.current.work;
-    const stamp = epoch.current;
-    const run = async (): Promise<Section<LiveGame>> => {
-      let next: Section<LiveGame>;
-      try {
-        const game = account.demo
-          ? makeDemo().snapshot.liveGame
-          : await (await getRuntime()).live(account.puuid);
-        next =
-          account.demo && game.status === 'ready'
-            ? {
-                ...game,
-                data: { ...game.data, nextCheckAt: Date.now() + livePollInterval(game.data) },
-              }
-            : game;
-      } catch (reason) {
-        const e = safeError(reason);
-        next = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+  const refreshProfile = useCallback(
+    async (reason: 'auto' | 'manual' = 'auto'): Promise<Snapshot | null> => {
+      const account = activeRef.current;
+      if (!account) return null;
+      const stamp = epoch.current;
+      const aimWork = aim.syncAim(reason).catch(() => undefined);
+      if (account.demo) {
+        await aimWork;
+        return snapshotRef.current;
       }
-      if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+      const runtime = await getRuntime();
+      const profile = await runtime.profile(account.puuid, reason);
+      if (stamp !== epoch.current || activeRef.current?.puuid !== account.puuid) return null;
+      if (profile)
         setSnapshot((previous) =>
-          previous?.accountId === account.puuid ? { ...previous, liveGame: next } : previous,
+          previous?.accountId === account.puuid ? mergeSnapshot(previous, profile) : profile,
         );
-      return next;
-    };
-    const work = run();
-    liveFlight.current = { id: account.puuid, work };
-    try {
-      return await work;
-    } finally {
-      if (liveFlight.current?.work === work) liveFlight.current = null;
-    }
-  }, []);
+      if (reason === 'manual') await aimWork;
+      return profile;
+    },
+    [aim.syncAim],
+  );
+  const liveFlight = useRef<{ id: string; work: Promise<Section<LiveGame>> } | null>(null);
+  const refreshLive = useCallback(
+    async (reason: 'auto' | 'manual' = 'auto'): Promise<Section<LiveGame>> => {
+      const account = activeRef.current;
+      if (!account) return { status: 'error', code: 'NO_ACCOUNT', message: 'Select an account.' };
+      if (liveFlight.current?.id === account.puuid) {
+        const waitingEpoch = epoch.current,
+          result = await liveFlight.current.work;
+        if (activeRef.current?.puuid !== account.puuid || epoch.current !== waitingEpoch)
+          return {
+            status: 'error',
+            code: 'ACCOUNT_CHANGED',
+            message: 'The selected account changed.',
+          };
+        if (
+          reason === 'auto' ||
+          result.status !== 'ready' ||
+          Date.now() - (result.data.observedAt ?? 0) < 5000
+        )
+          return result;
+      }
+      const stamp = epoch.current;
+      const run = async (): Promise<Section<LiveGame>> => {
+        let next: Section<LiveGame>;
+        try {
+          const game = account.demo
+            ? makeDemo().snapshot.liveGame
+            : await (await getRuntime()).live(account.puuid, reason);
+          next =
+            account.demo && game.status === 'ready'
+              ? {
+                  ...game,
+                  data: { ...game.data, nextCheckAt: Date.now() + livePollInterval(game.data) },
+                }
+              : game;
+        } catch (reason) {
+          const e = safeError(reason);
+          next = { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+        }
+        if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+          setSnapshot((previous) =>
+            previous?.accountId === account.puuid ? { ...previous, liveGame: next } : previous,
+          );
+        return next;
+      };
+      const work = run();
+      liveFlight.current = { id: account.puuid, work };
+      try {
+        return await work;
+      } finally {
+        if (liveFlight.current?.work === work) liveFlight.current = null;
+      }
+    },
+    [],
+  );
   const cachedPlayerProfile = useCallback(
     async (player: PlayerRef): Promise<PlayerProfile | null> => {
       const account = activeRef.current;

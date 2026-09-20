@@ -52,4 +52,5 @@ export interface AimDocument {
   modified?: number;
 }
 export const AIM_READ_INTERVAL = 60000;
+export const AIM_MANUAL_READ_INTERVAL = 5000;
 export const AIM_MAX_PROFILES = 15;

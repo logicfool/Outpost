@@ -12,6 +12,7 @@ export interface JsonResponse {
   status?: number;
 }
 export interface RequestPolicy {
+  priority?: 'interactive';
   aimSettings?: boolean;
   beforeDispatch?(): Promise<void>;
   allowEmptyJson?: boolean;
@@ -20,24 +21,32 @@ export interface RequestPolicy {
 }
 export class HttpClient {
   private active = 0;
-  private queue: (() => void)[] = [];
+  private queue: { resolve: () => void; priority: boolean }[] = [];
+  private urgentStreak = 0;
   private cooldowns = new Map<string, number>();
   constructor(
     private fetcher: Fetcher = (url, init) => fetch(url, init),
     private now: () => number = Date.now,
     private limit = 3,
   ) {}
-  private async enter() {
+  private async enter(priority = false) {
     if (this.active < this.limit) {
       this.active++;
       return;
     }
-    await new Promise<void>((resolve) => this.queue.push(resolve));
+    await new Promise<void>((resolve) => this.queue.push({ resolve, priority }));
   }
   private leave() {
-    const next = this.queue.shift();
-    if (next) next();
-    else this.active--;
+    const urgent = this.urgentStreak < 2 ? this.queue.findIndex((item) => item.priority) : -1;
+    const index = urgent >= 0 ? urgent : 0,
+      next = this.queue.splice(index, 1)[0];
+    if (next) {
+      this.urgentStreak = next.priority ? this.urgentStreak + 1 : 0;
+      next.resolve();
+    } else {
+      this.active--;
+      this.urgentStreak = 0;
+    }
   }
   async json(
     url: string,
@@ -63,7 +72,7 @@ export class HttpClient {
       mime: string | undefined,
       shape: string | undefined,
       code = 'OK';
-    await this.enter();
+    await this.enter(policy.priority === 'interactive');
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
