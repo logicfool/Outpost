@@ -5,6 +5,16 @@ import { Skeleton, MATCH_ROW_MIN_HEIGHT } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
 import type { PreviewIssue } from '../state/useMatchPreviews';
 import { CollectionHub } from './CollectionHub';
+import { MissionsView } from './MissionsPanel';
+import {
+  MatchFilterBar,
+  applyMatchFilter,
+  activeFilterCount,
+  matchFilterOptions,
+  reconcileFilter,
+  EMPTY_FILTER,
+  type MatchFilter,
+} from './MatchFilters';
 import { RoundOverview, DuelMatrix } from './MatchVisuals';
 import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
 import { useNavInset } from './NavInsets';
@@ -842,31 +852,13 @@ export function ProgressScreen({ model, onItem }: Props) {
             ) : (
               <Empty title="No active contracts" detail="Pull down to refresh." icon="flag" />
             )}
-            {progress.missions.length > 0 && (
-              <SectionHeader
-                title="Missions"
-                detail={
-                  progress.weeklyRefillAt ? `Refills ${date(progress.weeklyRefillAt)}` : undefined
-                }
-              />
-            )}
-            {progress.missions.map((mission, index) => (
-              <View key={mission.id} style={[S.card, S.between]}>
-                <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={S.h3}>Mission {index + 1}</Text>
-                  {mission.objectives.length ? (
-                    <Text style={S.body}>Progress {mission.objectives.join(' · ')}</Text>
-                  ) : null}
-                  {mission.expiresAt ? (
-                    <Text style={S.small}>Expires {date(mission.expiresAt)}</Text>
-                  ) : null}
-                </View>
-                <Badge
-                  text={mission.complete ? 'DONE' : 'ACTIVE'}
-                  color={mission.complete ? C.mint : C.gold}
-                />
-              </View>
-            ))}
+            <SectionHeader
+              title="Missions"
+              detail={
+                progress.weeklyRefillAt ? `Refills ${date(progress.weeklyRefillAt)}` : undefined
+              }
+            />
+            <MissionsView progression={progress} catalog={model.catalog} />
           </>
         )}
       </Resource>
@@ -1523,16 +1515,17 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   const polling = useLivePolling(model);
   const { C, S } = useTheme(),
     navInset = useNavInset();
-  const [filter, setFilter] = useState('all'),
+  const [filter, setFilter] = useState<MatchFilter>(EMPTY_FILTER),
     [loadingOlder, setLoadingOlder] = useState(false);
   const previews = useMatchPreviews(model),
     details = previews.details;
   const matches =
     model.snapshot?.matches.status === 'ready' ? model.snapshot.matches.data : undefined;
-  const queues = useMemo(() => ['all', ...new Set((matches ?? []).map((m) => m.queue))], [matches]);
+  const options = useMemo(() => matchFilterOptions(matches ?? [], details), [matches, details]);
+  const active = useMemo(() => reconcileFilter(filter, options), [filter, options]);
   const shown = useMemo(
-    () => (matches ?? []).filter((m) => filter === 'all' || m.queue === filter),
-    [matches, filter],
+    () => applyMatchFilter(matches ?? [], active, details),
+    [matches, active, details],
   );
   const open = useCallback((id: string) => onNavigate({ type: 'match', id }), [onNavigate]);
   const render = useCallback(
@@ -1576,12 +1569,29 @@ export function MatchesScreen({ model, onNavigate }: Props) {
             loading={polling.busy}
             onOpen={() => onNavigate({ type: 'live' })}
           />
+          <Pressable
+            testID="open-party"
+            accessibilityRole="button"
+            accessibilityLabel="Open your party"
+            onPress={() => onNavigate({ type: 'party' })}
+            style={[S.card, S.between, { paddingVertical: 14 }]}
+          >
+            <View style={[S.row, { gap: 11, alignItems: 'center', flex: 1 }]}>
+              <Feather name="users" size={17} color={C.accent} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={S.h3}>Party</Text>
+                <Text style={S.small}>Queue, invites and party code</Text>
+              </View>
+            </View>
+            <Feather name="chevron-right" size={18} color={C.subtle} />
+          </Pressable>
           <SectionHeader title="Match history" />
-          {queues.length > 2 && (
-            <Tabs
-              value={queues.includes(filter) ? filter : 'all'}
+          {!!matches?.length && (
+            <MatchFilterBar
+              matches={matches}
+              details={details}
+              value={active}
               onChange={setFilter}
-              items={queues.map((id) => ({ id, label: id === 'all' ? 'All' : queueName(id) }))}
             />
           )}
           {model.snapshot?.matches.status !== 'ready' && (
@@ -1592,7 +1602,13 @@ export function MatchesScreen({ model, onNavigate }: Props) {
         </View>
       }
       ListEmptyComponent={
-        matches ? <Empty title="No matches in this view" icon="crosshair" /> : null
+        matches ? (
+          <Empty
+            title="No matches in this view"
+            detail={activeFilterCount(active) ? 'Clear a filter to see more matches.' : undefined}
+            icon="crosshair"
+          />
+        ) : null
       }
       ListFooterComponent={
         !model.active?.demo && !!matches?.length && matches.length < 10000 ? (

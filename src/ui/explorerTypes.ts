@@ -17,6 +17,9 @@ export type ExplorerRoute =
   | { type: 'round'; detail: import('../core/types').MatchDetail; round: number; eventId?: string }
   | { type: 'live-loadout'; matchId: string; subject?: string }
   | { type: 'presets' }
+  | { type: 'party' }
+  | { type: 'sprays' }
+  | { type: 'missions' }
   | { type: 'market-history' }
   | { type: 'buddies' }
   | { type: 'aim'; tab?: import('./AimPanel').AimTab }

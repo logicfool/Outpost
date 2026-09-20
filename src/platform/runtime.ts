@@ -32,7 +32,7 @@ import {
   type PurchaseRecord,
 } from '../core/purchases';
 import { CURRENCIES } from '../core/normalize';
-import { catalogItem } from '../core/catalog';
+import { catalogItem, CATALOG_SCHEMA_VERSION } from '../core/catalog';
 import { validatePreset, type LoadoutPreset } from '../core/presets';
 import { ITEM_TYPES } from '../core/normalize';
 import {
@@ -212,7 +212,9 @@ export class Runtime {
       if (
         cached &&
         (!allowNetwork ||
-          (!force && cached.schemaVersion === 9 && cached.fetchedAt + ttl > this.now()))
+          (!force &&
+            cached.schemaVersion === CATALOG_SCHEMA_VERSION &&
+            cached.fetchedAt + ttl > this.now()))
       ) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
@@ -1258,6 +1260,85 @@ export class Runtime {
       return await work;
     } finally {
       if (this.equipmentFlights.get(id) === work) this.equipmentFlights.delete(id);
+    }
+  }
+  async party(id: string, fresh = false): Promise<Section<import('../core/partyTypes').Party>> {
+    id = uuid(id);
+    const generation = this.generations.get(id) ?? 0;
+    try {
+      await this.loadCatalog().catch(() => {});
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('SESSION_REMOVED', 'The account changed.');
+      const data = await (await this.client(id)).party(fresh);
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('SESSION_REMOVED', 'The account changed.');
+      return { status: 'ready', data, fetchedAt: this.now() };
+    } catch (reason) {
+      const e = safeError(reason);
+      return { status: 'error', code: e.code, message: e.message, retryAt: e.retryAt };
+    }
+  }
+
+  async partyCommand(
+    id: string,
+    run: (client: RiotClient) => Promise<import('../core/partyTypes').Party>,
+  ): Promise<import('../core/partyTypes').Party> {
+    id = uuid(id);
+    if (this.partyFlights.has(id))
+      throw new AppError('PARTY_BUSY', 'Wait for the current party change to finish.');
+    const generation = this.generations.get(id) ?? 0;
+    const work = (async () => {
+      const data = await run(await this.client(id));
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed before this finished.');
+      return data;
+    })();
+    this.partyFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.partyFlights.get(id) === work) this.partyFlights.delete(id);
+    }
+  }
+  private partyFlights = new Map<string, Promise<import('../core/partyTypes').Party>>();
+  async sprayEditor(id: string) {
+    await this.loadCatalog();
+    return (await this.client(uuid(id))).sprayEditor();
+  }
+  async saveSprays(
+    id: string,
+    edits: import('../core/sprays').SprayEdit[],
+    expectedVersion?: number,
+    guard?: () => void,
+  ): Promise<Loadout> {
+    if (this.identityFlights.has(id))
+      throw new AppError('LOADOUT_BUSY', 'Wait for the current equipment change.');
+    const generation = this.generations.get(id) ?? 0;
+    const run = async () => {
+      await this.loadCatalog();
+      const data = await (
+        await this.client(id)
+      ).saveSprays(edits, expectedVersion, () => {
+        guard?.();
+        if (generation !== (this.generations.get(id) ?? 0))
+          throw new AppError('ACCOUNT_CHANGED', 'The account changed before applying.');
+      });
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed.');
+      const saved = await this.repository.snapshot(id);
+      if (saved)
+        await this.repository.saveSnapshot({
+          ...saved,
+          loadout: { status: 'ready', data, fetchedAt: this.now() },
+        });
+      return data;
+    };
+    const work = run();
+    this.identityFlights.set(id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
     }
   }
   async saveIdentity(id: string, edit: IdentityEdit): Promise<Loadout> {

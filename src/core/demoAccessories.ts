@@ -43,4 +43,52 @@ export const DEMO_ACCESSORIES: CatalogItem[] = [
       'https://media.valorant-api.com/sprays/13a7b621-44cf-73a3-04bb-0fad33b93179/fullicon.png',
     ],
   },
+  {
+    'id': '7e2ba2e8-4597-060a-b41e-81acedca414e',
+    'canonicalId': '7e2ba2e8-4597-060a-b41e-81acedca414e',
+    'kind': 'spray',
+    'name': "Abilities Don't Kill Spray",
+    'image':
+      'https://media.valorant-api.com/sprays/7e2ba2e8-4597-060a-b41e-81acedca414e/displayicon.png',
+    'imageFallbacks': [
+      'https://media.valorant-api.com/sprays/7e2ba2e8-4597-060a-b41e-81acedca414e/fulltransparenticon.png',
+      'https://media.valorant-api.com/sprays/7e2ba2e8-4597-060a-b41e-81acedca414e/fullicon.png',
+    ],
+  },
+  {
+    'id': 'fe86a4c5-4e92-324b-4c0d-a7a837d0d548',
+    'canonicalId': 'fe86a4c5-4e92-324b-4c0d-a7a837d0d548',
+    'kind': 'spray',
+    'name': 'Cans On Spray',
+    'image':
+      'https://media.valorant-api.com/sprays/fe86a4c5-4e92-324b-4c0d-a7a837d0d548/displayicon.png',
+    'imageFallbacks': [
+      'https://media.valorant-api.com/sprays/fe86a4c5-4e92-324b-4c0d-a7a837d0d548/fulltransparenticon.png',
+      'https://media.valorant-api.com/sprays/fe86a4c5-4e92-324b-4c0d-a7a837d0d548/fullicon.png',
+    ],
+  },
+  {
+    'id': '7e85d0ab-4cc5-d869-5485-798aae7e8656',
+    'canonicalId': '7e85d0ab-4cc5-d869-5485-798aae7e8656',
+    'kind': 'spray',
+    'name': 'Hot Seat Spray',
+    'image':
+      'https://media.valorant-api.com/sprays/7e85d0ab-4cc5-d869-5485-798aae7e8656/displayicon.png',
+    'imageFallbacks': [
+      'https://media.valorant-api.com/sprays/7e85d0ab-4cc5-d869-5485-798aae7e8656/fulltransparenticon.png',
+      'https://media.valorant-api.com/sprays/7e85d0ab-4cc5-d869-5485-798aae7e8656/fullicon.png',
+    ],
+  },
+  {
+    'id': '3d2bcfc5-442b-812e-3c08-9180d6b36077',
+    'canonicalId': '3d2bcfc5-442b-812e-3c08-9180d6b36077',
+    'kind': 'spray',
+    'name': 'Caught on Camera Spray',
+    'image':
+      'https://media.valorant-api.com/sprays/3d2bcfc5-442b-812e-3c08-9180d6b36077/displayicon.png',
+    'imageFallbacks': [
+      'https://media.valorant-api.com/sprays/3d2bcfc5-442b-812e-3c08-9180d6b36077/fulltransparenticon.png',
+      'https://media.valorant-api.com/sprays/3d2bcfc5-442b-812e-3c08-9180d6b36077/fullicon.png',
+    ],
+  },
 ];

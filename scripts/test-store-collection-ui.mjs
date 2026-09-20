@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import crosshair from '../.test-build/crosshair.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-  out = path.join(root, 'docs/validation-0.9.5'),
+  out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.5'),
   dist = path.join(root, 'dist-web');
 const mime = {
   '.html': 'text/html',

@@ -245,7 +245,18 @@ export function validateProfileData(value: unknown, kind: string): void {
       const m = object(v);
       text(m.id);
       bool(m.complete);
-      list(m.objectives, 1000).forEach((v) => num(v));
+      const o = m.objectives;
+      if (Array.isArray(o)) list(o, 1000).forEach((v) => num(v));
+      else {
+        const entries = Object.entries(object(o));
+        if (entries.length > 1000) invalid();
+        for (const [key, progress] of entries) {
+          text(key, 200);
+          num(progress);
+        }
+      }
     }
+    optional(d.weeklyCheckpointAt, num);
+    optional(d.npeCompleted, bool);
   }
 }

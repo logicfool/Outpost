@@ -20,6 +20,18 @@ import { ChatPanel } from './ChatPanel';
 import { ChatSettings } from './ChatSettings';
 import { PlayerAvatar } from './PlayerAvatar';
 import { PresetsPanel } from './PresetsPanel';
+import { PartyPanel } from './PartyPanel';
+import {
+  MatchFilterBar,
+  applyMatchFilter,
+  activeFilterCount,
+  matchFilterOptions,
+  reconcileFilter,
+  EMPTY_FILTER,
+  type MatchFilter,
+} from './MatchFilters';
+import { SpraysPanel } from './SpraysPanel';
+import { MissionsPanel } from './MissionsPanel';
 import { Image } from './CachedImage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -134,7 +146,7 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
   const [data, setData] = useState<PlayerProfile | null>(null),
     [error, setError] = useState<string | null>(null),
     [version, setVersion] = useState(0);
-  const [queue, setQueue] = useState('all'),
+  const [queue, setQueue] = useState<MatchFilter>(EMPTY_FILTER),
     [loading, setLoading] = useState(false),
     [checking, setChecking] = useState(true),
     [finished, setFinished] = useState(false);
@@ -147,6 +159,7 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     setError(null);
     setFinished(false);
     setLoading(false);
+    setQueue(EMPTY_FILTER);
     let freshArrived = false;
     void model
       .cachedPlayerProfile(player)
@@ -205,10 +218,14 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       if (generation.current === stamp) setLoading(false);
     }
   };
-  const queues = useMemo(() => ['all', ...new Set(matches.map((m) => m.queue))], [data?.matches]);
+  const filterOptions = useMemo(
+    () => matchFilterOptions(matches, details),
+    [data?.matches, details],
+  );
+  const active = useMemo(() => reconcileFilter(queue, filterOptions), [queue, filterOptions]);
   const shown = useMemo(
-    () => matches.filter((m) => queue === 'all' || m.queue === queue),
-    [data?.matches, queue],
+    () => applyMatchFilter(matches, active, details),
+    [data?.matches, active, details],
   );
   const open = useCallback(
     (id: string) => onNavigate({ type: 'match', id, subject: player.subject }),
@@ -308,10 +325,11 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
             </Resource>
             <SectionHeader title="Match history" />
             {data?.matches.status === 'ready' ? (
-              <Tabs
-                value={queue}
+              <MatchFilterBar
+                matches={matches}
+                details={details}
+                value={active}
                 onChange={setQueue}
-                items={queues.map((id) => ({ id, label: id === 'all' ? 'All' : queueName(id) }))}
               />
             ) : (
               <Resource
@@ -329,7 +347,12 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
           </View>
         }
         ListEmptyComponent={
-          data?.matches.status === 'ready' ? <Empty title="No matches in this view" /> : null
+          data?.matches.status === 'ready' ? (
+            <Empty
+              title="No matches in this view"
+              detail={activeFilterCount(active) ? 'Clear a filter to see more matches.' : undefined}
+            />
+          ) : null
         }
         ListFooterComponent={
           !!matches.length && !finished && matches.length < 1000 && !model.active?.demo ? (
@@ -421,6 +444,20 @@ export function ExplorerModal({
       )}
       {route?.type === 'presets' && (
         <PresetsPanel key={model.active?.puuid} model={model} onBack={onBack} />
+      )}
+      {route?.type === 'party' && (
+        <PartyPanel
+          key={`party:${model.active?.puuid}`}
+          model={model}
+          onBack={onBack}
+          onNavigate={onNavigate}
+        />
+      )}
+      {route?.type === 'sprays' && (
+        <SpraysPanel key={`sprays:${model.active?.puuid}`} model={model} onBack={onBack} />
+      )}
+      {route?.type === 'missions' && (
+        <MissionsPanel key={`missions:${model.active?.puuid}`} model={model} onBack={onBack} />
       )}
       {route?.type === 'identity' && (
         <IdentityPanel

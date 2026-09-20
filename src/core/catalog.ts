@@ -1,4 +1,5 @@
 import { drainCooperatively } from './cooperative';
+import { missionDefinitions, objectiveDirectives } from './missions';
 import type { Catalog, CatalogItem, ItemKind, JsonObject } from './types';
 import { EMPTY_CATALOG } from './types';
 import {
@@ -13,6 +14,8 @@ import {
 } from './validation';
 import { HttpClient, SingleFlightCache } from './http';
 export const PUBLIC_ORIGIN = 'https://valorant-api.com';
+
+export const CATALOG_SCHEMA_VERSION = 10;
 export const CATALOG_PATHS = [
   'weapons',
   'buddies',
@@ -27,6 +30,8 @@ export const CATALOG_PATHS = [
   'seasons',
   'currencies',
   'themes',
+  'missions',
+  'objectives',
 ] as const;
 export type CatalogPath = (typeof CATALOG_PATHS)[number];
 function dataList(value: unknown) {
@@ -72,7 +77,9 @@ function* catalogSteps(
     contracts: Object.create(null),
     seasons: Object.create(null),
     weapons: Object.create(null),
-    schemaVersion: 9,
+    missions: Object.create(null),
+    objectives: Object.create(null),
+    schemaVersion: CATALOG_SCHEMA_VERSION,
     fetchedAt: now,
   };
   const themeNames = new Map(
@@ -313,6 +320,9 @@ function* catalogSteps(
       levels,
     };
   }
+  yield;
+  catalog.missions = missionDefinitions(responses.missions);
+  catalog.objectives = objectiveDirectives(responses.objectives);
   const seasons = dataList(responses.seasons)
     .map(object)
     .filter(
@@ -386,6 +396,8 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
     ),
     tiers: { ...previous.tiers, ...fresh.tiers },
     contracts: { ...previous.contracts, ...fresh.contracts },
+    missions: { ...previous.missions, ...fresh.missions },
+    objectives: { ...previous.objectives, ...fresh.objectives },
     seasons: { ...previous.seasons, ...fresh.seasons },
     currentSeasonId: fresh.currentSeasonId ?? previous.currentSeasonId,
   };

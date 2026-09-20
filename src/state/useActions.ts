@@ -11,6 +11,7 @@ import { randomId } from '../platform/secure';
 import { getRuntime } from '../platform/runtime';
 const demoBuddyChoices = new Map<string, BuddyChoice | null>();
 const demoPresets = new Map<string, LoadoutPreset>();
+const demoSprays = new Map<number, string | null>();
 export function useActions(
   account: Account | null,
   catalog: Catalog,
@@ -199,6 +200,57 @@ export function useActions(
     if (saved) current.current.snapshotLoaded(saved);
     return record;
   }, []);
+  const sprayEditor = useCallback(async () => {
+    const a = selected();
+    if (a.demo) {
+      const owned = Object.values(current.current.catalog.items).filter(
+        (i) => i.kind === 'spray' && i.id === i.canonicalId,
+      );
+      return {
+        slots: ['Pre-round', 'Mid-round', 'Post-round']
+          .map((label, index) => ({
+            index,
+            slotId: `demo-slot-${index}`,
+            label,
+            sprayId: demoSprays.has(index)
+              ? demoSprays.get(index)!
+              : (owned[index]?.canonicalId.toLowerCase() ?? null),
+            item: undefined,
+          }))
+          .map((slot) => ({
+            ...slot,
+            item: slot.sprayId
+              ? owned.find((s) => s.canonicalId.toLowerCase() === slot.sprayId)
+              : undefined,
+          })),
+        owned,
+        version: 1,
+      };
+    }
+    const data = await (await getRuntime()).sprayEditor(a.puuid);
+    assertCurrent(a.puuid);
+    return data;
+  }, []);
+  const saveSprays = useCallback(
+    async (edits: import('../core/sprays').SprayEdit[], version?: number) => {
+      const a = selected();
+      if (a.demo) {
+        for (const edit of edits) demoSprays.set(edit.slotIndex, edit.sprayId);
+        return;
+      }
+      const lease = current.current.selection?.();
+      const guard = () => {
+        assertCurrent(a.puuid);
+        const latest = current.current.selection?.();
+        if (lease && (latest?.accountId !== lease.accountId || latest?.revision !== lease.revision))
+          throw new AppError('ACCOUNT_CHANGED', 'The selected account changed before applying.');
+      };
+      const data = await (await getRuntime()).saveSprays(a.puuid, edits, version, guard);
+      assertCurrent(a.puuid);
+      current.current.updated(data);
+    },
+    [],
+  );
   const purchaseRecords = useCallback(async () => {
     const a = selected();
     return a.demo ? [] : (await getRuntime()).repository.purchaseRecords(a.puuid);
@@ -215,6 +267,8 @@ export function useActions(
   }, []);
   return {
     applyBuddy,
+    sprayEditor,
+    saveSprays,
     listPresets,
     editLoadout,
     savePreset,

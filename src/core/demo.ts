@@ -48,7 +48,54 @@ const RARITIES = [
   'Premium',
   'Exclusive',
 ];
-export function demoCatalog(): Catalog {
+const M = (n: number) => `00000000-0000-4000-8008-${String(n).padStart(12, '0')}`;
+const OBJ = (n: number) => `00000000-0000-4000-8009-${String(n).padStart(12, '0')}`;
+const DEMO_DAY = 86400000;
+export function demoMissions(now: number): {
+  missions: Record<string, import('./missionTypes').MissionDefinition>;
+  objectives: Record<string, string>;
+} {
+  const make = (
+    n: number,
+    title: string,
+    kind: 'daily' | 'weekly',
+    target: number,
+    xp: number,
+    week?: number,
+    activatesAt?: number,
+  ): import('./missionTypes').MissionDefinition => ({
+    id: M(n),
+    title,
+    kind,
+    xpGrant: xp,
+    target,
+    objectives: [{ id: OBJ(n), target }],
+    ...(activatesAt !== undefined ? { activatesAt, expiresAt: activatesAt + 7 * DEMO_DAY } : {}),
+    ...(week !== undefined ? { week, season: 'Demo', group: `Demo:${week}` } : {}),
+  });
+  const week = now - 2 * DEMO_DAY;
+  const list = [
+    make(1, 'Deal Damage', 'daily', 1000, 2000),
+    make(2, 'Plant or Defuse Spikes', 'daily', 5, 2000),
+    make(3, 'Get Headshots', 'weekly', 50, 34000, 1, week),
+    make(4, 'Play Matches', 'weekly', 12, 34000, 1, week),
+    make(5, 'Use Abilities', 'weekly', 40, 34000, 1, week),
+    make(6, 'Pick Up Ultimate Orbs', 'weekly', 20, 34000, 1, week),
+    make(7, 'Get First Blood', 'weekly', 8, 34000, 2, now + 5 * DEMO_DAY),
+    make(8, 'Purchase Shields', 'weekly', 25, 34000, 2, now + 5 * DEMO_DAY),
+    make(9, 'Kill Players', 'weekly', 120, 34000, 3, now + 12 * DEMO_DAY),
+  ];
+  return {
+    missions: Object.fromEntries(list.map((m) => [m.id, m])),
+    objectives: Object.fromEntries(
+      list.map((m, i) => [
+        OBJ(i + 1),
+        `${m.title.replace(/s$/, '')} {Num} {Num}|plural(one=time,other=times)`,
+      ]),
+    ),
+  };
+}
+export function demoCatalog(now = 0): Catalog {
   const items: Record<string, CatalogItem> = {};
   NAMES.forEach((name, index) => {
     const id = `00000000-0000-4000-8001-${String(index + 1).padStart(12, '0')}`;
@@ -87,6 +134,8 @@ export function demoCatalog(): Catalog {
     weapons: DEMO_MATCH_ASSETS.weapons,
     maps: { ...DEMO_ART.maps, ...DEMO_MATCH_ASSETS.maps },
     tiers: DEMO_ART.tiers,
+    missions: demoMissions(now || Date.now()).missions,
+    objectives: demoMissions(now || Date.now()).objectives,
     contracts: {
       'demo-pass': {
         id: 'demo-pass',
@@ -103,13 +152,56 @@ export function demoCatalog(): Catalog {
     fetchedAt: 0,
   };
 }
+
+export function demoParty(now: number): import('./partyTypes').Party {
+  const art = demoCatalog(now);
+  const card = Object.values(art.items).find((i) => i.kind === 'card');
+  const mate = (n: number, name: string, tier: number, ready: boolean, owner: boolean) => ({
+    subject: `00000000-0000-4000-800c-${String(n).padStart(12, '0')}`,
+    name,
+    tag: 'DEMO',
+    self: n === 1,
+    owner,
+    ready,
+    moderator: false,
+    hidden: false,
+    level: 180 + n * 24,
+    card,
+    tier,
+    tierName: art.tiers[String(tier)]?.name ?? `Tier ${tier}`,
+    tierImage: art.tiers[String(tier)]?.image,
+    platform: 'PC',
+    pings: [] as import('./partyTypes').PartyPing[],
+  });
+  return {
+    id: '00000000-0000-4000-800d-000000000001',
+    version: 3,
+    state: 'DEFAULT',
+    accessibility: 'CLOSED',
+    queueId: 'competitive',
+    eligibleQueues: ['competitive', 'unrated', 'swiftplay', 'spikerush', 'deathmatch'],
+    ineligibleQueues: [],
+    members: [
+      mate(1, 'Nightshift', 21, true, true),
+      mate(2, 'Corridor', 18, true, false),
+      mate(3, 'Halfstep', 15, false, false),
+    ],
+    maxSize: 5,
+    leaderId: '00000000-0000-4000-800c-000000000001',
+    selfIsLeader: true,
+    requests: [],
+    preferredGamePods: [],
+    inQueue: false,
+    observedAt: now,
+  };
+}
 const QUEUES = ['competitive', 'competitive', 'unrated', 'swiftplay', 'competitive'];
 export function makeDemo(now = Date.now()): {
   account: Account;
   snapshot: Snapshot;
   catalog: Catalog;
 } {
-  const catalog = demoCatalog(),
+  const catalog = demoCatalog(now),
     skins = Object.values(catalog.items).filter((i) => i.kind === 'skin');
   const ready = <T>(data: T): Section<T> => ({ status: 'ready', data, fetchedAt: now });
   const prices = [1775, 1275, 1775, 875, 4350, 2475, 1775, 2675];
@@ -191,7 +283,7 @@ export function makeDemo(now = Date.now()): {
           checkout: { lines: bundleLines, total: 2800, wholesaleOnly: true },
         },
       ],
-      accessories: DEMO_ACCESSORIES.map((item) => ({
+      accessories: DEMO_ACCESSORIES.slice(0, 4).map((item) => ({
         id: item.id,
         item,
         prices: [
@@ -263,10 +355,15 @@ export function makeDemo(now = Date.now()): {
         },
       ],
       missions: [
-        { id: 'demo-mission-1', complete: false, expiresAt: now + 3 * 86400000, objectives: [12] },
-        { id: 'demo-mission-2', complete: true, expiresAt: now + 3 * 86400000, objectives: [10] },
+        { id: M(1), complete: false, expiresAt: now + 14 * 3600000, objectives: { [OBJ(1)]: 640 } },
+        { id: M(2), complete: true, expiresAt: now + 14 * 3600000, objectives: { [OBJ(2)]: 5 } },
+        { id: M(3), complete: false, expiresAt: now + 3 * 86400000, objectives: { [OBJ(3)]: 31 } },
+        { id: M(4), complete: true, expiresAt: now + 3 * 86400000, objectives: { [OBJ(4)]: 12 } },
+        { id: M(5), complete: false, expiresAt: now + 3 * 86400000, objectives: { [OBJ(5)]: 7 } },
       ],
       weeklyRefillAt: now + 3 * 86400000,
+      weeklyCheckpointAt: now - 2 * 86400000,
+      npeCompleted: true,
     }),
     collection: ready([
       ...skins.slice(4),

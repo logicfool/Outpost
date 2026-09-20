@@ -31,6 +31,28 @@ import {
 } from './refreshPolicy';
 import { parseChatBootstrap } from './chatBootstrap';
 import { prepareIdentityEdit, verifyIdentity } from './identity';
+import {
+  assertInQueue,
+  assertLeader,
+  assertQueueReady,
+  assertQueueSelectable,
+  assertRemovable,
+  assertRequest,
+  normalizeParty,
+  normalizePartyPlayer,
+  validateInviteCode,
+  validateRiotId,
+} from './party';
+import type { Party } from './partyTypes';
+import {
+  ownedSprays,
+  prepareSprayEdit,
+  spraySlots,
+  verifySprayEdit,
+  SPRAY_TYPE,
+  type SpraySlot,
+  type SprayEdit,
+} from './sprays';
 import { PlayerScope } from './playerScope';
 import { hasPlayerName, nameAliases } from './playerNames';
 import { glzOrigin, normalizeLive } from './live';
@@ -39,6 +61,7 @@ import { catalogWithContent } from './rank';
 import type { PlayerRef, PlayerProfile, IdentityEdit } from './playerTypes';
 import type {
   Catalog,
+  CatalogItem,
   LiveGame,
   LoginTokens,
   MatchDetail,
@@ -212,7 +235,7 @@ export class RiotClient {
   private async read(
     path: string,
     ttlMs = 60000,
-    method: 'GET' | 'POST' | 'PUT' = 'GET',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
     body?: unknown,
     expectedSubject = this.session.account.puuid,
     host: 'pd' | 'shared' | 'glz' = 'pd',
@@ -879,6 +902,256 @@ export class RiotClient {
           'SAVE_UNCONFIRMED',
           'The buddy change has not been confirmed. Pull down before trying again.',
         );
+      this.cache.clear();
+      return normalizeLoadout(verified, this.catalog);
+    };
+    const work = run();
+    this.identityWrite = work;
+    try {
+      return await work;
+    } finally {
+      if (this.identityWrite === work) this.identityWrite = undefined;
+    }
+  }
+
+  private async partyRequest(
+    path: string,
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+    body?: unknown,
+    ttlMs = 0,
+  ) {
+    return this.read(path, ttlMs, method, body, this.session.account.puuid, 'glz');
+  }
+  private async currentPartyId(fresh = true): Promise<string> {
+    const raw = (
+      await this.partyRequest(
+        `/parties/v1/players/${this.session.account.puuid}`,
+        'GET',
+        undefined,
+        fresh ? 0 : 5000,
+      )
+    ).data;
+    return normalizePartyPlayer(raw, this.session.account.puuid).partyId;
+  }
+  private async readParty(partyId: string, ttlMs = 0): Promise<Party> {
+    const raw = (
+      await this.partyRequest(`/parties/v1/parties/${uuid(partyId)}`, 'GET', undefined, ttlMs)
+    ).data;
+    const party = normalizeParty(raw, partyId, this.session.account.puuid, this.catalog);
+    return { ...party, members: await this.resolveNames(party.members) };
+  }
+
+  async party(fresh = false): Promise<Party> {
+    try {
+      return await this.readParty(await this.currentPartyId(fresh), fresh ? 0 : 5000);
+    } catch (error) {
+      const e = safeError(error);
+      if (e.status === 404)
+        throw new AppError(
+          'PARTY_ABSENT',
+          'No party is open. Start VALORANT on your computer first.',
+        );
+      throw e;
+    }
+  }
+
+  private async confirmParty(partyId: string, raw: unknown): Promise<Party> {
+    try {
+      const party = normalizeParty(raw, partyId, this.session.account.puuid, this.catalog);
+      return { ...party, members: await this.resolveNames(party.members) };
+    } catch {
+      return this.readParty(partyId);
+    }
+  }
+  async setReady(ready: boolean): Promise<Party> {
+    const party = await this.party(true),
+      id = this.session.account.puuid;
+    if (!party.members.some((m) => m.self))
+      throw new AppError('PARTY_SCOPE', 'You are no longer in this party.');
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/members/${id}/setReady`,
+      'POST',
+      { ready: ready === true },
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async changeQueue(queueId: string): Promise<Party> {
+    const party = await this.party(true);
+    assertLeader(party, 'change the queue');
+    const id = assertQueueSelectable(party, queueId);
+    if (party.inQueue)
+      throw new AppError('QUEUE_ACTIVE', 'Stop the queue before changing the mode.');
+    const result = await this.partyRequest(`/parties/v1/parties/${party.id}/queue`, 'POST', {
+      queueId: id,
+    });
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async startQueue(beforeDispatch?: () => void): Promise<Party> {
+    const party = await this.party(true);
+    assertQueueReady(party);
+    const result = await this.read(
+      `/parties/v1/parties/${party.id}/matchmaking/join`,
+      0,
+      'POST',
+      {},
+      this.session.account.puuid,
+      'glz',
+      {
+        beforeDispatch: async () => {
+          beforeDispatch?.();
+          if (!this.isActive())
+            throw new AppError('SESSION_EXPIRED', 'The session changed before starting the queue.');
+        },
+      },
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async stopQueue(): Promise<Party> {
+    const party = await this.party(true);
+    assertInQueue(party);
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/matchmaking/leave`,
+      'POST',
+      {},
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async setPartyAccessibility(accessibility: 'OPEN' | 'CLOSED'): Promise<Party> {
+    if (accessibility !== 'OPEN' && accessibility !== 'CLOSED')
+      throw new AppError('PARTY_ACCESS', 'Choose open or closed.');
+    const party = await this.party(true);
+    assertLeader(party, 'change who can join');
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/accessibility`,
+      'POST',
+      { accessibility },
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async generatePartyCode(): Promise<Party> {
+    const party = await this.party(true);
+    assertLeader(party, 'create a party code');
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/invitecode`,
+      'POST',
+      {},
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async disablePartyCode(): Promise<Party> {
+    const party = await this.party(true);
+    assertLeader(party, 'disable the party code');
+    if (!party.inviteCode) throw new AppError('CODE_MISSING', 'This party has no code to disable.');
+    const result = await this.partyRequest(`/parties/v1/parties/${party.id}/invitecode`, 'DELETE');
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async joinPartyByCode(code: string): Promise<Party> {
+    const value = validateInviteCode(code);
+    const result = await this.partyRequest(
+      `/parties/v1/players/joinbycode/${encodeURIComponent(value)}`,
+      'POST',
+      {},
+    );
+    this.cache.clear();
+    const returned = text(object(result.data).ID);
+    return returned ? this.confirmParty(uuid(returned), result.data) : this.party(true);
+  }
+  async invitePlayer(name: string, tag: string): Promise<Party> {
+    const riotId = validateRiotId(name, tag);
+    const party = await this.party(true);
+    if (!party.selfIsLeader && !party.members.find((m) => m.self)?.moderator)
+      throw new AppError(
+        'PARTY_NOT_LEADER',
+        'Only the party leader or a moderator can invite players.',
+      );
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/invites/name/${encodeURIComponent(riotId.name)}/tag/${encodeURIComponent(riotId.tag)}`,
+      'POST',
+      {},
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async declineJoinRequest(requestId: string): Promise<Party> {
+    const party = await this.party(true);
+    const id = assertRequest(party, requestId);
+    const result = await this.partyRequest(
+      `/parties/v1/parties/${party.id}/request/${encodeURIComponent(id)}/decline`,
+      'POST',
+      {},
+    );
+    this.cache.clear();
+    return this.confirmParty(party.id, result.data);
+  }
+  async removePartyMember(subject: string): Promise<Party> {
+    const party = await this.party(true);
+    const id = assertRemovable(party, subject);
+    await this.partyRequest(`/parties/v1/players/${id}`, 'DELETE');
+    this.cache.clear();
+    return this.readParty(party.id);
+  }
+  async refreshPartyMember(subject: string): Promise<Party> {
+    const party = await this.party(true),
+      id = uuid(subject);
+    if (!party.members.some((m) => m.subject === id))
+      throw new AppError('PARTY_MEMBER_MISSING', 'That player is no longer in the party.');
+    const base = `/parties/v1/parties/${party.id}/members/${id}`;
+
+    await Promise.all(
+      ['refreshCompetitiveTier', 'refreshPlayerIdentity', 'refreshPings'].map((action) =>
+        this.partyRequest(`${base}/${action}`, 'POST', {}).catch(() => undefined),
+      ),
+    );
+    this.cache.clear();
+    return this.readParty(party.id);
+  }
+
+  async sprayEditor(): Promise<{ slots: SpraySlot[]; owned: CatalogItem[]; version?: number }> {
+    const [{ raw }, inventory] = await Promise.all([
+      this.rawLoadout(),
+      this.read(`/store/v1/entitlements/${this.session.account.puuid}/${SPRAY_TYPE}`, 0).then(
+        (r) => r.data,
+      ),
+    ]);
+    return {
+      slots: spraySlots(raw, this.catalog),
+      owned: ownedSprays(inventory, this.catalog),
+      version:
+        typeof object(raw).Version === 'number' ? (object(raw).Version as number) : undefined,
+    };
+  }
+  async saveSprays(
+    edits: SprayEdit[],
+    expectedVersion?: number,
+    beforeWrite?: () => void,
+  ): Promise<Loadout> {
+    if (this.identityWrite)
+      throw new AppError('SAVE_IN_PROGRESS', 'Wait for the current loadout change to finish.');
+    const run = async () => {
+      const initial = await this.rawLoadout();
+      if (expectedVersion !== undefined && object(initial.raw).Version !== expectedVersion)
+        throw new AppError('LOADOUT_CONFLICT', 'Your loadout changed. Review it before applying.');
+      const owned = await this.ownedIds(SPRAY_TYPE);
+      const latest = await this.rawLoadout();
+      if (object(latest.raw).Version !== object(initial.raw).Version)
+        throw new AppError('LOADOUT_CONFLICT', 'Your loadout changed in another client.');
+      const body = prepareSprayEdit(latest.raw, edits, owned, expectedVersion);
+      await this.read(latest.path, 0, 'PUT', body, this.session.account.puuid, 'pd', {
+        beforeDispatch: async () => {
+          beforeWrite?.();
+          if (!this.isActive())
+            throw new AppError('SESSION_EXPIRED', 'The session changed before applying.');
+        },
+      });
+      const verified = (await this.read(latest.path, 0)).data;
+      verifySprayEdit(verified, body);
       this.cache.clear();
       return normalizeLoadout(verified, this.catalog);
     };

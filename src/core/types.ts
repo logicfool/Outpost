@@ -98,6 +98,8 @@ export interface Catalog {
   weapons?: Record<string, import('./matchTypes').WeaponMetadata>;
   tiers: Record<string, { name: string; image?: string; smallArt?: string; color?: string }>;
   contracts: Record<string, ContractDefinition>;
+  missions?: Record<string, import('./missionTypes').MissionDefinition>;
+  objectives?: Record<string, string>;
   seasons?: Record<string, { name: string; startsAt?: number; endsAt?: number }>;
   currentSeasonId?: string;
   fetchedAt: number;
@@ -251,8 +253,15 @@ export interface Progression {
     nextReward?: CatalogItem;
     currentBattlepass: boolean;
   }[];
-  missions: { id: string; complete: boolean; expiresAt?: number; objectives: number[] }[];
+  missions: {
+    id: string;
+    complete: boolean;
+    expiresAt?: number;
+    objectives: Record<string, number>;
+  }[];
   weeklyRefillAt?: number;
+  weeklyCheckpointAt?: number;
+  npeCompleted?: boolean;
 }
 export interface Loadout {
   endpoint?: 'v2' | 'v3';

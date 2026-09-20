@@ -487,7 +487,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   };
   const fresh = {
     ...old,
-    schemaVersion: 9,
+    schemaVersion: 10,
     maps: {
       ascent: {
         name: 'Ascent',
@@ -512,7 +512,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   await load.call(f.runtime);
   await load.call(f.runtime);
   assert.equal(publicCalls, 1);
-  assert.equal(f.runtime.catalog.schemaVersion, 9);
+  assert.equal(f.runtime.catalog.schemaVersion, 10);
   assert.equal(f.calls.snapshots, 0);
 });
 test('a weapons-only media refresh cannot mark old map metadata as migrated', async () => {

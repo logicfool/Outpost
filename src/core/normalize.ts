@@ -264,20 +264,29 @@ export function normalizeProgression(raw: unknown, catalog: Catalog): Progressio
       };
     })
     .sort((a, b) => Number(b.currentBattlepass) - Number(a.currentBattlepass) || b.level - a.level);
-  return {
-    contracts,
-    missions: array(r.Missions).map((value) => {
-      const m = object(value);
+  const metadata = object(r.MissionMetadata);
+  const missions = array(r.Missions)
+    .map((value) => {
+      const m = object(value),
+        objectives: Record<string, number> = {};
+      for (const [id, progress] of Object.entries(object(m.Objectives))) {
+        if (id !== '__proto__' && typeof progress === 'number' && Number.isFinite(progress))
+          objectives[id.toLowerCase()] = progress;
+      }
       return {
-        id: text(m.ID),
+        id: text(m.ID).toLowerCase(),
         complete: m.Complete === true,
         expiresAt: timestamp(m.ExpirationTime),
-        objectives: Object.values(object(m.Objectives)).filter(
-          (v): v is number => typeof v === 'number' && Number.isFinite(v),
-        ),
+        objectives,
       };
-    }),
-    weeklyRefillAt: timestamp(object(r.MissionMetadata).WeeklyRefillTime),
+    })
+    .filter((m) => !!m.id);
+  return {
+    contracts,
+    missions,
+    weeklyRefillAt: timestamp(metadata.WeeklyRefillTime),
+    weeklyCheckpointAt: timestamp(metadata.WeeklyCheckpoint),
+    ...(typeof metadata.NPECompleted === 'boolean' ? { npeCompleted: metadata.NPECompleted } : {}),
   };
 }
 export function normalizeMatches(raw: unknown, updates: unknown, catalog: Catalog): MatchSummary[] {

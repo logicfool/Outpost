@@ -177,6 +177,11 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           onPress={() => onNavigate({ type: 'buddies' })}
         />
         <MenuRow
+          title="Change sprays"
+          icon="droplet"
+          onPress={() => onNavigate({ type: 'sprays' })}
+        />
+        <MenuRow
           title="Loadout presets"
           label="Saved loadouts"
           icon="layers"
