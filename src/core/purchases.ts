@@ -1,9 +1,11 @@
 import type { Store, StoreOffer, Money } from './types';
 import { CURRENCIES } from './normalize';
 import { AppError, object, text, uuid } from './validation';
+import { bundleQuoteKey } from './bundlePurchase';
 import { purchaseRejection } from './purchaseErrors';
 
 export interface PurchaseQuote {
+  bundle?: { id: string; lines: import('./types').BundleLine[]; ownedCount: number };
   id: string;
   accountId: string;
   offer: StoreOffer;
@@ -15,6 +17,7 @@ export interface PurchaseQuote {
 export type PurchaseState =
   'not-submitted' | 'submitting' | 'accepted' | 'complete' | 'failed' | 'unknown';
 export interface PurchaseRecord {
+  bundle?: { id: string; lines: import('./types').BundleLine[]; delivered?: string[] };
   id: string;
   accountId: string;
   offerId: string;
@@ -106,7 +109,8 @@ export function validatePurchaseQuote(
     quote.accountId !== fresh.accountId ||
     quote.offer.id.toLowerCase() !== fresh.offer.id.toLowerCase() ||
     quote.offer.item.id.toLowerCase() !== fresh.offer.item.id.toLowerCase() ||
-    quote.price !== fresh.price
+    quote.price !== fresh.price ||
+    bundleQuoteKey(quote) !== bundleQuoteKey(fresh)
   )
     throw new AppError(
       'PURCHASE_CHANGED',
@@ -127,7 +131,11 @@ export function unresolvedForItem(
 ): boolean {
   return (
     ['submitting', 'accepted', 'unknown'].includes(record.state) &&
-    [record.itemId, record.canonicalItemId].some(
+    [
+      record.itemId,
+      record.canonicalItemId,
+      ...(record.bundle?.lines ?? []).flatMap((l) => [l.itemId, l.canonicalItemId]),
+    ].some(
       (id) =>
         id && [itemId, canonicalId].some((value) => value?.toLowerCase() === id.toLowerCase()),
     )

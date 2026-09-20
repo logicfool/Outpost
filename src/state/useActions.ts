@@ -4,6 +4,7 @@ import type { Account, Catalog, Snapshot, Loadout } from '../core/types';
 import type { LoadoutPreset, LoadoutEditor } from '../core/presets';
 import type { PurchaseQuote, PurchaseRecord } from '../core/purchases';
 import { validatePreset } from '../core/presets';
+import { quoteBundlePurchase } from '../core/bundlePurchase';
 import { quotePurchase } from '../core/purchases';
 import { AppError } from '../core/validation';
 import { randomId } from '../platform/secure';
@@ -143,21 +144,39 @@ export function useActions(
     },
     [],
   );
-  const purchaseQuote = useCallback(async (itemId: string): Promise<PurchaseQuote> => {
-    const a = selected();
-    if (a.demo) {
-      const s = current.current.snapshot;
-      if (s?.store.status !== 'ready' || s.wallet.status !== 'ready')
-        throw new AppError('DEMO', 'No demo store.');
-      return quotePurchase(s.store.data, s.wallet.data, itemId, a.puuid, randomId());
-    }
-    const prefs = await (await getRuntime()).repository.settings();
-    if (!prefs.allowPurchases)
-      throw new AppError('PURCHASE_DISABLED', 'Enable phone purchases in Settings first.');
-    const q = await (await getRuntime()).purchaseQuote(a.puuid, itemId);
-    assertCurrent(a.puuid);
-    return q;
-  }, []);
+  const purchaseQuote = useCallback(
+    async (itemId: string, kind: 'skin' | 'bundle' = 'skin'): Promise<PurchaseQuote> => {
+      const a = selected();
+      if (a.demo) {
+        const s = current.current.snapshot;
+        if (s?.store.status !== 'ready' || s.wallet.status !== 'ready')
+          throw new AppError('DEMO', 'No demo store.');
+        return kind === 'bundle'
+          ? quoteBundlePurchase(
+              s.store.data,
+              s.wallet.data,
+              itemId,
+              a.puuid,
+              randomId(),
+              new Map(
+                (
+                  s.store.data.bundles.find((b) => b.id === itemId || b.catalogId === itemId)
+                    ?.checkout?.lines ?? []
+                ).map((l) => [l.itemTypeId, new Map()]),
+              ),
+              current.current.catalog,
+            )
+          : quotePurchase(s.store.data, s.wallet.data, itemId, a.puuid, randomId());
+      }
+      const prefs = await (await getRuntime()).repository.settings();
+      if (!prefs.allowPurchases)
+        throw new AppError('PURCHASE_DISABLED', 'Enable phone purchases in Settings first.');
+      const q = await (await getRuntime()).purchaseQuote(a.puuid, itemId, kind);
+      assertCurrent(a.puuid);
+      return q;
+    },
+    [],
+  );
   const confirmPurchase = useCallback(async (id: string): Promise<PurchaseRecord> => {
     const a = selected();
     if (a.demo) throw new AppError('DEMO_ONLY', 'Demo purchases never contact Riot or spend VP.');

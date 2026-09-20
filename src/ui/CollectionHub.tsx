@@ -1,7 +1,9 @@
+import type { CollectionView } from '../core/browseMemory';
+import { useBrowseScroll } from '../state/useBrowseScroll';
 import { AimCollectionRows } from './AimCollectionRows';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
-import React, { memo, useDeferredValue, useMemo, useState } from 'react';
+import React, { memo, useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -268,18 +270,52 @@ export function CollectionBrowser({
   initialScope = 'owned',
   onNavigate,
   onBack,
+  view: savedView,
 }: {
   model: AppModel;
   initialKind?: CollectionKind;
   initialScope?: CollectionScope;
   onNavigate: Navigate;
   onBack(): void;
+  view?: CollectionView;
 }) {
   const { C, S } = useTheme();
-  const [scope, setScope] = useState(initialScope),
-    [kind, setKind] = useState(initialKind),
-    [query, setQuery] = useState(''),
-    [weapon, setWeapon] = useState('all');
+  const fallback = useRef<CollectionView>({
+    scope: initialScope,
+    kind: initialKind,
+    query: '',
+    weapon: 'all',
+    offset: 0,
+  });
+  const view = savedView ?? fallback.current;
+  const [scope, updateScope] = useState(view.scope),
+    [kind, updateKind] = useState(view.kind),
+    [query, updateQuery] = useState(view.query),
+    [weapon, updateWeapon] = useState(view.weapon);
+  const scroll = useBrowseScroll<CatalogItem>(
+    view,
+    scope !== 'owned' || model.snapshot?.collection.status === 'ready',
+  );
+  const setScope = (v: CollectionScope) => {
+    view.scope = v;
+    updateScope(v);
+    scroll.reset();
+  };
+  const setKind = (v: CollectionKind) => {
+    view.kind = v;
+    updateKind(v);
+    scroll.reset();
+  };
+  const setQuery = (v: string) => {
+    view.query = v;
+    updateQuery(v);
+    scroll.reset();
+  };
+  const setWeapon = (v: string) => {
+    view.weapon = v;
+    updateWeapon(v);
+    scroll.reset();
+  };
   const search = useDeferredValue(query.trim().toLowerCase());
   const owned = model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : [];
   const all = useMemo(
@@ -303,7 +339,11 @@ export function CollectionBrowser({
       (scope === 'owned'
         ? owned
         : scope === 'wishlist'
-          ? all.filter((i) => model.wishlist.includes(i.canonicalId) && i.kind !== 'chroma')
+          ? all.filter(
+              (i) =>
+                model.wishlist.includes(i.canonicalId) &&
+                (kind === 'chroma' || i.kind !== 'chroma'),
+            )
           : all
       )
         .map((i) => hydrateItem(model.catalog, i))
@@ -322,6 +362,8 @@ export function CollectionBrowser({
     <ModalPage>
       <ModalHeader title={title} closeLabel="Back from collection browser" onClose={onBack} />
       <FlatList
+        {...scroll.props}
+        testID="collection-browser-list"
         data={waiting ? [] : items}
         numColumns={2}
         keyExtractor={(i) => `${i.kind}:${i.id}`}
@@ -353,6 +395,7 @@ export function CollectionBrowser({
             />
             <TextInput
               accessibilityLabel="Search collection"
+              maxLength={180}
               placeholder={`Search ${title.toLowerCase()}`}
               value={query}
               onChangeText={setQuery}

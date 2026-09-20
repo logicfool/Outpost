@@ -110,6 +110,20 @@ export interface StoreOffer {
   discountPercent?: number;
   seen?: boolean;
 }
+export interface BundleLine {
+  offerId: string;
+  itemId: string;
+  canonicalItemId: string;
+  name: string;
+  itemTypeId: string;
+  quantity: number;
+  price: number;
+}
+export interface BundleCheckout {
+  lines: BundleLine[];
+  total: number;
+  wholesaleOnly: boolean;
+}
 export interface Bundle {
   catalogId?: string;
   id: string;
@@ -119,6 +133,7 @@ export interface Bundle {
   prices: Money[];
   expiresAt: number;
   offers: StoreOffer[];
+  checkout?: BundleCheckout;
 }
 export interface Store {
   daily: StoreOffer[];

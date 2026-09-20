@@ -1,6 +1,7 @@
 import { FriendActions } from './FriendActions';
 import { FriendRequestsPanel } from './FriendRequestsPanel';
 import { ChatsPanel } from './ChatsPanel';
+import { BrowseMemory } from '../core/browseMemory';
 import { ChatDirectoryMemory } from '../core/chatDirectory';
 import { MarketHistoryPanel } from './MarketHistoryPanel';
 import { LiveMatchPanel } from './LiveMatchPanel';
@@ -362,11 +363,25 @@ export function ExplorerModal({
   const route = routes.at(-1),
     props = { model, onNavigate, onBack };
   const chatViews = useRef(new ChatDirectoryMemory()).current;
+  const browseViews = useRef(new BrowseMemory()).current;
+  browseViews.syncAccount(model.active?.puuid);
+  const collectionView =
+    route?.type === 'collection'
+      ? browseViews.collection(model.active?.puuid, route, route.kind, route.scope)
+      : undefined;
+  const marketView =
+    route?.type === 'market-history' ? browseViews.markets(model.active?.puuid, route) : undefined;
   const chatView =
     route?.type === 'friends' ? chatViews.forRoute(model.active?.puuid, route) : undefined;
   return (
     <Modal visible={!!route} animationType="slide" onRequestClose={onBack}>
-      {route?.type === 'market-history' && <MarketHistoryPanel {...props} />}
+      {route?.type === 'market-history' && (
+        <MarketHistoryPanel
+          key={`${model.active?.puuid}:${marketView?.navigationId}`}
+          {...props}
+          view={marketView}
+        />
+      )}
       {route?.type === 'bundle' && <BundlePanel {...props} id={route.id} />}
       {route?.type === 'item' && (
         <ItemModal key={route.item.id} model={model} item={route.item} onClose={onBack} embedded />
@@ -416,10 +431,11 @@ export function ExplorerModal({
       )}
       {route?.type === 'collection' && (
         <CollectionBrowser
-          key={`${route.kind}:${route.scope}`}
+          key={`${model.active?.puuid}:${collectionView?.navigationId}`}
           {...props}
           initialKind={route.kind}
           initialScope={route.scope}
+          view={collectionView}
         />
       )}
       {route?.type === 'equipped' && <EquippedPanel {...props} />}

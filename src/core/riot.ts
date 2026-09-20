@@ -19,8 +19,8 @@ import {
   type LoadoutEditor,
 } from './presets';
 import { orderResult } from './purchases';
-import { submitConfirmedOffer } from './purchaseRequest';
-import { ownedItemIds } from './ownership';
+import { submitConfirmedOffer, submitConfirmedBundle } from './purchaseRequest';
+import { ownedItemIds, ownedQuantities } from './ownership';
 import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
 import {
   DAY_MS,
@@ -791,6 +791,32 @@ export class RiotClient {
         (await this.read(`/store/v1/entitlements/${id}/${type}`, fresh ? 0 : 60000)).data,
       );
     return ownedItemIds(raw, type);
+  }
+  async ownedQuantities(type: string): Promise<Map<string, number>> {
+    if (!Object.values(ITEM_TYPES).includes(type))
+      throw new AppError('ITEM_TYPE', 'Unsupported collection category.');
+    const raw = (await this.read(`/store/v1/entitlements/${this.session.account.puuid}/${type}`, 0))
+      .data;
+    return ownedQuantities(raw, type);
+  }
+  async purchaseBundle(
+    lines: import('./types').BundleLine[],
+    price: number,
+    beforeDispatch: () => Promise<void>,
+  ) {
+    const result = await submitConfirmedBundle(
+      (path, body, policy) =>
+        this.read(path, 0, 'POST', body, this.session.account.puuid, 'pd', policy),
+      lines,
+      price,
+      async () => {
+        if (!this.isActive()) throw new AppError('SESSION_EXPIRED', 'The account session changed.');
+        await beforeDispatch();
+        if (!this.isActive()) throw new AppError('SESSION_EXPIRED', 'The account session changed.');
+      },
+    );
+    this.cache.clear();
+    return result;
   }
   async wallet(fresh = false) {
     return normalizeWallet(

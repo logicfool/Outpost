@@ -13,7 +13,8 @@ import type {
   Snapshot,
   StoreOffer,
 } from './types';
-import { CURRENCIES } from './normalize';
+import { CURRENCIES, ITEM_TYPES } from './normalize';
+export const DEMO_BUNDLE_ID = '00000000-0000-4000-8006-000000000001';
 export const DEMO_ID = '00000000-0000-4000-8000-000000000001';
 export const DEMO_ACCOUNT: Account = {
   puuid: DEMO_ID,
@@ -61,6 +62,10 @@ export function demoCatalog(): Catalog {
       ...DEMO_ART.skins[name],
     };
   });
+  AGENTS.forEach((name, index) => {
+    const id = `00000000-0000-4000-8007-${String(index + 1).padStart(12, '0')}`;
+    items[id] = { id, canonicalId: id, name, kind: 'agent', image: DEMO_ART.agents[name] };
+  });
   for (const item of DEMO_ACCESSORIES) items[item.id] = item;
   for (const item of [...DEMO_ART.cards, ...DEMO_ART.titles]) items[item.id] = item;
   for (const skin of Object.values(items).filter((i) => i.kind === 'skin'))
@@ -74,7 +79,7 @@ export function demoCatalog(): Catalog {
         name: 'After-hours collection',
         itemIds: Object.values(items)
           .filter((i) => i.kind === 'skin')
-          .slice(4, 8)
+          .slice(0, 4)
           .map((i) => i.canonicalId),
         membershipSource: 'store',
       },
@@ -112,6 +117,19 @@ export function makeDemo(now = Date.now()): {
     id: item.id,
     item,
     prices: [{ currencyId: CURRENCIES.VP, symbol: 'VP', amount: prices[index] ?? 1775 }],
+  }));
+  const bundleOffers = offers.slice(0, 4).map((o, index) => ({
+    ...o,
+    prices: [{ currencyId: CURRENCIES.VP, symbol: 'VP', amount: [875, 700, 700, 525][index]! }],
+  }));
+  const bundleLines = bundleOffers.map((o) => ({
+    offerId: o.id,
+    itemId: o.item.id,
+    canonicalItemId: o.item.canonicalId,
+    name: o.item.name,
+    itemTypeId: ITEM_TYPES.skin,
+    quantity: 1,
+    price: o.prices[0]!.amount,
   }));
   const matches = ['Ascent', 'Lotus', 'Haven', 'Bind', 'Split'].map((map, index) => ({
     id: `00000000-0000-4000-8003-${String(index + 1).padStart(12, '0')}`,
@@ -164,12 +182,13 @@ export function makeDemo(now = Date.now()): {
       endpoint: 'demo',
       bundles: [
         {
-          id: 'demo-bundle',
+          id: DEMO_BUNDLE_ID,
           catalogId: 'demo-featured',
           name: 'After-hours collection',
-          prices: [{ currencyId: CURRENCIES.VP, symbol: 'VP', amount: 7100 }],
+          prices: [{ currencyId: CURRENCIES.VP, symbol: 'VP', amount: 2800 }],
           expiresAt: now + 5 * 86400000,
-          offers: offers.slice(4),
+          offers: bundleOffers,
+          checkout: { lines: bundleLines, total: 2800, wholesaleOnly: true },
         },
       ],
       accessories: DEMO_ACCESSORIES.map((item) => ({

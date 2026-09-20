@@ -3,7 +3,7 @@ const config: ExpoConfig = {
   owner: 'logicfool',
   name: 'Outpost',
   slug: 'outpost-valorant',
-  version: '0.9.4.1',
+  version: '0.9.5',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   scheme: 'outpost',
@@ -11,8 +11,8 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   ios: {
     bundleIdentifier: 'app.outpost.valorant',
-    version: '0.9.4',
-    buildNumber: '27',
+    version: '0.9.5',
+    buildNumber: '28',
     supportsTablet: true,
     icon: './assets/icon.png',
     infoPlist: {
@@ -24,7 +24,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'app.outpost.valorant',
-    versionCode: 27,
+    versionCode: 28,
     allowBackup: false,
 
     blockedPermissions: [

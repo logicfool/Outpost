@@ -290,21 +290,24 @@ function ItemArtwork({
             if (active.current && current.current === index) setIndex((n) => n + 1);
           }}
         />
-      ) : (
+      ) : urls.length ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Retry artwork for ${item.name}`}
-          disabled={!urls.length}
           onPress={onRetry}
           style={{ alignItems: 'center', gap: 4 }}
         >
+          <Feather name="refresh-cw" size={Math.min(28, size / 2.5)} color={C.muted} />
+          <Text style={S.small}>Retry image</Text>
+        </Pressable>
+      ) : (
+        <View pointerEvents="none">
           <Feather
-            name={item.kind === 'title' ? 'type' : urls.length ? 'refresh-cw' : 'image'}
+            name={item.kind === 'title' ? 'type' : 'image'}
             size={Math.min(28, size / 2.5)}
             color={C.muted}
           />
-          {urls.length > 0 && <Text style={S.small}>Retry image</Text>}
-        </Pressable>
+        </View>
       )}
       {uri && !loaded && (
         <SkeletonGroup

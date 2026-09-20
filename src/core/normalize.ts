@@ -1,3 +1,4 @@
+import { bundleMetadata } from './bundleMetadata';
 import type {
   ActStat,
   Bundle,
@@ -140,7 +141,9 @@ export function normalizeStore(
           prices: money({ [text(bi.CurrencyID)]: bi.DiscountedPrice ?? bi.BasePrice }),
         });
       }
+    const checkout = bundleMetadata(b, catalog, CURRENCIES.VP, ITEM_TYPES);
     bundles.push({
+      ...(checkout ? { checkout } : {}),
       id,
       catalogId: text(b.DataAssetID) || undefined,
       name: meta?.name ?? 'Featured collection',

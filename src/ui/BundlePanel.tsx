@@ -1,3 +1,4 @@
+import { PurchaseControls } from './PurchaseControls';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
 import React, { useMemo, useEffect, useState } from 'react';
@@ -101,6 +102,19 @@ export function BundlePanel({
               </Text>
               {detail.active && <MoneyText prices={detail.active.prices} />}
             </View>
+            {detail.active && (
+              <PurchaseControls
+                model={model}
+                bundleId={detail.active.id}
+                item={{
+                  id: detail.active.id,
+                  canonicalId: detail.active.catalogId ?? detail.active.id,
+                  name: detail.name,
+                  kind: 'unknown',
+                  image: detail.image,
+                }}
+              />
+            )}
             {detail.source === 'catalog-theme' && (
               <Text style={S.small}>
                 Matched by catalog theme. Original bundle contents may differ.

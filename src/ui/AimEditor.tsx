@@ -362,6 +362,7 @@ export function CrosshairFields({
             label="Sniper dot size"
             value={profile.sniper.centerDotSize}
             max={6}
+            step={0.01}
             onChange={(centerDotSize) =>
               onChange({
                 ...profile,

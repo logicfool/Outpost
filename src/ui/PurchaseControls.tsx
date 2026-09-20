@@ -14,7 +14,9 @@ function Receipt({ record }: { record: PurchaseRecord }) {
   const label =
     record.state === 'complete'
       ? record.ownershipVerified
-        ? 'Skin ownership confirmed'
+        ? record.bundle
+          ? 'Bundle items confirmed'
+          : 'Skin ownership confirmed'
         : 'Riot confirmed the order'
       : record.state === 'failed'
         ? 'Purchase rejected'
@@ -41,7 +43,15 @@ function Receipt({ record }: { record: PurchaseRecord }) {
     </View>
   );
 }
-export function PurchaseControls({ model, item }: { model: AppModel; item: CatalogItem }) {
+export function PurchaseControls({
+  model,
+  item,
+  bundleId,
+}: {
+  model: AppModel;
+  item: CatalogItem;
+  bundleId?: string;
+}) {
   const { C, S } = useTheme();
   const [quote, setQuote] = useState<PurchaseQuote>(),
     [record, setRecord] = useState<PurchaseRecord>();
@@ -49,7 +59,7 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
     [busy, setBusy] = useState(false),
     [error, setError] = useState<AppError>();
   const [now, setNow] = useState(Date.now());
-  const scope = `${model.active?.puuid}:${item.id}`,
+  const scope = `${model.active?.puuid}:${bundleId ?? item.id}:${bundleId ? 'bundle' : 'skin'}`,
     current = useRef(scope),
     mounted = useRef(true),
     running = useRef(false);
@@ -93,10 +103,18 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
   const daily =
     model.snapshot?.store.status === 'ready' &&
     model.snapshot.store.data.daily.some((o) => o.item.canonicalId === item.canonicalId);
-  if (!daily || item.kind !== 'skin' || !model.settings.allowPurchases) return null;
+  const bundle =
+    bundleId && model.snapshot?.store.status === 'ready'
+      ? model.snapshot.store.data.bundles.find((b) => b.id === bundleId)
+      : undefined;
+  if (
+    (bundleId ? !bundle : !daily || item.kind !== 'skin') ||
+    (!model.settings.allowPurchases && !model.active?.demo)
+  )
+    return null;
   const review = () =>
     run(async () => {
-      const next = await model.purchaseQuote(item.id);
+      const next = await model.purchaseQuote(bundleId ?? item.id, bundleId ? 'bundle' : 'skin');
       if (same()) {
         setQuote(next);
         setRecord(undefined);
@@ -133,10 +151,11 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
   const nextCheck = Math.max(record?.retryAt ?? 0, (record?.lastCheckedAt ?? 0) + 60000);
   return (
     <View style={S.card}>
-      <Text style={S.h3}>Buy with existing VP</Text>
+      <Text style={S.h3}>{bundleId ? 'Bundle checkout' : 'Buy with existing VP'}</Text>
       <Text style={S.small}>
-        Daily weapon offers only. This uses an unofficial Riot service; availability is not
-        guaranteed. No VP top-ups or automatic purchases.
+        {bundleId
+          ? 'Experimental bundle checkout. Items may be processed separately; an uncertain purchase is never resent.'
+          : 'Uses your VP balance. No automatic purchases.'}
       </Text>
       {error && (
         <View accessibilityRole="alert" style={{ gap: 4 }}>
@@ -147,7 +166,7 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
           </Text>
         </View>
       )}
-      {!model.settings.allowPurchases ? (
+      {!model.settings.allowPurchases && !model.active?.demo ? (
         <Text style={S.small}>Enable Phone purchases in Settings before reviewing a purchase.</Text>
       ) : !quote && (!record || (!pending(record) && record.state !== 'complete')) ? (
         <Button
@@ -157,7 +176,9 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
               ? 'Checking current offer…'
               : record
                 ? 'Review a new purchase'
-                : 'Review VP purchase'
+                : bundleId
+                  ? 'Review bundle purchase'
+                  : 'Review VP purchase'
           }
           disabled={busy}
           onPress={() => void review()}
@@ -167,6 +188,22 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
         <>
           <Text style={S.h2}>{quote.price.toLocaleString()} VP</Text>
           <Text style={S.body}>{quote.offer.item.name}</Text>
+          {quote.bundle && (
+            <View testID="bundle-quote-items" style={{ gap: 8, minWidth: 0 }}>
+              {quote.bundle.lines.map((line) => (
+                <View key={line.offerId} style={{ gap: 3 }}>
+                  <Text style={S.body}>
+                    {line.quantity > 1 ? `${line.quantity} × ` : ''}
+                    {line.name}
+                  </Text>
+                  <Text style={S.small}>{line.price.toLocaleString()} VP</Text>
+                </View>
+              ))}
+              {!!quote.bundle.ownedCount && (
+                <Text style={S.small}>{quote.bundle.ownedCount} already owned - not charged</Text>
+              )}
+            </View>
+          )}
           <Text style={S.small}>
             {model.active?.gameName} #{model.active?.tagLine} · Balance{' '}
             {quote.balanceBefore?.toLocaleString() ?? 'verified'} VP
@@ -188,8 +225,14 @@ export function PurchaseControls({ model, item }: { model: AppModel; item: Catal
             </Text>
           </View>
           <Button
-            title={busy ? 'Submitting once and verifying…' : `Confirm spend ${quote.price} VP`}
-            disabled={busy || !accepted || !seconds}
+            title={
+              model.active?.demo
+                ? 'Demo preview - no VP is spent'
+                : busy
+                  ? 'Submitting once and verifying…'
+                  : `Confirm spend ${quote.price} VP`
+            }
+            disabled={!!model.active?.demo || busy || !accepted || !seconds}
             onPress={() => void confirm()}
           />
           <Button

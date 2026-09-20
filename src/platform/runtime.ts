@@ -18,6 +18,12 @@ import { rememberBundles } from '../core/bundles';
 import { recordRequest } from '../core/diagnostics';
 import type { Session } from '../core/types';
 import {
+  quoteBundlePurchase,
+  bundleOwnedQuantity,
+  validateBundleLines,
+  type BundleOwnership,
+} from '../core/bundlePurchase';
+import {
   quotePurchase,
   validatePurchaseQuote,
   ownsOffer,
@@ -1357,6 +1363,92 @@ export class Runtime {
       if (this.identityFlights.get(id) === work) this.identityFlights.delete(id);
     }
   }
+  private async bundleOwnership(
+    client: RiotClient,
+    lines: import('../core/types').BundleLine[],
+    strict = true,
+  ) {
+    validateBundleLines(lines);
+    const types = [...new Set(lines.map((l) => l.itemTypeId))];
+    const results = await Promise.allSettled(types.map((type) => client.ownedQuantities(type))),
+      owned: BundleOwnership = new Map(),
+      errors: ReturnType<typeof safeError>[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') owned.set(types[index]!, result.value);
+      else errors.push(safeError(result.reason));
+    });
+    if (strict && errors.length) throw errors[0];
+    return { owned, errors };
+  }
+  private async reconcileBundle(
+    record: PurchaseRecord,
+    client: RiotClient,
+  ): Promise<PurchaseRecord> {
+    const bundle = record.bundle!;
+    const [inventory, wallet] = await Promise.all([
+      this.bundleOwnership(client, bundle.lines, false),
+      client
+        .wallet(true)
+        .then((data) => ({ data, error: undefined }))
+        .catch((reason) => ({ data: undefined, error: safeError(reason) })),
+    ]);
+    const delivered = bundle.lines
+      .filter(
+        (l) =>
+          inventory.owned.has(l.itemTypeId) &&
+          bundleOwnedQuantity(l, inventory.owned, this.catalog) >= l.quantity,
+      )
+      .map((l) => l.itemId);
+    const complete = delivered.length === bundle.lines.length,
+      errors = [...inventory.errors, ...(wallet.error ? [wallet.error] : [])];
+    const retryAt = Math.max(record.retryAt ?? 0, ...errors.map((e) => e.retryAt ?? 0));
+    const next: PurchaseRecord = {
+      ...record,
+      bundle: { ...bundle, delivered },
+      lastCheckedAt: this.now(),
+      state: complete ? 'complete' : 'unknown',
+      ownershipVerified: complete,
+      ...(retryAt > this.now() ? { retryAt } : {}),
+      ...(wallet.data
+        ? { balanceAfter: wallet.data.find((m) => m.currencyId === CURRENCIES.VP)?.amount }
+        : {}),
+      errorCode: complete ? undefined : (errors[0]?.code ?? record.errorCode),
+      message: complete
+        ? 'All bundle items are owned. Check Riot for billing details.'
+        : `${delivered.length} / ${bundle.lines.length} items confirmed. Check again later; this purchase will not be resent.`,
+    };
+    try {
+      const cached = await this.repository.snapshot(record.accountId);
+      if (cached) {
+        const additions = bundle.lines
+          .filter((l) => delivered.includes(l.itemId))
+          .map((l) => catalogItem(this.catalog, l.itemId));
+        await this.repository.saveSnapshot({
+          ...cached,
+          ...(wallet.data
+            ? { wallet: { status: 'ready' as const, data: wallet.data, fetchedAt: this.now() } }
+            : {}),
+          ...(additions.length && cached.collection.status === 'ready'
+            ? {
+                collection: {
+                  status: 'ready' as const,
+                  data: [
+                    ...new Map(
+                      [...cached.collection.data, ...additions].map((i) => [
+                        i.kind + ':' + (i.kind === 'skin' ? i.canonicalId : i.id),
+                        i,
+                      ]),
+                    ).values(),
+                  ],
+                  fetchedAt: this.now(),
+                },
+              }
+            : {}),
+        });
+      }
+    } catch {}
+    return next;
+  }
   private pendingFor(records: PurchaseRecord[], itemId: string, canonicalId?: string) {
     return records.filter((r) =>
       unresolvedForItem(
@@ -1366,7 +1458,11 @@ export class Runtime {
       ),
     );
   }
-  async purchaseQuote(id: string, itemId: string): Promise<PurchaseQuote> {
+  async purchaseQuote(
+    id: string,
+    itemId: string,
+    kind: 'skin' | 'bundle' = 'skin',
+  ): Promise<PurchaseQuote> {
     if (!(await this.repository.settings()).allowPurchases)
       throw new AppError('PURCHASE_DISABLED', 'Enable phone purchases in Settings first.');
     if (this.purchaseFlights.has(id) || this.purchaseCheckFlights.has(id))
@@ -1392,6 +1488,50 @@ export class Runtime {
         retryAt,
       );
     const client = await this.client(id);
+    if (kind === 'bundle') {
+      const [store, wallet] = await Promise.all([client.store(true), client.wallet(true)]);
+      const bundle = store.bundles.find((b) => b.id === itemId || b.catalogId === itemId);
+      if (!bundle?.checkout)
+        throw new AppError(
+          'BUNDLE_OFFERS',
+          'Riot did not return complete bundle purchase offers. Buy this bundle in VALORANT.',
+        );
+      const { owned } = await this.bundleOwnership(client, bundle.checkout.lines);
+      const quote = quoteBundlePurchase(
+        store,
+        wallet,
+        itemId,
+        id,
+        randomId(),
+        owned,
+        this.catalog,
+        this.now(),
+      );
+      const pending = [
+        ...new Map(
+          quote
+            .bundle!.lines.flatMap((l) => this.pendingFor(records, l.itemId, l.canonicalItemId))
+            .map((r) => [r.id, r]),
+        ).values(),
+      ];
+      for (const old of pending) {
+        if (old.phase === 'prepared')
+          await this.repository.savePurchaseRecord({
+            ...old,
+            state: 'not-submitted',
+            message: 'Preparation stopped before dispatch.',
+          });
+        else
+          throw new AppError(
+            'ORDER_PENDING',
+            'A purchase containing these items is unconfirmed. Check Purchase history first.',
+          );
+      }
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed while reviewing this bundle.');
+      this.quotes.set(id, quote);
+      return JSON.parse(JSON.stringify(quote)) as PurchaseQuote;
+    }
     const [store, wallet, owned] = await Promise.all([
       client.store(true),
       client.wallet(true),
@@ -1401,13 +1541,14 @@ export class Runtime {
     const pending = this.pendingFor(records, quote.offer.item.id, quote.offer.item.canonicalId);
     if (ownsOffer(owned, quote.offer)) {
       for (const old of pending)
-        await this.repository.savePurchaseRecord({
-          ...old,
-          state: 'complete',
-          ownershipVerified: true,
-          lastCheckedAt: this.now(),
-          message: 'Ownership is confirmed. Riot provides the original transaction details.',
-        });
+        if (!old.bundle)
+          await this.repository.savePurchaseRecord({
+            ...old,
+            state: 'complete',
+            ownershipVerified: true,
+            lastCheckedAt: this.now(),
+            message: 'Ownership is confirmed. Riot provides the original transaction details.',
+          });
       throw new AppError(
         'ALREADY_OWNED',
         'This skin is already owned. Its saved purchase record has been reconciled.',
@@ -1459,30 +1600,52 @@ export class Runtime {
       guard();
       if (!(await this.repository.settings()).allowPurchases)
         throw new AppError('PURCHASE_DISABLED', 'Phone purchases are disabled.');
-      if (
-        this.pendingFor(
-          await this.repository.purchaseRecords(id),
-          quote.offer.item.id,
-          quote.offer.item.canonicalId,
-        ).length
-      )
+      const records = await this.repository.purchaseRecords(id);
+      const pending = quote.bundle
+        ? quote.bundle.lines.flatMap((l) => this.pendingFor(records, l.itemId, l.canonicalItemId))
+        : this.pendingFor(records, quote.offer.item.id, quote.offer.item.canonicalId);
+      if (pending.length)
         throw new AppError(
           'ORDER_PENDING',
-          'Check the previous purchase of this skin before continuing.',
+          'Check the previous purchase containing this item before continuing.',
         );
       const client = await this.client(id);
       const [store, wallet, owned] = await Promise.all([
         client.store(true),
         client.wallet(true),
-        client.ownedIds(ITEM_TYPES.skin),
+        quote.bundle ? Promise.resolve(new Set<string>()) : client.ownedIds(ITEM_TYPES.skin),
       ]);
-      validatePurchaseQuote(
-        quote,
-        quotePurchase(store, wallet, quote.offer.item.id, id, quote.id, this.now()),
-        this.now(),
-      );
-      if (ownsOffer(owned, quote.offer))
-        throw new AppError('ALREADY_OWNED', 'This skin is already owned.');
+      if (quote.bundle) {
+        const bundle = store.bundles.find((b) => b.id === quote.bundle!.id);
+        if (!bundle?.checkout)
+          throw new AppError(
+            'BUNDLE_OFFERS',
+            'This bundle is no longer available for phone checkout.',
+          );
+        const inventory = await this.bundleOwnership(client, bundle.checkout.lines);
+        validatePurchaseQuote(
+          quote,
+          quoteBundlePurchase(
+            store,
+            wallet,
+            quote.bundle.id,
+            id,
+            quote.id,
+            inventory.owned,
+            this.catalog,
+            this.now(),
+          ),
+          this.now(),
+        );
+      } else {
+        validatePurchaseQuote(
+          quote,
+          quotePurchase(store, wallet, quote.offer.item.id, id, quote.id, this.now()),
+          this.now(),
+        );
+        if (ownsOffer(owned, quote.offer))
+          throw new AppError('ALREADY_OWNED', 'This skin is already owned.');
+      }
       guard();
       let record: PurchaseRecord = {
         id: quote.id,
@@ -1490,6 +1653,7 @@ export class Runtime {
         offerId: quote.offer.id,
         itemId: quote.offer.item.id,
         canonicalItemId: quote.offer.item.canonicalId,
+        ...(quote.bundle ? { bundle: { id: quote.bundle.id, lines: quote.bundle.lines } } : {}),
         name: quote.offer.item.name,
         price: quote.price,
         at: this.now(),
@@ -1501,7 +1665,12 @@ export class Runtime {
       await this.repository.savePurchaseRecord(record);
       let dispatched = false;
       try {
-        const result = await client.purchaseOffer(record.offerId, record.price, async () => {
+        const submit = quote.bundle
+          ? (before: () => Promise<void>) =>
+              client.purchaseBundle(quote.bundle!.lines, record.price, before)
+          : (before: () => Promise<void>) =>
+              client.purchaseOffer(record.offerId, record.price, before);
+        const result = await submit(async () => {
           guard();
           if (!(await this.repository.settings()).allowPurchases)
             throw new AppError(
@@ -1520,12 +1689,16 @@ export class Runtime {
           message:
             result.state === 'failed'
               ? 'Riot rejected the purchase. Review the saved code before trying a new quote.'
-              : 'Request accepted; checking whether the skin was delivered.',
+              : record.bundle
+                ? 'Request acknowledged; checking each bundle item.'
+                : 'Request accepted; checking whether the skin was delivered.',
         };
       } catch (reason) {
         const error = safeError(reason);
         const rejected =
-          dispatched && [400, 401, 403, 404, 405, 410, 422, 429].includes(error.status ?? 0);
+          dispatched &&
+          !quote.bundle &&
+          [400, 401, 403, 404, 405, 410, 422, 429].includes(error.status ?? 0);
         record = {
           ...record,
           state: !dispatched ? 'not-submitted' : rejected ? 'failed' : 'unknown',
@@ -1566,6 +1739,7 @@ export class Runtime {
     record: PurchaseRecord,
     client: RiotClient,
   ): Promise<PurchaseRecord> {
+    if (record.bundle) return this.reconcileBundle(record, client);
     const [owned, wallet] = await Promise.allSettled([
       client.ownedIds(ITEM_TYPES.skin),
       client.wallet(true),

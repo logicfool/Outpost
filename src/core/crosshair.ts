@@ -165,7 +165,7 @@ export function validateCrosshair(value: unknown): Crosshair {
     aDS: layer(v.aDS),
     sniper: {
       color: colorHex(s.color),
-      centerDotSize: number(s.centerDotSize, 0, 6, true),
+      centerDotSize: number(s.centerDotSize, 0, 6),
       centerDotOpacity: number(s.centerDotOpacity, 0, 1),
       bDisplayCenterDot: bool(s.bDisplayCenterDot),
     },

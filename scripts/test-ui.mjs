@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.4.1');
+const out = path.join(root, 'docs', process.env.OUTPOST_VALIDATION_DIR ?? 'validation-0.9.5');
 const staticRoot = path.join(root, 'dist-web');
 const types = {
   '.html': 'text/html',
@@ -679,7 +679,7 @@ try {
       .first()
       .click();
     await page.getByText('Included items', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'View RGX 11z Pro Blade', exact: true }).click();
+    await page.getByRole('button', { name: 'View Reaver Vandal', exact: true }).click();
     await page.getByRole('button', { name: 'Close item details', exact: true }).waitFor();
     await click('Close item details');
     await shot('bundle-contents');
