@@ -23,6 +23,7 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
     wanted = useRef<string[]>([]),
     blocked = useRef(0);
   const loadedAt = useRef<Record<string, number>>({});
+  const cacheScope = useRef<string | undefined>(undefined);
   const generation = useRef(0),
     running = useRef(false),
     timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -86,12 +87,15 @@ export function useMatchPreviews(model: AppModel, subject?: string) {
   };
   useEffect(() => {
     generation.current++;
-    cache.current = {};
-    loadedAt.current = {};
-    wanted.current = [];
-    blocked.current = 0;
     running.current = false;
-    setView({ scope, details: {} });
+    if (cacheScope.current !== scope) {
+      cacheScope.current = scope;
+      cache.current = {};
+      loadedAt.current = {};
+      wanted.current = [];
+      blocked.current = 0;
+      setView({ scope, details: {} });
+    }
     return () => {
       generation.current++;
       clearTimeout(timer.current);

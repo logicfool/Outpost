@@ -116,10 +116,13 @@ test('the real Profile memo comparator responds to chat-only score updates', () 
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     }).outputText,
     m = { exports: {} };
-  vm.runInThisContext('(function(module){' + js + '})')(m);
+  vm.runInThisContext('(function(module,sameScreenModel){' + js + '})')(
+    m,
+    require('../.test-build/screenInputs.js').sameScreenModel,
+  );
   const shared = { status: 'ready', friends: [], selfPresence: presence() },
     model = { chat: shared },
-    props = { tab: 'matches', model };
+    props = { tab: 'matches', visible: true, model };
   assert.equal(m.exports(props, props), true);
   assert.equal(
     m.exports(props, {

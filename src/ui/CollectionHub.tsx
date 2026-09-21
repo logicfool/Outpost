@@ -1,9 +1,10 @@
+import { catalogueBrowse, ownedBrowse, EMPTY_BROWSE } from '../core/catalogBrowse';
 import type { CollectionView } from '../core/browseMemory';
 import { useBrowseScroll } from '../state/useBrowseScroll';
 import { AimCollectionRows } from './AimCollectionRows';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
-import React, { memo, useDeferredValue, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -89,16 +90,16 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
     art = card ? hydrateItem(model.catalog, card) : undefined;
   const owned =
     model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : undefined;
-  const count = (kind: ItemKind) =>
-    owned
-      ? String(
-          new Set(
-            owned
-              .filter((i) => i.kind === kind)
-              .map((i) => (i.kind === 'skin' ? i.canonicalId : i.id)),
-          ).size,
-        )
-      : undefined;
+  const counts = useMemo(() => {
+    const values = new Map<ItemKind, Set<string>>();
+    for (const item of owned ?? []) {
+      const ids = values.get(item.kind) ?? new Set();
+      ids.add(item.kind === 'skin' ? item.canonicalId : item.id);
+      values.set(item.kind, ids);
+    }
+    return values;
+  }, [owned]);
+  const count = (kind: ItemKind) => (owned ? String(counts.get(kind)?.size ?? 0) : undefined);
   const group = { backgroundColor: C.surface, borderRadius: 20, overflow: 'hidden' as const };
   return (
     <ScrollView
@@ -322,44 +323,49 @@ export function CollectionBrowser({
     scroll.reset();
   };
   const search = useDeferredValue(query.trim().toLowerCase());
-  const owned = model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : [];
-  const all = useMemo(
-    () => [
-      ...new Map(
-        Object.values(model.catalog.items).map((i) => [
-          i.kind === 'chroma' ? i.id : `${i.kind}:${i.canonicalId}`,
-          i.kind === 'chroma' ? i : { ...i, id: i.canonicalId },
-        ]),
-      ).values(),
-    ],
-    [model.catalog],
-  );
-  const weapons = useMemo(
+  const owned =
+    model.snapshot?.collection.status === 'ready' ? model.snapshot.collection.data : EMPTY_BROWSE;
+  const source = useMemo(
     () =>
-      [...new Set(all.filter((i) => i.kind === 'skin' && i.weapon).map((i) => i.weapon!))].sort(),
-    [all],
+      scope === 'owned' ? ownedBrowse(owned, model.catalog) : catalogueBrowse(model.catalog).items,
+    [scope, owned, model.catalog.items],
   );
+  const wished = useMemo(() => new Set(model.wishlist), [model.wishlist]);
+  const weapons = useMemo(() => {
+    const meta = Object.values(model.catalog.weapons ?? {}).map((weapon) => weapon.name);
+    return meta.length
+      ? meta.sort()
+      : [
+          ...new Set(
+            source
+              .filter((item) => item.kind === 'skin' && item.weapon)
+              .map((item) => item.weapon!),
+          ),
+        ].sort();
+  }, [model.catalog.weapons, source]);
   const items = useMemo(
     () =>
-      (scope === 'owned'
-        ? owned
-        : scope === 'wishlist'
-          ? all.filter(
-              (i) =>
-                model.wishlist.includes(i.canonicalId) &&
-                (kind === 'chroma' || i.kind !== 'chroma'),
-            )
-          : all
-      )
-        .map((i) => hydrateItem(model.catalog, i))
-        .filter(
-          (i) =>
-            (kind === 'all' ? i.kind !== 'chroma' && i.kind !== 'currency' : i.kind === kind) &&
-            (weapon === 'all' || i.weapon === weapon) &&
-            i.name.toLowerCase().includes(search),
-        )
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [scope, owned, all, model.catalog, kind, weapon, search, model.wishlist],
+      source.filter(
+        (item) =>
+          (scope !== 'wishlist' ||
+            (wished.has(item.canonicalId) && (kind === 'chroma' || item.kind !== 'chroma'))) &&
+          (kind === 'all'
+            ? item.kind !== 'chroma' && item.kind !== 'currency'
+            : item.kind === kind) &&
+          (weapon === 'all' || item.weapon === weapon) &&
+          item.name.toLowerCase().includes(search),
+      ),
+    [source, scope, wished, kind, weapon, search],
+  );
+  const openItem = useCallback(
+    (item: CatalogItem) => onNavigate({ type: 'item', item }),
+    [onNavigate],
+  );
+  const onWish = useCallback(
+    (id: string) => {
+      void model.toggleWish(id);
+    },
+    [model.toggleWish],
   );
   const title = CATEGORIES.find((c) => c.kind === kind)?.title ?? 'Collection';
   const waiting = scope === 'owned' && model.snapshot?.collection.status !== 'ready';
@@ -438,9 +444,9 @@ export function CollectionBrowser({
         renderItem={({ item }) => (
           <CollectionTile
             item={item}
-            wished={model.wishlist.includes(item.canonicalId)}
-            onItem={(value) => onNavigate({ type: 'item', item: value })}
-            onWish={(id) => void model.toggleWish(id)}
+            wished={wished.has(item.canonicalId)}
+            onItem={openItem}
+            onWish={onWish}
           />
         )}
         ListEmptyComponent={

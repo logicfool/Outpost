@@ -82,11 +82,11 @@ async function harness(t, options = {}) {
     history: async () => {
       counts.history++;
       if (options.historyError) throw new AppError('LOCAL_DATA', 'History unavailable');
-      return [];
+      return options.history ? options.history() : [];
     },
     catalog: async () => {
       if (options.catalogError) throw new AppError('LOCAL_DATA', 'Catalog unavailable');
-      return null;
+      return options.catalog ? options.catalog() : null;
     },
     clearCache: async () => {},
     notificationStamp: async (key) => {
@@ -100,7 +100,12 @@ async function harness(t, options = {}) {
   const runtime = {
     repository,
     catalog: makeDemo().catalog,
-    savedAccount: async (id) => accounts.find((a) => a.puuid === id),
+    loadCatalog: async () => {
+      const saved = await repository.catalog();
+      return saved ?? runtime.catalog;
+    },
+    savedAccount: async (id) =>
+      options.savedAccount ? options.savedAccount(id) : accounts.find((a) => a.puuid === id),
     sync: async (id, reason) => {
       counts.sync.push({ id, reason });
       return options.sync ? options.sync(id, reason) : goodSnapshot(id);
@@ -193,6 +198,12 @@ async function harness(t, options = {}) {
         },
       };
     if (name.endsWith('/notifications')) return notifications;
+    if (name === '../core/progressiveCache') {
+      const { restoreProgressively } = require('../.test-build/progressiveCache.js');
+      return {
+        restoreProgressively: (options) => restoreProgressively({ ...options, yield: tick }),
+      };
+    }
     if (name.startsWith('../core/'))
       return require(path.join(__dirname, '../.test-build', name.slice(8) + '.js'));
     throw Error('Unexpected useApp dependency: ' + name);
@@ -505,4 +516,37 @@ test('app opening restores chat even when every notification preference is disab
   assert.equal(h.model().settings.chatAlerts, false);
   assert.ok(h.counts.chatResume >= 1);
   assert.equal(h.counts.permission, 0);
+});
+test('cached paint is not blocked by slow optional session, catalogue or history reads', async (t) => {
+  const secondary = deferred(),
+    network = deferred(),
+    cached = goodSnapshot();
+  const h = await harness(t, {
+    cached: async () => cached,
+    savedAccount: () => secondary.promise,
+    catalog: () => secondary.promise,
+    history: () => secondary.promise,
+    sync: () => network.promise,
+  });
+  assert.equal(h.model().snapshot?.store.status, 'ready');
+  assert.equal(h.model().snapshot?.wallet.status, 'ready');
+  assert.equal(h.counts.sync.length, 0);
+  secondary.resolve(null);
+  network.resolve(goodSnapshot(ID, Date.now() + 100));
+  await h.settle();
+  assert.equal(h.counts.sync.length, 1);
+});
+test('cached paint keeps account scope when an optional old-account read completes late', async (t) => {
+  const old = deferred(),
+    h = await harness(t, {
+      cached: async (id) => goodSnapshot(id),
+      savedAccount: (id) => (id === ID ? old.promise : session(id).account),
+    });
+  assert.equal(h.model().snapshot.accountId, ID);
+  await h.invoke((m) => m.switchAccount(h.accounts[1]));
+  assert.equal(h.model().snapshot.accountId, OTHER);
+  old.resolve(session(ID).account);
+  await h.settle();
+  assert.equal(h.model().active.puuid, OTHER);
+  assert.equal(h.model().snapshot.accountId, OTHER);
 });

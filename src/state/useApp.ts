@@ -1,3 +1,4 @@
+import { restoreProgressively } from '../core/progressiveCache';
 import { yieldToUI } from '../core/cooperative';
 import { livePollInterval } from '../core/refreshPolicy';
 import { validateBackupData, type BackupData } from '../core/backup';
@@ -124,10 +125,12 @@ export function useApp() {
     let mounted = true;
     (async () => {
       try {
-        const runtime = await getRuntime(),
-          list = await runtime.repository.accounts(),
-          prefs = await runtime.repository.settings(),
-          selected = await runtime.repository.selectedAccount();
+        const runtime = await getRuntime();
+        const [list, prefs, selected] = await Promise.all([
+          runtime.repository.accounts(),
+          runtime.repository.settings(),
+          runtime.repository.selectedAccount(),
+        ]);
         if (mounted) {
           setAccounts(list);
           setSettings(prefs);
@@ -345,44 +348,53 @@ export function useApp() {
     (async () => {
       try {
         const runtime = await getRuntime();
-        const savedAccount = await runtime.savedAccount(active.puuid).catch(() => null);
-        if (savedAccount && epoch.current === stamp) {
-          activeRef.current = savedAccount;
-          setActive(savedAccount);
-          setAccounts((list) =>
-            list.map((a) => (a.puuid === savedAccount.puuid ? savedAccount : a)),
-          );
-        }
-        const [cached, wishes, entries, savedCatalog] = await Promise.allSettled([
-          runtime.repository.snapshot(active.puuid),
-          runtime.repository.wishlist(active.puuid),
-          runtime.repository.history(active.puuid),
-          runtime.repository.catalog(),
-        ]);
-        if (epoch.current !== stamp || activeRef.current?.puuid !== active.puuid) return;
-        if (cached.status === 'fulfilled' && cached.value) {
-          const restored = cached.value;
-          setSnapshot((previous) =>
-            previous?.accountId === active.puuid ? mergeSnapshot(restored, previous) : restored,
-          );
-        }
-        if (wishes.status === 'fulfilled') setWishlist(wishes.value);
-        if (entries.status === 'fulfilled') setHistory(entries.value);
-        if (savedCatalog.status === 'fulfilled' && savedCatalog.value)
-          setCatalog(savedCatalog.value);
-        if (
-          [cached, wishes, entries, savedCatalog].some((result) => result.status === 'rejected')
-        ) {
-          recordRequest({
-            at: Date.now(),
-            service: 'Account cache',
-            method: 'READ',
-            code: 'PARTIAL_CACHE_RECOVERY',
-            durationMs: 0,
-          });
-        }
-
-        await refreshAutomatic();
+        const selected = () => epoch.current === stamp && activeRef.current?.puuid === active.puuid;
+        await restoreProgressively({
+          snapshot: () => runtime.repository.snapshot(active.puuid),
+          current: selected,
+          publish: (restored) => {
+            if (restored)
+              setSnapshot((previous) =>
+                previous?.accountId === active.puuid ? mergeSnapshot(restored, previous) : restored,
+              );
+          },
+          resume: async () => {
+            // Show cached screens first, but keep credential metadata reconciliation
+            // before the refresh so an older vault read cannot overwrite a renewal.
+            const savedAccount = await runtime.savedAccount(active.puuid).catch(() => null);
+            if (!selected()) return;
+            if (savedAccount) {
+              activeRef.current = savedAccount;
+              setActive(savedAccount);
+              setAccounts((list) =>
+                list.map((a) => (a.puuid === savedAccount.puuid ? savedAccount : a)),
+              );
+            }
+            await refreshAutomatic();
+          },
+          failed: () =>
+            recordRequest({
+              at: Date.now(),
+              service: 'Account cache',
+              method: 'READ',
+              code: 'PARTIAL_CACHE_RECOVERY',
+              durationMs: 0,
+            }),
+          optional: [
+            async () => {
+              const wishes = await runtime.repository.wishlist(active.puuid);
+              if (selected()) setWishlist(wishes);
+            },
+            async () => {
+              const entries = await runtime.repository.history(active.puuid);
+              if (selected()) setHistory(entries);
+            },
+            async () => {
+              const savedCatalog = await runtime.loadCatalog(false, false);
+              if (selected()) setCatalog(savedCatalog);
+            },
+          ],
+        });
       } catch (error) {
         if (epoch.current === stamp) setMessage(safeError(error).message);
       }

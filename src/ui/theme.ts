@@ -1,4 +1,5 @@
 import React, { createContext, createElement, useContext, useMemo, type ReactNode } from 'react';
+import { sharedViewStyles } from '../core/viewCache';
 import { StyleSheet, useColorScheme } from 'react-native';
 import {
   PALETTES,
@@ -113,5 +114,5 @@ export function useTheme() {
 }
 export function useThemedStyles<T>(factory: (palette: Palette) => T): T {
   const { C } = useTheme();
-  return useMemo(() => factory(C), [C, factory]);
+  return useMemo(() => sharedViewStyles(factory, C), [C, factory]);
 }

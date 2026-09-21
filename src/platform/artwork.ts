@@ -1,3 +1,4 @@
+import { clearArtworkMemory } from '../core/artworkMemory';
 import { Image } from 'expo-image';
 import { safeImage } from '../core/validation';
 const recent = new Map<string, number>();
@@ -29,6 +30,7 @@ export function warmArtwork(urls: string[]): () => void {
   };
 }
 export async function clearArtworkCache() {
+  clearArtworkMemory();
   recent.clear();
   await Image.clearMemoryCache();
   await Image.clearDiskCache();

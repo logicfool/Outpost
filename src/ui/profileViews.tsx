@@ -97,21 +97,21 @@ export function PlayerCover({
           </Pressable>
         )}
       </View>
-      <View style={{ padding: 16, gap: 8 }}>
+      <View style={{ padding: 12, gap: 7 }}>
         <View style={S.row}>
-          <PlayerAvatar card={card} catalog={catalog} size={42} />
+          <PlayerAvatar card={card} catalog={catalog} size={36} />
           <View style={{ flex: 1 }}>
-            <Text style={[S.h2, { fontSize: 23 }]} numberOfLines={2}>
+            <Text style={[S.h2, { fontSize: 20 }]} numberOfLines={2}>
               {ownId ? playerLabel(player, ownId) : player.hidden ? 'Hidden player' : player.name}
               {!player.hidden && !you && player.tag ? (
                 <Text style={{ color: C.muted, fontSize: 17 }}> #{player.tag}</Text>
               ) : null}
             </Text>
+            {title && !title.name.startsWith('Unresolved') && (
+              <Text style={[S.small, { color: C.gold }]}>{title.name}</Text>
+            )}
           </View>
         </View>
-        {title && !title.name.startsWith('Unresolved') && (
-          <Text style={[S.body, { color: C.gold }]}>{title.name}</Text>
-        )}
         <View style={[S.between, { flexWrap: 'wrap', gap: 4 }]}>
           <Text style={S.small}>
             {player.hideLevel

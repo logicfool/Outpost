@@ -73,6 +73,8 @@ for (const platform of ['android', 'ios'])
         if (n === 'react') return React;
         if (n === 'react/jsx-runtime') return require(n);
         if (n === 'react-native') return RN;
+        if (n.endsWith('/RetainedTabs')) return evaluate(compile('src/ui/RetainedTabs.tsx'), load);
+        if (n.endsWith('/screenInputs')) return require('../.test-build/screenInputs.js');
         if (n === 'react-native-safe-area-context')
           return {
             SafeAreaProvider: 'SafeAreaProvider',
@@ -152,7 +154,15 @@ for (const platform of ['android', 'ios'])
       t.after(async () => {
         await act(async () => renderer.unmount());
       });
-      const screen = () => renderer.root.findByType('RefreshScreen');
+      const screen = () => {
+        const tab = renderer.root
+          .findAllByType('Pressable')
+          .find((p) => p.props.testID?.startsWith('tab-') && p.props.accessibilityState?.selected)
+          ?.props.testID?.slice(4);
+        return renderer.root
+          .findByProps({ testID: 'tab-scene-' + tab })
+          .findByType('RefreshScreen');
+      };
       await act(async () => {
         screen().props.onRefresh();
         screen().props.onRefresh();

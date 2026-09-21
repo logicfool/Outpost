@@ -88,7 +88,9 @@ try {
       await page.getByText(/Detailed capture is on/).waitFor();
       await tab('Collection');
       await tab('Settings');
-      await click('Connection diagnostics');
+      await page
+        .getByRole('button', { name: 'Hide connection diagnostics', exact: true })
+        .waitFor();
       await page.getByText(/Detailed capture is on/).waitFor();
       await shot('diagnostic-capture');
     },

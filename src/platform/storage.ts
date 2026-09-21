@@ -1,3 +1,4 @@
+import { MemoizedRead } from '../core/memoizedRead';
 import { backupRepository } from './backupRepository';
 import {
   matchRepository,
@@ -93,6 +94,7 @@ async function create(): Promise<Repository> {
       }),
     );
   const matches = matchRepository(db, write);
+  const catalogMemory = new MemoizedRead<Catalog | null>();
   return {
     ...matches,
     ...backupRepository(db, write),
@@ -411,7 +413,9 @@ async function create(): Promise<Repository> {
       });
     },
     catalog() {
-      return readJson<Catalog>('SELECT data FROM settings WHERE key = ?', 'catalog');
+      return catalogMemory.read(() =>
+        write(() => readJson<Catalog>('SELECT data FROM settings WHERE key = ?', 'catalog')),
+      );
     },
     async saveCatalog(catalog) {
       await write(async () => {
@@ -420,6 +424,7 @@ async function create(): Promise<Repository> {
           'catalog',
           JSON.stringify(catalog),
         );
+        catalogMemory.replace(catalog);
       });
     },
     async notificationStamp(key) {
@@ -437,6 +442,7 @@ async function create(): Promise<Repository> {
     async clearCache() {
       await write(async () => {
         await db.execAsync("DELETE FROM snapshots; DELETE FROM settings WHERE key = 'catalog';");
+        catalogMemory.clear();
       });
     },
   };

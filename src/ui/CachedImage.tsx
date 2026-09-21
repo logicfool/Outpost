@@ -1,3 +1,4 @@
+import { wasArtworkReady, rememberArtwork, forgetArtwork } from '../core/artworkMemory';
 import React, { useContext, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Image as ExpoImage, type ImageProps } from 'expo-image';
@@ -25,7 +26,10 @@ export function Image({
         : undefined;
   const currentUri = useRef(uri);
   currentUri.current = uri;
-  const [loaded, setLoaded] = useState<string | undefined>();
+  const [loaded, setLoaded] = useState<string | undefined>(() =>
+    uri && wasArtworkReady(uri) ? uri : undefined,
+  );
+  const settledUri = useRef<string | undefined>(loaded);
   const [failed, setFailed] = useState<string | undefined>();
   const fit =
     resizeMode === 'contain'
@@ -37,7 +41,11 @@ export function Image({
           : 'cover';
   const displayed = () => {
     if (uri) {
-      setLoaded(uri);
+      rememberArtwork(uri);
+      if (settledUri.current !== uri) {
+        settledUri.current = uri;
+        setLoaded(uri);
+      }
       group?.settle(uri);
     }
   };
@@ -54,7 +62,7 @@ export function Image({
       cachePolicy="memory-disk"
       contentFit={contentFit ?? fit}
       recyclingKey={uri}
-      transition={group ? 0 : (transition ?? 120)}
+      transition={group || (uri && wasArtworkReady(uri)) ? 0 : (transition ?? 100)}
       allowDownscaling
       {...props}
       style={[uri && loaded !== uri ? { backgroundColor: C.raised } : undefined, style]}
@@ -71,6 +79,7 @@ export function Image({
       onError={(event) => {
         if (currentUri.current !== uri) return;
         if (uri) {
+          forgetArtwork(uri);
           setFailed(uri);
           group?.settle(uri, true);
         }

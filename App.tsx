@@ -1,9 +1,10 @@
+import { RetainedTabs } from './src/ui/RetainedTabs';
+import { sameScreenModel } from './src/core/screenInputs';
 import { NavSurface } from './src/ui/NavSurface';
 import { SkeletonProvider } from './src/ui/Skeleton';
 import { AccountsModal, type AccountRoute } from './src/ui/AccountsModal';
 import { NavInsetContext } from './src/ui/NavInsets';
 import { listenNotificationTaps } from './src/platform/notifications';
-import { LivePollingContext } from './src/state/useLivePolling';
 import { ScreenTransition } from './src/ui/ScreenTransition';
 import { FriendsScreen } from './src/ui/FriendsScreen';
 import { PlayerAvatar } from './src/ui/PlayerAvatar';
@@ -249,18 +250,24 @@ function AppContent({ model }: { model: AppModel }) {
               </Pressable>
             )}
             <NavInsetContext.Provider value={76 + insets.bottom}>
-              <LivePollingContext.Provider value={!explorer && !item && !accountRoute}>
-                <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
-                  <ScreenSlot
-                    key={`${model.active.puuid}:${tab}`}
-                    tab={tab}
-                    model={model}
-                    onItem={onItem}
-                    onLink={onLink}
-                    onNavigate={onNavigate}
-                  />
-                </ScreenTransition>
-              </LivePollingContext.Provider>
+              <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
+                <RetainedTabs
+                  key={model.active.puuid}
+                  active={tab}
+                  interactive={!explorer && !item && !accountRoute}
+                  render={(scene, visible) => (
+                    <ScreenSlot
+                      key={scene}
+                      visible={visible}
+                      tab={scene}
+                      model={model}
+                      onItem={onItem}
+                      onLink={onLink}
+                      onNavigate={onNavigate}
+                    />
+                  )}
+                />
+              </ScreenTransition>
             </NavInsetContext.Provider>
             <NavSurface
               testID="floating-bottom-nav"
@@ -274,6 +281,7 @@ function AppContent({ model }: { model: AppModel }) {
                     testID={`tab-${nav.id}`}
                     accessibilityRole="tab"
                     accessibilityLabel={nav.label}
+                    aria-selected={selected}
                     accessibilityState={{ selected }}
                     style={styles.navItem}
                     onPress={() => setTab(nav.id)}
@@ -284,7 +292,11 @@ function AppContent({ model }: { model: AppModel }) {
                       numberOfLines={1}
                       adjustsFontSizeToFit
                       minimumFontScale={0.85}
-                      style={[styles.navLabel, selected && { color: C.ink, fontWeight: '700' }]}
+                      style={[
+                        styles.navLabel,
+                        narrow && { fontSize: 9 },
+                        selected && { color: C.ink, fontWeight: '700' },
+                      ]}
                     >
                       {nav.id === 'progress' ? 'Pass' : nav.label}
                     </Text>
@@ -329,12 +341,14 @@ function AppContent({ model }: { model: AppModel }) {
 const ScreenSlot = memo(
   function ScreenSlot({
     tab,
+    visible,
     model,
     onItem,
     onLink,
     onNavigate,
   }: {
     tab: ScreenName;
+    visible: boolean;
     model: AppModel;
     onItem(item: CatalogItem): void;
     onLink(expectedId?: string): void;
@@ -359,28 +373,9 @@ const ScreenSlot = memo(
       a.onNavigate !== b.onNavigate
     )
       return false;
-    const keys = [
-      'active',
-      'snapshot',
-      'catalog',
-      'observedIdentity',
-      'accounts',
-      'wishlist',
-      'history',
-      'settings',
-      'busy',
-      'aimState',
-      'aimPresets',
-      'aimLoading',
-    ] as const;
-    if (keys.some((k) => a.model[k] !== b.model[k])) return false;
-    return (
-      !['friends', 'account', 'matches'].includes(a.tab) ||
-      (a.model.chat === b.model.chat &&
-        a.model.savedConversations === b.model.savedConversations &&
-        a.model.syncingSavedHistory === b.model.syncingSavedHistory &&
-        a.model.chatHistorySync === b.model.chatHistorySync)
-    );
+    if (!a.visible && !b.visible) return true;
+    if (a.visible !== b.visible) return false;
+    return sameScreenModel(a.tab, a.model, b.model);
   },
 );
 

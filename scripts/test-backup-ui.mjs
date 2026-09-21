@@ -205,6 +205,7 @@ try {
   });
   await check('new video previews start audible and mute preference survives restart', async () => {
     await tab('Store');
+    await tab('Today');
     await click('View Reaver Vandal');
     await page.locator('video').scrollIntoViewIfNeeded();
     await page.waitForFunction(

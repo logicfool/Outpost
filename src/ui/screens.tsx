@@ -149,11 +149,19 @@ function Heading({ eyebrow, title }: { eyebrow: string; title: React.ReactNode }
   const navInset = useNavInset();
 
   return (
-    <View style={{ gap: 4 }}>
-      <Text style={S.eyebrow}>{eyebrow}</Text>
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        gap: 8,
+        flexWrap: 'wrap',
+      }}
+    >
       <Text style={S.title} numberOfLines={1}>
         {title}
       </Text>
+      <Text style={[S.eyebrow, { fontSize: 9, letterSpacing: 1 }]}>{eyebrow}</Text>
     </View>
   );
 }
@@ -199,16 +207,21 @@ function Wallet({ model }: { model: AppModel }) {
   return (
     <Resource section={model.snapshot?.wallet} title="Balances" loading={model.busy}>
       {(balances) => (
-        <View style={styles.wallet}>
+        <View style={styles.wallet} testID="compact-wallet">
           {walletOverview(balances).map((m) => (
-            <View key={m.currencyId} style={[styles.currency, { flexDirection: 'column', gap: 4 }]}>
-              <View style={S.row}>
-                <CurrencyIcon symbol={m.symbol} size={16} />
-                <Text style={S.small}>{m.symbol}</Text>
+            <View key={m.currencyId} style={styles.currency}>
+              <CurrencyIcon symbol={m.symbol} size={16} />
+              <View style={{ flexShrink: 1, minWidth: 0, gap: 1 }}>
+                <Text style={[S.small, { fontSize: 10, lineHeight: 14 }]}>{m.symbol}</Text>
+                <Text
+                  style={styles.balance}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  {m.amount === null ? '-' : m.amount.toLocaleString()}
+                </Text>
               </View>
-              <Text style={styles.balance}>
-                {m.amount === null ? '-' : m.amount.toLocaleString()}
-              </Text>
             </View>
           ))}
         </View>
@@ -332,7 +345,13 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
         .sort((a, b) => a[1].name.localeCompare(b[1].name)),
     [model.catalog.bundles, bundleQuery],
   );
-  useEffect(() => setBundleLimit(12), [bundleQuery]);
+  const lastBundleQuery = useRef(bundleQuery);
+  useEffect(() => {
+    if (lastBundleQuery.current !== bundleQuery) {
+      lastBundleQuery.current = bundleQuery;
+      setBundleLimit(12);
+    }
+  }, [bundleQuery]);
   const [tab, setTab] = useState<'daily' | 'night' | 'bundles' | 'accessories' | 'history'>(
     'daily',
   );
@@ -2172,7 +2191,16 @@ const makeStyles = (C: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    wallet: { flexDirection: 'row', gap: 8 },
+    wallet: {
+      flexDirection: 'row',
+      gap: 2,
+      backgroundColor: C.surface,
+      borderRadius: 16,
+      paddingHorizontal: 6,
+      paddingVertical: 3,
+      borderWidth: 0.5,
+      borderColor: C.border,
+    },
     currency: {
       flex: 1,
       flexDirection: 'row',
@@ -2180,10 +2208,10 @@ const makeStyles = (C: Palette) =>
       gap: 8,
       backgroundColor: C.surface,
       borderRadius: 14,
-      borderWidth: 1,
+      borderWidth: 0,
       borderColor: C.border,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
     },
     balance: { color: C.ink, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
     bundle: {

@@ -359,7 +359,11 @@ try {
     await tab('Accessories');
     await page.waitForFunction(
       () => {
-        const offers = [...document.querySelectorAll('button[aria-label^="View "]')];
+        const offers = [
+          ...document.querySelectorAll(
+            '[data-testid="tab-scene-store"] button[aria-label^="View "]',
+          ),
+        ];
         return (
           offers.length === 4 &&
           offers.every((offer) =>

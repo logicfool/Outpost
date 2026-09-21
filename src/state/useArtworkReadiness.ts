@@ -1,3 +1,4 @@
+import { wasArtworkReady } from '../core/artworkMemory';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export const ARTWORK_WAIT_MS = 8000;
@@ -18,13 +19,19 @@ export function useArtworkReadiness(
   const active = useRef(signature),
     mounted = useRef(true);
   active.current = signature;
+  const initialSettled = () =>
+    Object.fromEntries(
+      expected.filter((url) => wasArtworkReady(url)).map((url) => [url, 'ready' as const]),
+    );
   const [state, setState] = useState<{
     signature: string;
     settled: Record<string, 'ready' | 'failed'>;
     expired: boolean;
-  }>({ signature, settled: {}, expired: false });
+  }>(() => ({ signature, settled: initialSettled(), expired: false }));
   const current =
-    state.signature === signature ? state : { signature, settled: {}, expired: false };
+    state.signature === signature
+      ? state
+      : { signature, settled: initialSettled(), expired: false };
   const ready = current.expired || expected.every((url) => !!current.settled[url]);
   const failed = useMemo(
     () =>
