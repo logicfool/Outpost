@@ -63,49 +63,53 @@ try {
   await button('Try the demo').click();
 
   await tab('Battle Pass').click();
-  await check('battle pass shows daily checkpoints with a reset time', async () => {
-    await page.getByText('DAILY CHECKPOINTS', { exact: true }).waitFor();
-    await page.getByText('1 of 2 complete', { exact: true }).waitFor();
-    assert.equal(
-      await page.getByText(/Mission \d$/).count(),
-      0,
-      'Missions must not be numbered placeholders',
-    );
-    await shot('missions-daily');
+  await check('missions sit above other contracts on the battle pass screen', async () => {
+    const summary = page.getByTestId('missions-summary');
+    const other = page.getByText('Other contracts', { exact: true });
+    await summary.waitFor();
+    await other.waitFor();
+    assert.ok((await summary.boundingBox()).y < (await other.boundingBox()).y);
   });
-  await check('daily missions show their objective directive and real progress', async () => {
-    await page.getByText('Deal Damage', { exact: true }).waitFor();
-    await page.getByText('640 / 1,000', { exact: true }).waitFor();
-    await page.getByText('64%', { exact: true }).waitFor();
-  });
-  await check('weekly missions list progress and completion separately', async () => {
-    await tab('Weekly 3').click();
-    await page.getByText('Get Headshots', { exact: true }).waitFor();
-    await page.getByText('31 / 50', { exact: true }).waitFor();
-    assert.ok(
-      (await page.getByText('DONE', { exact: true }).count()) >= 1,
-      'A completed weekly is marked done',
-    );
-    await shot('missions-weekly');
-  });
-  await check('queued weeklies are listed as unlocked but not yet active', async () => {
-    await tab('Queued 1').click();
+  await check(
+    'the weekly summary counts what is left, what is done and the next unlock',
+    async () => {
+      await page.getByText('WEEKLY MISSIONS', { exact: true }).waitFor();
+      await page.getByText('2 to do', { exact: true }).waitFor();
+      await page.getByText(/4 done this act · 2 more unlock/).waitFor();
+      await page.getByText(/Daily checkpoints are not shared by Riot's API/).waitFor();
+      assert.equal(await page.getByText('DAILY CHECKPOINTS', { exact: true }).count(), 0);
+      assert.equal(await page.getByText(/Mission \d$/).count(), 0);
+      await shot('missions-summary');
+    },
+  );
+  await check('active weeklies show their objective directive and real progress', async () => {
     await page.getByText('Pick Up Ultimate Orbs', { exact: true }).waitFor();
-    await page.getByText(/Riot has not placed them in your active list yet/).waitFor();
-    await shot('missions-queued');
+    await page.getByText('Pick Up 20 Ultimate Orbs', { exact: true }).waitFor();
+    await page.getByText('12 / 20', { exact: true }).waitFor();
+    await page.getByText('60%', { exact: true }).waitFor();
+    await shot('missions-active');
+  });
+  await check('finished weeklies are listed as done, not as queued', async () => {
+    await tab('Done 4').click();
+    for (const title of ['Get Headshots', 'Play Matches', 'Use Abilities', 'Purchase Shields'])
+      await page.getByText(title, { exact: true }).waitFor();
+    assert.equal(await page.getByText('DONE', { exact: true }).count(), 4);
+    await page.getByText(/no longer in\s+your active list are the ones you finished/).waitFor();
+    assert.equal(await page.getByText(/queued/i).count(), 0);
+    await shot('missions-done');
   });
   await check('future weeklies are previewed per scheduled unlock date', async () => {
     await tab('Upcoming 2').click();
-    await page.getByTestId('mission-week-Demo:2').waitFor();
-    await page.getByText('Get First Blood', { exact: true }).waitFor();
+    await page.getByTestId('mission-week-Demo:3').waitFor();
+    await page.getByText('Kill Players', { exact: true }).waitFor();
     assert.equal(
-      await page.getByText('Kill Players', { exact: true }).count(),
+      await page.getByText('Plant or Defuse Spikes', { exact: true }).count(),
       0,
       'A later week is not shown until selected',
     );
-    await page.getByTestId('mission-week-Demo:3').click();
-    await page.getByText('Kill Players', { exact: true }).waitFor();
-    await page.getByText(/not a guarantee that these missions will be delivered/).waitFor();
+    await page.getByTestId('mission-week-Demo:4').click();
+    await page.getByText('Plant or Defuse Spikes', { exact: true }).waitFor();
+    await page.getByText(/not a guarantee that these missions will be/).waitFor();
     await shot('missions-upcoming');
   });
 
@@ -218,7 +222,7 @@ try {
   await check('party and missions fit a 320 pixel screen without overflow', async () => {
     await page.setViewportSize({ width: 320, height: 800 });
     await tab('Battle Pass').click();
-    await page.getByText('DAILY CHECKPOINTS', { exact: true }).waitFor();
+    await page.getByText('WEEKLY MISSIONS', { exact: true }).waitFor();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -239,7 +243,7 @@ try {
     await tab('Settings').click();
     await tab('Light').click();
     await tab('Battle Pass').click();
-    await page.getByText('DAILY CHECKPOINTS', { exact: true }).waitFor();
+    await page.getByText('WEEKLY MISSIONS', { exact: true }).waitFor();
     await shot('missions-light');
     await tab('Profile').click();
     await page.getByTestId('open-party').click();

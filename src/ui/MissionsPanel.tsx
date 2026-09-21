@@ -17,7 +17,7 @@ import type { Mission, MissionDefinition, MissionWeek } from '../core/missionTyp
 import type { Catalog, Progression } from '../core/types';
 import type { AppModel } from '../state/useApp';
 
-type Tab = 'daily' | 'weekly' | 'queued' | 'upcoming';
+type Tab = 'active' | 'done' | 'upcoming';
 
 const day = (at?: number) =>
   at ? new Date(at).toLocaleDateString([], { day: 'numeric', month: 'short' }) : undefined;
@@ -25,8 +25,8 @@ const when = (at?: number) => {
   if (!at) return undefined;
   const ms = at - Date.now();
   if (ms <= 0) return 'now';
-  const hours = Math.floor(ms / 3600000);
-  return hours < 24 ? `${Math.max(1, hours)}h` : `${Math.floor(hours / 24)}d`;
+  const hours = Math.round(ms / 3600000);
+  return hours < 24 ? `${Math.max(1, hours)}h` : `${Math.round(hours / 24)}d`;
 };
 const xp = (value?: number) => (value ? `+${value.toLocaleString()} XP` : undefined);
 
@@ -100,7 +100,15 @@ function MissionCard({ mission }: { mission: Mission }) {
   );
 }
 
-function DefinitionCard({ definition, note }: { definition: MissionDefinition; note?: string }) {
+function DefinitionCard({
+  definition,
+  note,
+  done = false,
+}: {
+  definition: MissionDefinition;
+  note?: string;
+  done?: boolean;
+}) {
   const { C, S } = useTheme();
   const directive = definition.objectives[0];
   return (
@@ -109,7 +117,11 @@ function DefinitionCard({ definition, note }: { definition: MissionDefinition; n
         <Text style={[S.h3, { flex: 1 }]} numberOfLines={2}>
           {definition.title}
         </Text>
-        <Text style={[S.small, { fontVariant: ['tabular-nums'] }]}>{xp(definition.xpGrant)}</Text>
+        {done ? (
+          <Badge text="DONE" color={C.mint} />
+        ) : (
+          <Text style={[S.small, { fontVariant: ['tabular-nums'] }]}>{xp(definition.xpGrant)}</Text>
+        )}
       </View>
       <Text style={S.body}>Target {(directive?.target ?? definition.target).toLocaleString()}</Text>
       {note ? <Text style={S.small}>{note}</Text> : null}
@@ -177,50 +189,48 @@ export function MissionsView({
     () => missionBoard(progression.missions, progression, catalog),
     [progression, catalog],
   );
-  const [tab, setTab] = useState<Tab>('daily');
+  const [tab, setTab] = useState<Tab>('active');
   const [week, setWeek] = useState<string | null>(null);
 
-  const tabs = [
-    { id: 'daily' as const, label: 'Daily', count: board.daily.length },
-    { id: 'weekly' as const, label: 'Weekly', count: board.weekly.length },
-    { id: 'queued' as const, label: 'Queued', count: board.queued.length },
-    { id: 'upcoming' as const, label: 'Upcoming', count: board.upcoming.length },
-  ].filter((item) => item.count > 0 || item.id === 'daily' || item.id === 'weekly');
+  const next = board.upcoming[0];
+  const refillAt = board.weeklyRefillAt ?? next?.activatesAt;
+  const headline =
+    board.todo > 0
+      ? `${board.todo} to do`
+      : board.done.length
+        ? 'All caught up'
+        : 'No weekly missions';
+  const detail = [
+    board.done.length ? `${board.done.length} done this act` : undefined,
+    refillAt
+      ? `${next ? `${next.missions.length} more unlock` : 'Refills'} ${day(refillAt)} (in ${when(refillAt)})`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
+  const tabs = [
+    { id: 'active' as const, label: 'Active', count: board.active.length },
+    { id: 'done' as const, label: 'Done', count: board.done.length },
+    { id: 'upcoming' as const, label: 'Upcoming', count: board.upcoming.length },
+  ];
   const selected = board.upcoming.find((w) => w.group === week) ?? board.upcoming[0];
-  const completedDaily = board.daily.filter((m) => m.complete).length;
-  const completedWeekly = board.weekly.filter((m) => m.complete).length;
 
   return (
     <View style={{ gap: 14 }}>
-      <View style={[S.card, { gap: 12 }]}>
+      <View testID="missions-summary" style={[S.card, { gap: 8 }]}>
         <View style={S.between}>
-          <View style={{ gap: 3 }}>
-            <Text style={S.small}>DAILY CHECKPOINTS</Text>
-            <Text style={S.h2}>
-              {completedDaily} of {board.daily.length || '-'} complete
-            </Text>
+          <View style={{ gap: 3, flex: 1 }}>
+            <Text style={S.small}>WEEKLY MISSIONS</Text>
+            <Text style={S.h2}>{headline}</Text>
           </View>
-          <Feather name="sunrise" size={22} color={C.gold} />
-        </View>
-        {board.daily.length ? (
-          <ProgressBar
-            value={completedDaily}
-            max={board.daily.length}
-            color={completedDaily === board.daily.length ? C.mint : undefined}
+          <Feather
+            name={board.todo === 0 && board.done.length ? 'check-circle' : 'calendar'}
+            size={22}
+            color={board.todo === 0 && board.done.length ? C.mint : C.gold}
           />
-        ) : null}
-        <Text style={S.small}>
-          {board.dailyResetAt
-            ? `Resets in ${when(board.dailyResetAt)}`
-            : 'Riot did not return a daily reset time'}
-          {board.weeklyRefillAt ? ` · Weeklies refill ${day(board.weeklyRefillAt)}` : ''}
-        </Text>
-        {board.weekly.length ? (
-          <Text style={S.small}>
-            {completedWeekly} of {board.weekly.length} weekly missions complete.
-          </Text>
-        ) : null}
+        </View>
+        {detail ? <Text style={S.small}>{detail}</Text> : null}
       </View>
 
       <Tabs
@@ -232,51 +242,43 @@ export function MissionsView({
         }))}
       />
 
-      {tab === 'daily' &&
-        (board.daily.length ? (
-          board.daily.map((mission) => <MissionCard key={mission.id} mission={mission} />)
-        ) : (
+      {tab === 'active' &&
+        (board.active.length ? (
+          board.active.map((mission) => <MissionCard key={mission.id} mission={mission} />)
+        ) : board.done.length ? (
           <Empty
-            icon="sunrise"
-            title="No daily missions returned"
-            detail="Riot returns dailies once you have played this season. Pull down to refresh."
+            icon="check-circle"
+            title="You're all caught up"
+            detail={`All ${board.done.length} weekly missions released this act are done.${refillAt ? ` The next ones unlock ${day(refillAt)}.` : ''}`}
           />
-        ))}
-
-      {tab === 'weekly' &&
-        (board.weekly.length ? (
-          board.weekly.map((mission) => <MissionCard key={mission.id} mission={mission} />)
         ) : (
           <Empty
             icon="calendar"
             title="No weekly missions active"
-            detail={
-              board.weeklyRefillAt
-                ? `The next refill is ${day(board.weeklyRefillAt)}.`
-                : 'Pull down to refresh.'
-            }
+            detail={refillAt ? `The next refill is ${day(refillAt)}.` : 'Pull down to refresh.'}
           />
         ))}
 
-      {tab === 'queued' && (
+      {tab === 'done' && (
         <>
           <Text style={S.small}>
-            These weekly missions have unlocked but Riot has not placed them in your active list
-            yet. They usually arrive as you finish the current ones.
+            Weekly missions stay open until the act ends, so released missions that are no longer in
+            your active list are the ones you finished.
           </Text>
-          {board.queued.length ? (
-            board.queued.map((definition) => (
+          {board.done.length ? (
+            board.done.map((definition) => (
               <DefinitionCard
                 key={definition.id}
                 definition={definition}
+                done
                 note={definition.week ? `Week ${definition.week}` : undefined}
               />
             ))
           ) : (
             <Empty
               icon="inbox"
-              title="Nothing queued"
-              detail="Every unlocked weekly is already in your active list."
+              title="Nothing finished yet"
+              detail="Completed weekly missions appear here."
             />
           )}
         </>
@@ -305,7 +307,7 @@ export function MissionsView({
                 </>
               )}
               <Text style={S.small}>
-                This is Riot’s published schedule, not a guarantee that these missions will be
+                This is Riot's published schedule, not a guarantee that these missions will be
                 delivered unchanged.
               </Text>
             </>
@@ -319,14 +321,9 @@ export function MissionsView({
         </>
       )}
 
-      {!!board.other.length && tab === 'weekly' && (
-        <>
-          <SectionHeader title="Other missions" />
-          {board.other.map((mission) => (
-            <MissionCard key={mission.id} mission={mission} />
-          ))}
-        </>
-      )}
+      <Text style={S.small}>
+        Daily checkpoints are not shared by Riot's API, so they can't be shown here.
+      </Text>
     </View>
   );
 }

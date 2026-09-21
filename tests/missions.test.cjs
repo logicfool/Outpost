@@ -147,7 +147,7 @@ test('an objective without a published directive falls back to the mission title
   );
 });
 
-test('the board splits dailies, weeklies, queued weeklies and future weeks', () => {
+test('active missions list weeklies first and count what is left to do', () => {
   const board = missionBoard(
     [
       { id: M(1), complete: false, objectives: { [O(1)]: 640 } },
@@ -159,16 +159,12 @@ test('the board splits dailies, weeklies, queued weeklies and future weeks', () 
     NOW,
   );
   assert.deepEqual(
-    board.daily.map((m) => m.id),
-    [M(1)],
+    board.active.map((m) => m.id),
+    [M(3), M(4), M(1)],
   );
+  assert.equal(board.todo, 2);
   assert.deepEqual(
-    board.weekly.map((m) => m.id),
-    [M(3), M(4)],
-  );
-
-  assert.deepEqual(
-    board.queued.map((m) => m.id),
+    board.done.map((m) => m.id),
     [M(5)],
   );
   assert.deepEqual(
@@ -182,6 +178,24 @@ test('the board splits dailies, weeklies, queued weeklies and future weeks', () 
   assert.equal(board.npeCompleted, true);
   assert.equal(board.weeklyRefillAt, NOW + 3 * DAY);
 });
+test('an empty active list mid-act means every released weekly is done', () => {
+  const board = missionBoard([], { weeklyRefillAt: NOW + DAY }, catalog(), NOW);
+  assert.deepEqual(board.active, []);
+  assert.equal(board.todo, 0);
+  assert.deepEqual(
+    board.done.map((m) => m.id),
+    [M(3), M(4), M(5)],
+  );
+  assert.equal(board.upcoming[0].missions.length, 2);
+});
+test('only weeklies whose window is open count as done', () => {
+  const data = [weekly(3, 8, -2), weekly(20, 7, -10), weekly(21, 9, 1), mission(22, 'Daily')];
+  const board = missionBoard([], {}, buildCatalog({ missions: { data } }, NOW), NOW);
+  assert.deepEqual(
+    board.done.map((m) => m.id),
+    [M(3)],
+  );
+});
 test('future weeks are ordered by activation date and never include open ones', () => {
   const board = missionBoard([], {}, catalog(), NOW);
   assert.ok(board.upcoming[0].activatesAt < board.upcoming[1].activatesAt);
@@ -189,24 +203,6 @@ test('future weeks are ordered by activation date and never include open ones', 
     board.upcoming.some((w) => w.activatesAt <= NOW),
     false,
   );
-});
-test('the daily reset time is the earliest daily expiry Riot returned', () => {
-  const board = missionBoard(
-    [
-      { id: M(1), complete: false, expiresAt: NOW + 2 * DAY, objectives: {} },
-      { id: M(2), complete: false, expiresAt: NOW + 4 * 3600000, objectives: {} },
-    ],
-    {},
-    catalog(),
-    NOW,
-  );
-  assert.equal(board.dailyResetAt, NOW + 4 * 3600000);
-});
-test('an empty active list still previews the schedule without inventing progress', () => {
-  const board = missionBoard([], {}, catalog(), NOW);
-  assert.deepEqual(board.daily, []);
-  assert.deepEqual(board.weekly, []);
-  assert.equal(board.queued.length, 3);
 });
 
 test('progression keeps objective identifiers so progress maps to the right directive', () => {

@@ -808,6 +808,8 @@ export function ProgressScreen({ model, onItem }: Props) {
       <Resource title="Contracts" section={model.snapshot?.progression}>
         {(progress) => (
           <>
+            <SectionHeader title="Missions" />
+            <MissionsView progression={progress} catalog={model.catalog} />
             {progress.contracts.some((c) => !c.currentBattlepass) && (
               <SectionHeader title="Other contracts" />
             )}
@@ -852,13 +854,6 @@ export function ProgressScreen({ model, onItem }: Props) {
             ) : (
               <Empty title="No active contracts" detail="Pull down to refresh." icon="flag" />
             )}
-            <SectionHeader
-              title="Missions"
-              detail={
-                progress.weeklyRefillAt ? `Refills ${date(progress.weeklyRefillAt)}` : undefined
-              }
-            />
-            <MissionsView progression={progress} catalog={model.catalog} />
           </>
         )}
       </Resource>

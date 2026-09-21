@@ -44,12 +44,10 @@ export interface MissionWeek {
   missions: MissionDefinition[];
 }
 export interface MissionBoard {
-  daily: Mission[];
-  weekly: Mission[];
-  other: Mission[];
-  queued: MissionDefinition[];
+  active: Mission[];
+  todo: number;
+  done: MissionDefinition[];
   upcoming: MissionWeek[];
-  dailyResetAt?: number;
   weeklyRefillAt?: number;
   weeklyCheckpointAt?: number;
   npeCompleted?: boolean;

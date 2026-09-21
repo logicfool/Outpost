@@ -156,7 +156,7 @@ export function missionBoard(
   const active = new Set(missions.map((m) => m.id.toLowerCase()));
   const definitions = Object.values(catalog.missions ?? {});
 
-  const queued = definitions
+  const done = definitions
     .filter(
       (d) =>
         d.kind === 'weekly' &&
@@ -196,17 +196,16 @@ export function missionBoard(
     }))
     .sort((a, b) => (a.activatesAt ?? 0) - (b.activatesAt ?? 0));
 
-  const daily = missions.filter((m) => m.kind === 'daily');
+  const order: Record<string, number> = { weekly: 0, daily: 1 };
+  const activeMissions = [...missions].sort(
+    (a, b) =>
+      (order[a.kind] ?? 2) - (order[b.kind] ?? 2) || Number(a.complete) - Number(b.complete),
+  );
   return {
-    daily,
-    weekly: missions.filter((m) => m.kind === 'weekly'),
-    other: missions.filter((m) => m.kind !== 'daily' && m.kind !== 'weekly'),
-    queued,
+    active: activeMissions,
+    todo: activeMissions.filter((m) => !m.complete).length,
+    done,
     upcoming,
-    dailyResetAt: daily
-      .map((m) => m.expiresAt)
-      .filter((v): v is number => !!v)
-      .sort((a, b) => a - b)[0],
     weeklyRefillAt: metadata.weeklyRefillAt,
     weeklyCheckpointAt: metadata.weeklyCheckpointAt,
     npeCompleted: metadata.npeCompleted,
