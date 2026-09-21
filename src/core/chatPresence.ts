@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import { presenceProgress } from './liveProgress';
+import { presenceProgress, sharedPartyProgress } from './liveProgress';
 import { valorantActivity, presenceFields } from './presenceState';
 import type { Catalog } from './types';
 import type { Friend } from './chatTypes';
@@ -69,6 +69,7 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
     presence: state,
     updatedAt,
     progress: presenceProgress(data, state === 'in_game', now),
+    partyProgress: sharedPartyProgress(data, state === 'in_game', now),
     matchId: valOnline ? text(match.matchId) || text(match.matchID) || undefined : undefined,
     game,
     activity,

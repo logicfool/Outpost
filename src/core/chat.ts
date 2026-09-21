@@ -498,6 +498,7 @@ export class RiotChat {
         mapId: undefined,
         status: undefined,
         progress: undefined,
+        partyProgress: undefined,
         matchId: undefined,
       }),
       updatedAt: this.now(),

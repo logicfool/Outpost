@@ -106,12 +106,13 @@ try {
     await page.getByText('DIAMOND 2', { exact: true }).waitFor();
     await shot('profile');
   });
-  await check('live game opens ten-player roster and another player profile', async () => {
+  await check('live game opens a team-switching roster and contextual player details', async () => {
     await click('View live game details');
     await page.getByTestId('live-roster').waitFor();
-    assert.equal(await page.locator('[data-testid^="live-player-"]').count(), 10);
-    await page.getByRole('button', { name: 'View Lumen profile', exact: true }).waitFor();
+    assert.equal(await page.locator('[data-testid^="live-player-"]').count(), 5);
     await page.getByRole('button', { name: 'View You profile', exact: true }).waitFor();
+    await tab('Opponents');
+    await page.getByRole('button', { name: 'View Lumen profile', exact: true }).waitFor();
     await shot('live-roster');
     await click('View Lumen profile');
     await page.getByRole('button', { name: 'View rank history', exact: true }).waitFor();
@@ -206,12 +207,15 @@ try {
       await page.getByTestId('live-match-hero').getByText('7', { exact: true }).waitFor();
       await page.getByTestId('live-match-hero').getByText('5', { exact: true }).waitFor();
       await click('Match skins');
-      await page
-        .getByText('Equipped cosmetics, not the weapon currently held.', { exact: true })
-        .waitFor();
+      await page.getByText('Equipped skins and buddies for this match.', { exact: true }).waitFor();
       await page.getByRole('tab', { name: 'Lumen', exact: true }).click();
       await shot('live-match-skins');
-      await page.getByText('Reaver Vandal', { exact: true }).waitFor();
+      await page.getByRole('textbox', { name: 'Search match loadout', exact: true }).fill('Vandal');
+      await page.getByText('Prime Vandal', { exact: true }).waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: 'View equipped Vandal', exact: true }).count(),
+        1,
+      );
       await click('Back from match skins');
       await click('Back from live match');
     },

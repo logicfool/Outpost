@@ -5,6 +5,8 @@ import { BrowseMemory } from '../core/browseMemory';
 import { ChatDirectoryMemory } from '../core/chatDirectory';
 import { MarketHistoryPanel } from './MarketHistoryPanel';
 import { LiveMatchPanel } from './LiveMatchPanel';
+import { LivePlayerPanel } from './LivePlayerPanel';
+import { LiveMatchMemory } from '../core/livePresentation';
 import { AimPanel } from './AimPanel';
 import { IdentityPanel } from './IdentityPanel';
 import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
@@ -387,6 +389,13 @@ export function ExplorerModal({
     props = { model, onNavigate, onBack };
   const chatViews = useRef(new ChatDirectoryMemory()).current;
   const browseViews = useRef(new BrowseMemory()).current;
+  const liveViews = useRef(new LiveMatchMemory()).current;
+  const currentMatch =
+    model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data.matchId : undefined;
+  const liveView = liveViews.forMatch(
+    model.active?.puuid,
+    route?.type === 'live-player' || route?.type === 'live-loadout' ? route.matchId : currentMatch,
+  );
   browseViews.syncAccount(model.active?.puuid);
   const collectionView =
     route?.type === 'collection'
@@ -426,13 +435,26 @@ export function ExplorerModal({
       {route?.type === 'career' && (
         <CareerModal rank={route.rank} visible onClose={onBack} embedded />
       )}
-      {route?.type === 'live' && <LiveMatchPanel {...props} />}
+      {route?.type === 'live' && (
+        <LiveMatchPanel key={`${model.active?.puuid}:${currentMatch}`} {...props} view={liveView} />
+      )}
+      {route?.type === 'live-player' && (
+        <LivePlayerPanel
+          key={`${model.active?.puuid}:${route.matchId}:${route.subject}`}
+          {...props}
+          matchId={route.matchId}
+          subject={route.subject}
+          view={liveView}
+        />
+      )}
       {route?.type === 'live-loadout' && (
         <LiveEquipmentPanel
-          key={`${route.matchId}:${route.subject}`}
+          key={`${model.active?.puuid}:${route.matchId}:${route.subject}`}
           model={model}
           matchId={route.matchId}
           subject={route.subject}
+          view={liveView}
+          onNavigate={onNavigate}
           onBack={onBack}
         />
       )}

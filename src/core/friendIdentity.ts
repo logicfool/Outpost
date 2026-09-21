@@ -16,6 +16,7 @@ export function mergeFriendIdentity(
     ...identity,
     presence: next.presence,
     progress: next.progress,
+    partyProgress: next.partyProgress,
     matchId: next.matchId,
     game: next.game,
     activity: next.activity,

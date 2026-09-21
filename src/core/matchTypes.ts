@@ -78,12 +78,16 @@ export interface MatchProgress {
   roundEstimated?: boolean;
   source: 'match' | 'self-presence' | 'teammate-presence' | 'friend-presence' | 'party-owner';
   scoreOnly?: boolean;
+  scoreTeamId?: string;
+  binding?: 'match-id' | 'self-map' | 'roster-map' | 'party-context';
   observedAt: number;
   matchId?: string;
 }
 export interface LiveWeapon {
   weaponId: string;
   weapon: string;
+  weaponImage?: string;
+  category?: string;
   skin?: CatalogItem;
   levelId?: string;
   chromaId?: string;

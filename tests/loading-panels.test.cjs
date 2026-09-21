@@ -38,7 +38,14 @@ test('cancelling a slow preset read preserves the independently loading preset d
   assert.equal(backs, 1);
 });
 test('live cosmetics first load is a skeleton and a failed refresh preserves known weapons', async (t) => {
-  const h = harness({ overrides: { './MatchVisuals': { AgentPortrait: 'Agent' } } }),
+  const h = harness({
+      overrides: {
+        './MatchVisuals': { AgentPortrait: 'Agent' },
+        '../state/useLivePolling': {
+          useLivePolling: () => ({ busy: false, refreshing: false, refresh() {} }),
+        },
+      },
+    }),
     { LiveEquipmentPanel } = h.load('src/ui/LiveEquipmentPanel.tsx');
   const first = deferred(),
     next = deferred();
@@ -47,17 +54,31 @@ test('live cosmetics first load is a skeleton and a failed refresh preserves kno
   const model = {
     active: { puuid: ID },
     catalog: { items: {} },
+    chat: { status: 'ready', friends: [] },
+    playerRank: async () => {
+      throw Error('not returned');
+    },
     snapshot: {
       liveGame: {
         status: 'ready',
-        data: { matchId: 'm', players: [{ subject: ID, name: 'You' }] },
+        data: {
+          state: 'in_game',
+          matchId: 'm',
+          players: [{ subject: ID, name: 'You', self: true, teamId: 'Blue' }],
+        },
       },
     },
     liveEquipment: () => (++calls === 1 ? first.promise : next.promise),
   };
   await act(() => {
     tree = Renderer.create(
-      React.createElement(LiveEquipmentPanel, { model, matchId: 'm', onBack() {} }),
+      React.createElement(LiveEquipmentPanel, {
+        model,
+        matchId: 'm',
+        view: { accountId: ID, matchId: 'm', ranks: {}, rankFlights: new Map() },
+        onNavigate() {},
+        onBack() {},
+      }),
     );
   });
   t.after(async () => act(() => tree.unmount()));

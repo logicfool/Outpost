@@ -1125,6 +1125,16 @@ export class Runtime {
           'SESSION_REMOVED',
           'This live check was discarded after an account change.',
         );
+      if (
+        sample.status === 'ready' &&
+        sample.data.state === 'in_game' &&
+        gate?.sample?.status === 'ready'
+      ) {
+        const previous = gate.sample.data;
+        const changed = previous.matchId !== sample.data.matchId || previous.state !== 'in_game';
+        const cutoff = changed ? previous.observedAt : previous.presenceNotBefore;
+        if (cutoff) sample = { ...sample, data: { ...sample.data, presenceNotBefore: cutoff } };
+      }
       const error = sample.status === 'error' ? sample : sample.data.detailError;
       const failures = error ? (gate?.failures ?? 0) + 1 : 0;
       const notBefore = Math.max(

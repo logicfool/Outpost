@@ -938,7 +938,29 @@ export function useApp() {
           game = demo.snapshot.liveGame;
         if (game.status !== 'ready' || game.data.matchId !== matchId)
           return { status: 'error', code: 'MATCH_SCOPE', message: 'Open the current demo match.' };
-        const skins = Object.values(demo.catalog.items).filter((i) => i.kind === 'skin');
+        const skins = [
+          ...new Map(
+            Object.values(demo.catalog.items)
+              .filter((i) => i.kind === 'skin')
+              .map((i) => [i.canonicalId, i]),
+          ).values(),
+        ];
+        const buddies = Object.values(demo.catalog.items).filter((i) => i.kind === 'buddy');
+        const weaponsFor = (index: number) => [
+          ...new Map(
+            skins.slice(index % 2).map((s) => [
+              s.weaponId ?? s.weapon ?? s.id,
+              {
+                weaponId: s.weaponId ?? s.id,
+                weapon: s.weapon ?? 'Weapon',
+                skin: s,
+                ...(s.weapon !== 'Melee' && buddies.length
+                  ? { buddy: buddies[index % buddies.length] }
+                  : {}),
+              },
+            ]),
+          ).values(),
+        ];
         return {
           status: 'ready',
           fetchedAt: Date.now(),
@@ -947,13 +969,7 @@ export function useApp() {
             observedAt: Date.now(),
             players: (game.data.players ?? []).map((p, index) => ({
               subject: p.subject,
-              weapons: skins
-                .filter((s, i) => i < 6 || index % 2 === 0)
-                .map((s) => ({
-                  weaponId: s.weaponId ?? s.id,
-                  weapon: s.weapon ?? 'Weapon',
-                  skin: s,
-                })),
+              weapons: weaponsFor(index),
             })),
           },
         };

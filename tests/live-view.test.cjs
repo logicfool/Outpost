@@ -168,6 +168,31 @@ test('agent selection suppresses all combat stats and hidden identities cannot o
     tree = Renderer.create(React.createElement(LiveRoster, { game: g, ownId: ID, onPlayer() {} }));
   });
   assert.equal(tree.root.findAll((n) => n.props?.testID === 'live-kda-value').length, 0);
+  await act(() =>
+    tree.root
+      .findByProps({ accessibilityLabel: 'Opponents', accessibilityRole: 'tab' })
+      .props.onPress(),
+  );
   assert.equal(tree.root.findByProps({ testID: 'live-player-' + OTHER }).props.disabled, true);
   await act(async () => tree.unmount());
+});
+
+test('team tabs expose their selected state to web and native accessibility', async (t) => {
+  const { LiveRoster } = components('android');
+  let tree;
+  await act(() => {
+    tree = Renderer.create(
+      React.createElement(LiveRoster, { game: game(), ownId: ID, onPlayer() {} }),
+    );
+  });
+  t.after(() => act(() => tree.unmount()));
+  const tab = (label) =>
+    tree.root.findByProps({ accessibilityLabel: label, accessibilityRole: 'tab' });
+  assert.equal(tab('Your team').props['aria-selected'], true);
+  assert.equal(tab('Your team').props.accessibilityState.selected, true);
+  assert.equal(tab('Opponents').props['aria-selected'], false);
+  await act(() => tab('Opponents').props.onPress());
+  assert.equal(tab('Your team').props['aria-selected'], false);
+  assert.equal(tab('Opponents').props['aria-selected'], true);
+  assert.equal(tab('Opponents').props.accessibilityState.selected, true);
 });

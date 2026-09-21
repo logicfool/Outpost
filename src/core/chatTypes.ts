@@ -16,6 +16,7 @@ export interface Friend extends PlayerRef {
   jid: string;
   matchId?: string;
   progress?: import('./matchTypes').MatchProgress;
+  partyProgress?: import('./liveProgress').SharedPartyProgress;
   presence: 'offline' | 'online' | 'away' | 'in_game' | 'agent_select' | 'queue';
   presenceSource?: 'valorant' | 'riot';
   queue?: string;

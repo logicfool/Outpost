@@ -1,65 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
 import type { Navigate } from './explorerTypes';
-import type { Ranked } from '../core/types';
-import { ownLiveProgress } from '../core/liveProgress';
+import type { LiveViewState } from '../core/livePresentation';
+import { liveTeams } from '../core/livePresentation';
 import { useLivePolling } from '../state/useLivePolling';
+import { useLiveRanks, useLiveScore } from '../state/useLiveMatchData';
 import { LiveMatchHero, LiveRoster } from './LiveMatchView';
-import { Button, Empty, ModalHeader, ModalPage, Resource } from './components';
+import { Empty, ModalHeader, ModalPage, Resource } from './components';
 import { useTheme } from './theme';
-import { Feather } from '@expo/vector-icons';
 export function LiveMatchPanel({
   model,
   onBack,
   onNavigate,
+  view,
 }: {
   model: AppModel;
   onBack(): void;
   onNavigate: Navigate;
+  view: LiveViewState;
 }) {
   const { C, S } = useTheme(),
     polling = useLivePolling(model),
     section = model.snapshot?.liveGame;
-  const game = section?.status === 'ready' ? section.data : undefined;
-  const [ranks, setRanks] = useState<Record<string, Ranked>>({}),
-    [ranksLoading, setRanksLoading] = useState(true);
-  const progress = ownLiveProgress(
-    game,
-    model.chat.selfPresence,
-    model.chat.status === 'ready',
-    Date.now(),
-    model.chat.friends,
-  );
-  const rosterKey = game?.players
-    ?.filter((p) => !p.hidden)
-    .map((p) => p.subject)
-    .sort()
-    .join(':');
-  useEffect(() => {
-    let current = true;
-    setRanks({});
-    setRanksLoading(true);
-    void (async () => {
-      try {
-        for (const player of game?.players ?? []) {
-          if (!current) return;
-          if (player.hidden || player.tier != null) continue;
-          try {
-            const rank = await model.playerRank(player);
-            if (current) setRanks((old) => ({ ...old, [player.subject]: rank }));
-          } catch {
-            return;
-          }
-        }
-      } finally {
-        if (current) setRanksLoading(false);
-      }
-    })();
-    return () => {
-      current = false;
-    };
-  }, [game?.matchId, rosterKey, model.playerRank, model.active?.puuid]);
+  const game = section?.status === 'ready' ? section.data : undefined,
+    score = useLiveScore(model, view);
+  const [teamId, setTeamId] = useState(view.teamId);
+  const teams = game ? liveTeams(game, model.active?.puuid) : [],
+    selected = teams.find((t) => t.id === teamId) ?? teams[0];
+  const rankState = useLiveRanks(model, selected?.players ?? [], view);
+  const selectTeam = (id: string) => {
+    view.teamId = id;
+    setTeamId(id);
+  };
   return (
     <ModalPage>
       <ModalHeader title="Live match" closeLabel="Back from live match" onClose={onBack} />
@@ -68,11 +42,14 @@ export function LiveMatchPanel({
         refreshControl={
           <RefreshControl
             refreshing={polling.refreshing}
-            onRefresh={polling.refresh}
+            onRefresh={() => {
+              polling.refresh();
+              rankState.refresh();
+            }}
             tintColor={C.accent}
           />
         }
-        contentContainerStyle={[S.content, { gap: 14 }]}
+        contentContainerStyle={[S.content, { gap: 12 }]}
       >
         <Resource
           title="Live game"
@@ -90,19 +67,20 @@ export function LiveMatchPanel({
                   icon="moon"
                 />
               ) : (
-                <LiveMatchHero game={value} progress={progress} region={model.active?.region} />
+                <LiveMatchHero
+                  game={value}
+                  progress={score.progress}
+                  stale={!score.live}
+                  region={model.active?.region}
+                />
               )}
               {value.detailError && (
-                <Empty
-                  title="Waiting for match details"
-                  detail={value.detailError.message}
-                  icon="clock"
-                />
+                <Text style={[S.small, { color: C.gold }]}>{value.detailError.message}</Text>
               )}
               {!!value.players?.length && (
                 <>
                   <View style={S.between}>
-                    <Text style={[S.h3, { color: C.muted }]}>Players</Text>
+                    <Text style={[S.h3, { color: C.muted, fontSize: 13 }]}>Match roster</Text>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Match skins"
@@ -111,25 +89,34 @@ export function LiveMatchPanel({
                         onNavigate({ type: 'live-loadout', matchId: value.matchId })
                       }
                       style={{
-                        minHeight: 44,
-                        paddingHorizontal: 12,
-                        borderRadius: 12,
-                        backgroundColor: C.raised,
+                        minHeight: 36,
+                        paddingHorizontal: 10,
+                        borderRadius: 10,
+                        backgroundColor: C.surface,
                         flexDirection: 'row',
-                        alignItems: 'center',
                         gap: 6,
+                        alignItems: 'center',
                       }}
                     >
-                      <Feather name="crosshair" size={14} color={C.ink} />
-                      <Text style={[S.h3, { fontSize: 12 }]}>Match skins</Text>
+                      <Feather name="crosshair" size={13} color={C.ink} />
+                      <Text style={[S.small, { color: C.ink }]}>Match skins</Text>
                     </Pressable>
                   </View>
                   <LiveRoster
                     game={value}
-                    ranks={ranks}
-                    ranksLoading={ranksLoading}
                     ownId={model.active?.puuid}
-                    onPlayer={(player) => onNavigate({ type: 'player', player })}
+                    teamId={selected?.id}
+                    onTeamChange={selectTeam}
+                    ranks={rankState.ranks}
+                    ranksLoading={rankState.loading}
+                    onPlayer={(player) =>
+                      value.matchId &&
+                      onNavigate({
+                        type: 'live-player',
+                        matchId: value.matchId,
+                        subject: player.subject,
+                      })
+                    }
                   />
                 </>
               )}

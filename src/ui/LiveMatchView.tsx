@@ -8,39 +8,33 @@ import { useTheme } from './theme';
 import type { LiveGame, Ranked } from '../core/types';
 import type { LivePlayer } from '../core/playerTypes';
 import type { MatchProgress } from '../core/matchTypes';
+import { liveTeams, liveRank } from '../core/livePresentation';
 import { freshLiveStats } from '../core/liveStats';
 import { queueName } from '../core/normalize';
 import { playerLabel } from '../core/playerNames';
-import { progressLabel } from '../core/liveProgress';
-const numberStyle = { fontVariant: ['tabular-nums'] as 'tabular-nums'[] };
+import { progressLabel, hasScorePair } from '../core/liveProgress';
+const digits = { fontVariant: ['tabular-nums'] as 'tabular-nums'[] };
 export function LiveMatchHero({
   game,
   progress,
   region,
+  stale = false,
 }: {
   game: LiveGame;
   progress?: MatchProgress;
   region?: string;
+  stale?: boolean;
 }) {
   const { C, S } = useTheme(),
     [detail, setDetail] = useState(false),
     active = game.state === 'in_game';
-  const score =
-    progressLabel(progress) &&
-    progress?.allyScore !== undefined &&
-    progress?.enemyScore !== undefined;
-  const hasStats = active && game.players?.some((p) => !!freshLiveStats(p.stats));
+  const score = hasScorePair(progress);
+  const fresh = !!progressLabel(progress) && !stale,
+    hasStats = active && game.players?.some((p) => !!freshLiveStats(p.stats));
   return (
     <View testID="live-match-hero" style={{ gap: 10 }}>
       <View
-        style={{
-          borderRadius: 20,
-          overflow: 'hidden',
-          backgroundColor: C.raised,
-          minHeight: 190,
-          borderWidth: 1,
-          borderColor: C.border,
-        }}
+        style={{ height: 145, borderRadius: 18, overflow: 'hidden', backgroundColor: C.raised }}
       >
         {game.mapImage && (
           <Image
@@ -50,145 +44,133 @@ export function LiveMatchHero({
           />
         )}
         <LinearGradient
-          colors={['#0B10142B', '#0B1014E8']}
-          style={{ padding: 18, gap: 18, minHeight: 190 }}
+          colors={['#0B101400', '#0B1014D9']}
+          style={{ flex: 1, padding: 16, justifyContent: 'flex-end', gap: 3 }}
         >
-          <View style={S.between}>
-            <View style={{ flexDirection: 'row', gap: 7, alignItems: 'center' }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 27, fontWeight: '800', letterSpacing: -0.7 }}>
+            {game.map ?? 'Current match'}
+          </Text>
+          <Text style={{ color: '#E2E6EB', fontSize: 12 }}>
+            {[game.queue ? queueName(game.queue) : 'VALORANT', region?.toUpperCase()]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </LinearGradient>
+      </View>
+      <View
+        style={{
+          backgroundColor: C.surface,
+          borderRadius: 16,
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          gap: 9,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
+          <View style={{ flex: 1, alignItems: 'flex-start' }}>
+            <Text style={[S.small, { fontSize: 10, letterSpacing: 0.7 }]}>YOUR TEAM</Text>
+            <Text
+              testID="live-score-ally"
+              style={[digits, { fontSize: 38, lineHeight: 45, fontWeight: '800', color: C.mint }]}
+            >
+              {score ? progress!.allyScore : '-'}
+            </Text>
+          </View>
+          <View style={{ alignItems: 'center', gap: 6 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                paddingHorizontal: 9,
+                paddingVertical: 4,
+                borderRadius: 10,
+                backgroundColor: active && fresh ? `${C.accent}18` : C.raised,
+              }}
+            >
               <View
                 style={{
-                  width: 6,
-                  height: 6,
+                  width: 5,
+                  height: 5,
                   borderRadius: 3,
-                  backgroundColor: active ? '#7BE0B9' : '#F2C679',
+                  backgroundColor: active && fresh ? C.accent : C.gold,
                 }}
               />
               <Text
-                style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}
+                style={[
+                  S.small,
+                  { fontWeight: '800', fontSize: 10, color: active && fresh ? C.accent : C.muted },
+                ]}
               >
-                {active ? 'LIVE MATCH' : 'AGENT SELECT'}
+                {active
+                  ? score
+                    ? !fresh
+                      ? 'LAST REPORTED'
+                      : 'LIVE'
+                    : 'IN PROGRESS'
+                  : 'AGENT SELECT'}
               </Text>
             </View>
-            <Text style={{ color: '#D5DBE2', fontSize: 11 }}>
-              {[game.queue ? queueName(game.queue) : undefined, region?.toUpperCase()]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-          </View>
-          <View>
-            <Text
-              style={{ color: '#FFFFFF', fontSize: 27, fontWeight: '800', letterSpacing: -0.6 }}
-            >
-              {game.map ?? 'Match in progress'}
-            </Text>
-            {score ? (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 25,
-                  paddingTop: 8,
-                }}
-              >
-                <View style={{ alignItems: 'center', minWidth: 65 }}>
-                  <Text
-                    style={{
-                      color: '#7BE0B9',
-                      fontSize: 10,
-                      fontWeight: '700',
-                      letterSpacing: 0.8,
-                    }}
-                  >
-                    YOUR TEAM
-                  </Text>
-                  <Text
-                    style={[
-                      numberStyle,
-                      { color: '#FFFFFF', fontSize: 42, fontWeight: '800', lineHeight: 50 },
-                    ]}
-                  >
-                    {progress!.allyScore}
-                  </Text>
-                </View>
-                <Text style={{ color: '#B6BEC8', fontSize: 20 }}>:</Text>
-                <View style={{ alignItems: 'center', minWidth: 65 }}>
-                  <Text
-                    style={{
-                      color: '#FF8B91',
-                      fontSize: 10,
-                      fontWeight: '700',
-                      letterSpacing: 0.8,
-                    }}
-                  >
-                    OPPONENTS
-                  </Text>
-                  <Text
-                    style={[
-                      numberStyle,
-                      { color: '#FFFFFF', fontSize: 42, fontWeight: '800', lineHeight: 50 },
-                    ]}
-                  >
-                    {progress!.enemyScore}
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <Text style={{ color: '#CED5DF', fontSize: 12, marginTop: 8 }}>
-                {active
-                  ? 'Score updates appear as they are reported'
-                  : 'Choose your agent in VALORANT'}
-              </Text>
-            )}
-          </View>
-          <View
-            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-          >
-            <Text style={{ color: '#E6EBF1', fontSize: 11 }}>
-              {progress?.roundNumber
+            <Text style={[S.small, { fontSize: 11 }]}>
+              {active && progress?.roundNumber
                 ? `Round ${progress.roundEstimated ? '~' : ''}${progress.roundNumber}`
                 : active
-                  ? 'In progress'
-                  : 'Preparing match'}
-            </Text>
-            <Text style={{ color: '#C3CBD6', fontSize: 10 }}>
-              {game.observedAt
-                ? `Updated ${new Date(game.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                : ''}
+                  ? 'Waiting for score'
+                  : 'Choose your agent'}
             </Text>
           </View>
-        </LinearGradient>
+          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+            <Text style={[S.small, { fontSize: 10, letterSpacing: 0.7 }]}>OPPONENTS</Text>
+            <Text
+              testID="live-score-enemy"
+              style={[digits, { fontSize: 38, lineHeight: 45, fontWeight: '800', color: C.accent }]}
+            >
+              {score ? progress!.enemyScore : '-'}
+            </Text>
+          </View>
+        </View>
       </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Live data details"
         accessibilityState={{ expanded: detail }}
         onPress={() => setDetail((v) => !v)}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 7, minHeight: 28 }}
+        style={{ minHeight: 28, flexDirection: 'row', gap: 6, alignItems: 'center' }}
       >
-        <Feather name="info" color={C.subtle} size={13} />
+        <Feather name="activity" size={12} color={C.subtle} />
         <Text
           testID={!hasStats && active ? 'live-stats-unavailable' : undefined}
-          style={[S.small, { flex: 1, fontSize: 11 }]}
+          style={[S.small, { fontSize: 11, flex: 1 }]}
         >
-          {active
-            ? hasStats
-              ? 'Current-match stats'
-              : 'Live K/D/A not reported'
-            : 'The roster updates automatically.'}
+          {score
+            ? `${fresh ? 'Score updated' : 'Last score'} ${new Date(progress!.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            : active
+              ? 'Score syncs from your game presence'
+              : 'Roster updates automatically'}
         </Text>
-        <Feather name={detail ? 'chevron-up' : 'chevron-down'} color={C.subtle} size={14} />
+        <Feather name={detail ? 'chevron-up' : 'chevron-down'} size={13} color={C.subtle} />
       </Pressable>
       {detail && (
-        <View style={{ gap: 4, padding: 12, borderRadius: 12, backgroundColor: C.surface }}>
+        <View style={{ padding: 12, borderRadius: 12, backgroundColor: C.surface, gap: 5 }}>
           <Text testID="live-progress-source" style={S.small}>
             {progress
-              ? `Score source: ${progress.source === 'match' ? 'match service' : progress.source === 'teammate-presence' ? 'teammate presence' : 'your presence'}`
-              : 'The match service has not supplied a score.'}
+              ? `Score source: ${progress.source === 'match' ? 'match service' : progress.source === 'teammate-presence' ? 'same-match teammate' : progress.binding === 'party-context' ? 'shared party presence' : 'your presence'}`
+              : 'Waiting for a score that can be linked to this match.'}
           </Text>
+          {stale && (
+            <Text style={S.small}>This is the last reported score, not a new live sample.</Text>
+          )}
           {progress?.roundEstimated && (
             <Text style={S.small}>~ marks a round estimated from the reported score.</Text>
           )}
+          {!hasStats && active && <Text style={S.small}>Live K/D/A has not been reported.</Text>}
           <Text style={S.small}>
             Only counters returned for this match are shown. Missing stats are not treated as zero.
           </Text>
@@ -203,219 +185,214 @@ export function LiveRoster({
   ranksLoading = false,
   ownId,
   onPlayer,
+  teamId,
+  onTeamChange,
 }: {
   game: LiveGame;
   ranks?: Record<string, Ranked>;
   ranksLoading?: boolean;
   ownId?: string;
   onPlayer(player: LivePlayer): void;
+  teamId?: string;
+  onTeamChange?(id: string): void;
 }) {
   const { C, S } = useTheme(),
-    players = game.players ?? [],
-    ownTeam = players.find((p) => p.subject === ownId || p.self)?.teamId;
-  const teams = [...new Set(players.map((p) => p.teamId))].sort(
-    (a, b) => Number(b === ownTeam) - Number(a === ownTeam),
-  );
-  const statsEnabled = game.state === 'in_game' && players.some((p) => !!freshLiveStats(p.stats));
+    teams = liveTeams(game, ownId),
+    [selected, setSelected] = useState(teamId ?? teams[0]?.id);
+  const group = teams.find((t) => t.id === (teamId ?? selected)) ?? teams[0],
+    members = group?.players ?? [],
+    accent = group?.friendly ? C.mint : C.accent;
+  const statsEnabled = game.state === 'in_game' && members.some((p) => !!freshLiveStats(p.stats));
   return (
-    <View testID="live-roster" style={{ gap: 16 }}>
-      {teams.map((team) => {
-        const members = players.filter((p) => p.teamId === team),
-          friendly = team === ownTeam,
-          accent = friendly ? C.mint : C.accent;
-        const label =
-          teams.length === 1
-            ? 'Players'
-            : friendly
-              ? 'Your team'
-              : teams.length === 2
-                ? 'Opponents'
-                : `${team || 'Other'} team`;
-        return (
-          <View
-            key={team}
-            style={{
-              borderRadius: 16,
-              overflow: 'hidden',
-              borderWidth: 1,
-              borderColor: C.border,
-              backgroundColor: C.surface,
-            }}
-          >
-            <View
+    <View testID="live-roster" style={{ gap: 8 }}>
+      {teams.length > 1 && (
+        <View
+          accessibilityRole="tablist"
+          style={{
+            flexDirection: 'row',
+            gap: 4,
+            backgroundColor: C.surface,
+            padding: 4,
+            borderRadius: 14,
+          }}
+        >
+          {teams.map((t) => (
+            <Pressable
+              key={t.id}
+              accessibilityRole="tab"
+              accessibilityLabel={t.label}
+              aria-selected={t.id === group?.id}
+              accessibilityState={{ selected: t.id === group?.id }}
+              onPress={() => {
+                setSelected(t.id);
+                onTeamChange?.(t.id);
+              }}
               style={{
-                flexDirection: 'row',
+                flex: 1,
+                paddingVertical: 10,
+                paddingHorizontal: 6,
+                borderRadius: 11,
                 alignItems: 'center',
-                padding: 12,
-                gap: 8,
-                backgroundColor: C.raised,
+                backgroundColor: t.id === group?.id ? C.raised : 'transparent',
               }}
             >
-              <View style={{ width: 3, height: 13, borderRadius: 2, backgroundColor: accent }} />
-              <Text style={[S.h3, { flex: 1, fontSize: 12 }]}>
-                {label}{' '}
-                <Text style={{ color: C.subtle, fontWeight: '400' }}> {members.length}</Text>
+              <Text style={[S.h3, { fontSize: 12, color: t.id === group?.id ? C.ink : C.muted }]}>
+                {t.label}
+                <Text style={{ fontWeight: '400', color: C.subtle }}> {t.players.length}</Text>
               </Text>
-              {statsEnabled && (
-                <View
-                  accessibilityLabel="Kills deaths assists columns"
-                  style={{ width: 84, flexDirection: 'row' }}
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {statsEnabled && (
+        <View
+          accessibilityLabel="Kills deaths assists columns"
+          style={{ alignItems: 'flex-end', paddingRight: 12 }}
+        >
+          <View style={{ width: 84, flexDirection: 'row' }}>
+            {['K', 'D', 'A'].map((label) => (
+              <Text key={label} style={[S.small, { fontSize: 10, width: 28, textAlign: 'center' }]}>
+                {label}
+              </Text>
+            ))}
+          </View>
+        </View>
+      )}
+      <View style={{ backgroundColor: C.surface, borderRadius: 16, overflow: 'hidden' }}>
+        {members.map((p, index) => {
+          const you = p.subject === ownId || p.self,
+            rank = liveRank(p, ranks[p.subject]),
+            stats = game.state === 'in_game' ? freshLiveStats(p.stats) : undefined;
+          const agent = p.agent && p.agent !== 'Not selected' ? p.agent : 'Choosing agent';
+          return (
+            <Pressable
+              key={p.subject}
+              testID={`live-player-${p.subject}`}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${playerLabel(p, ownId)} profile`}
+              accessibilityState={{ disabled: !!p.hidden }}
+              disabled={!!p.hidden}
+              onPress={() => onPlayer(p)}
+              style={({ pressed }) => ({
+                opacity: pressed ? 0.72 : 1,
+                minHeight: 74,
+                paddingHorizontal: 12,
+                paddingVertical: 11,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+                borderTopWidth: index ? 0.5 : 0,
+                borderTopColor: C.border,
+                backgroundColor: you ? `${accent}0A` : C.surface,
+              })}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 42,
+                  borderRadius: 10,
+                  backgroundColor: C.raised,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                }}
+              >
+                {p.agentImage ? (
+                  <Image
+                    source={{ uri: p.agentImage }}
+                    contentFit="contain"
+                    style={{ width: 38, height: 42 }}
+                    transition={0}
+                  />
+                ) : (
+                  <Feather name="user" size={20} color={C.subtle} />
+                )}
+              </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+                <Text
+                  numberOfLines={1}
+                  style={[S.h3, { fontSize: 14, color: you ? accent : C.ink }]}
                 >
-                  {['K', 'D', 'A'].map((k) => (
-                    <Text
-                      key={k}
-                      style={[
-                        S.small,
-                        { width: 28, textAlign: 'center', fontSize: 10, fontWeight: '700' },
-                      ]}
-                    >
-                      {k}
-                    </Text>
-                  ))}
+                  {playerLabel(p, ownId)}
+                  {!you && p.tag && !p.hidden ? (
+                    <Text style={{ fontWeight: '400', color: C.subtle }}> #{p.tag}</Text>
+                  ) : null}
+                </Text>
+                <Text numberOfLines={1} style={[S.small, { fontSize: 11 }]}>
+                  {agent}
+                  {p.hideLevel || p.level == null ? '' : ` · Lv ${p.level}`}
+                  {game.state === 'agent_select' && p.selection?.toLowerCase() === 'locked'
+                    ? ' · Locked'
+                    : ''}
+                </Text>
+              </View>
+              {statsEnabled ? (
+                <View
+                  testID={stats ? 'live-kda-value' : undefined}
+                  accessibilityLabel={
+                    stats
+                      ? `Live kills ${stats.kills}, deaths ${stats.deaths}, assists ${stats.assists}`
+                      : 'Stats not reported'
+                  }
+                  style={{ width: 84, flexDirection: 'row', justifyContent: 'center' }}
+                >
+                  {stats ? (
+                    [stats.kills, stats.deaths, stats.assists].map((v, i) => (
+                      <Text
+                        key={i}
+                        style={[
+                          digits,
+                          {
+                            width: 28,
+                            textAlign: 'center',
+                            fontSize: 14,
+                            fontWeight: '700',
+                            color: i === 0 ? C.ink : C.muted,
+                          },
+                        ]}
+                      >
+                        {v}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={[S.small, { fontSize: 10 }]}>Not reported</Text>
+                  )}
+                </View>
+              ) : null}
+              {!p.hidden && !statsEnabled && (
+                <View style={{ alignItems: 'center', gap: 3, width: 60 }}>
+                  {rank.image ? (
+                    <Image
+                      source={{ uri: rank.image }}
+                      contentFit="contain"
+                      style={{ width: 28, height: 29 }}
+                      transition={0}
+                    />
+                  ) : ranksLoading && p.tier == null ? (
+                    <SkeletonGroup label="Loading player rank">
+                      <Bone width={26} height={27} />
+                    </SkeletonGroup>
+                  ) : (
+                    <Feather name="award" size={23} color={C.subtle} />
+                  )}
+                  <Text numberOfLines={1} style={[S.small, { fontSize: 9, textAlign: 'center' }]}>
+                    {rank.name === 'Not reported'
+                      ? ranksLoading
+                        ? 'Loading'
+                        : 'Not reported'
+                      : rank.name}
+                  </Text>
                 </View>
               )}
-            </View>
-            {members.map((p) => {
-              const stats = game.state === 'in_game' ? freshLiveStats(p.stats) : undefined,
-                you = p.subject === ownId || p.self;
-              const rank = ranks[p.subject],
-                rankName = p.tierName ?? rank?.name,
-                rankImage = p.tierImage ?? rank?.image;
-              const selection = p.selection?.toLowerCase(),
-                agent = p.agent && p.agent !== 'Not selected' ? p.agent : 'Choosing agent';
-              return (
-                <Pressable
-                  key={p.subject}
-                  testID={`live-player-${p.subject}`}
-                  accessibilityRole="button"
-                  accessibilityLabel={`View ${playerLabel(p, ownId)} profile`}
-                  accessibilityState={{ disabled: !!p.hidden }}
-                  disabled={!!p.hidden}
-                  onPress={() => onPlayer(p)}
-                  style={({ pressed }) => ({
-                    opacity: pressed ? 0.72 : 1,
-                    paddingHorizontal: 12,
-                    paddingVertical: 12,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 9,
-                    minHeight: 76,
-                    borderTopWidth: 0.5,
-                    borderTopColor: C.border,
-                    backgroundColor: you ? `${C.mint}0C` : C.surface,
-                  })}
-                >
-                  <View
-                    style={{
-                      width: 36,
-                      height: 42,
-                      borderRadius: 9,
-                      backgroundColor: C.raised,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {p.agentImage ? (
-                      <Image
-                        source={{ uri: p.agentImage }}
-                        contentFit="contain"
-                        style={{ width: 36, height: 42 }}
-                        transition={0}
-                      />
-                    ) : (
-                      <Feather name="user" size={21} color={C.subtle} />
-                    )}
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <Text
-                        numberOfLines={1}
-                        style={[S.h3, { flexShrink: 1, fontSize: 13, color: you ? C.mint : C.ink }]}
-                      >
-                        {playerLabel(p, ownId)}
-                      </Text>
-                      {p.hidden && <Feather name="lock" color={C.subtle} size={10} />}
-                    </View>
-                    <Text numberOfLines={1} style={[S.small, { fontSize: 11 }]}>
-                      {agent}
-                      {game.state === 'agent_select' && selection
-                        ? ` · ${selection === 'locked' ? 'Locked in' : 'Selecting'}`
-                        : p.hideLevel
-                          ? ''
-                          : p.level != null
-                            ? ` · Lv ${p.level}`
-                            : ''}
-                    </Text>
-                    {!p.hidden &&
-                      (rankName ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          {rankImage && (
-                            <Image
-                              source={{ uri: rankImage }}
-                              contentFit="contain"
-                              style={{ width: 15, height: 15 }}
-                              transition={0}
-                            />
-                          )}
-                          <Text numberOfLines={1} style={[S.small, { fontSize: 10 }]}>
-                            {rankName}
-                            {rank && !rank.currentSeason ? ' · previous' : ''}
-                          </Text>
-                        </View>
-                      ) : ranksLoading && p.tier == null ? (
-                        <SkeletonGroup label="Loading player rank">
-                          <Bone width={68} height={9} />
-                        </SkeletonGroup>
-                      ) : null)}
-                  </View>
-                  {statsEnabled ? (
-                    <View
-                      testID={stats ? 'live-kda-value' : undefined}
-                      accessibilityLabel={
-                        stats
-                          ? `Live kills ${stats.kills}, deaths ${stats.deaths}, assists ${stats.assists}`
-                          : 'Stats not reported'
-                      }
-                      style={{ width: 84, flexDirection: 'row', alignItems: 'center' }}
-                    >
-                      {stats ? (
-                        [stats.kills, stats.deaths, stats.assists].map((value, index) => (
-                          <Text
-                            key={index}
-                            style={[
-                              numberStyle,
-                              {
-                                width: 28,
-                                textAlign: 'center',
-                                fontSize: 14,
-                                fontWeight: '700',
-                                color: index === 0 ? C.ink : C.muted,
-                              },
-                            ]}
-                          >
-                            {value}
-                          </Text>
-                        ))
-                      ) : (
-                        <Text style={[S.small, { width: 84, textAlign: 'center', fontSize: 10 }]}>
-                          Not reported
-                        </Text>
-                      )}
-                    </View>
-                  ) : (
-                    <Feather
-                      name={p.hidden ? 'lock' : 'chevron-right'}
-                      size={15}
-                      color={C.subtle}
-                    />
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        );
-      })}
+              {p.hidden ? (
+                <Feather name="lock" size={14} color={C.subtle} />
+              ) : (
+                !statsEnabled && <Feather name="chevron-right" size={14} color={C.subtle} />
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }

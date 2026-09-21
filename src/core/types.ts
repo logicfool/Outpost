@@ -2,7 +2,15 @@ export type Shard = 'ap' | 'eu' | 'na' | 'kr' | 'pbe';
 export type Region = 'ap' | 'eu' | 'na' | 'br' | 'latam' | 'kr' | 'pbe';
 export type JsonObject = Record<string, unknown>;
 export type ItemKind =
-  'skin' | 'chroma' | 'buddy' | 'spray' | 'card' | 'title' | 'agent' | 'currency' | 'unknown';
+  | 'skin'
+  | 'chroma'
+  | 'buddy'
+  | 'spray'
+  | 'card'
+  | 'title'
+  | 'agent'
+  | 'currency'
+  | 'unknown';
 export interface Account {
   puuid: string;
   gameName: string;
@@ -356,6 +364,7 @@ export interface LiveGame {
   nextCheckAt?: number;
   mapId?: string;
   progress?: import('./matchTypes').MatchProgress;
+  presenceNotBefore?: number;
   detailError?: { code: string; message: string; retryAt?: number };
 }
 export interface MatchPlayer {

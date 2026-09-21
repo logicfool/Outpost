@@ -105,6 +105,7 @@ try {
     async () => {
       await tab('Profile');
       await click('View live game details');
+      await tab('Opponents');
       await click('View Ferro profile');
       await button('Add friend').waitFor();
       await click('Add friend');

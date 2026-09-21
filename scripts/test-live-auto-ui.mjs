@@ -87,7 +87,7 @@ try {
       await click('View live game details');
       await page.getByTestId('live-match-hero').waitFor();
       await page.getByTestId('live-roster').waitFor();
-      assert.equal(await page.locator('[data-testid^="live-player-"]').count(), 10);
+      assert.equal(await page.locator('[data-testid^="live-player-"]').count(), 5);
       assert.equal(await page.getByTestId('live-kda-value').count(), 0);
       assert.equal(await page.getByTestId('live-stats-unavailable').count(), 1);
       assert.ok(!/K\/D\/A\s*-\s*\//.test(await page.locator('body').innerText()));
@@ -107,6 +107,7 @@ try {
         heights.join(','),
       );
       await button('View You profile').waitFor();
+      await tab('Opponents');
       await click('View Ferro profile');
       await button('Add friend').waitFor();
       await noConnectionControls();

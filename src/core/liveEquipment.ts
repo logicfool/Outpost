@@ -42,7 +42,11 @@ export function normalizeLiveEquipment(
         id: text(p.ID).toLowerCase(),
         item: catalogItem(catalog, text(p.ID)),
       }));
-      const skin = parts.find((p) => p.item.kind === 'skin' && p.item.weaponId === weaponId);
+      const skins = parts.filter((p) => p.item.kind === 'skin' && p.item.weaponId === weaponId);
+      const skin =
+        skins.find((p) =>
+          catalog.items[p.item.canonicalId]?.levels?.some((level) => level.id === p.id),
+        ) ?? skins[0];
       const chroma = parts.find(
         (p) =>
           p.item.kind === 'chroma' &&
@@ -54,6 +58,8 @@ export function normalizeLiveEquipment(
       weapons.set(weaponId, {
         weaponId,
         weapon: meta?.name ?? skin?.item.weapon ?? chroma?.item.weapon ?? 'Weapon',
+        weaponImage: meta?.image,
+        category: meta?.category,
         skin: chroma?.item ?? skin?.item,
         levelId: skin?.id,
         chromaId: chroma?.id,
@@ -65,7 +71,12 @@ export function normalizeLiveEquipment(
       const g = object(value),
         weaponId = text(g.ID).toLowerCase(),
         meta = catalog.weapons?.[weaponId];
-      const level = catalogItem(catalog, text(g.SkinLevelID) || text(g.SkinID), 'skin'),
+      const level =
+          [
+            catalogItem(catalog, text(g.SkinLevelID), 'skin'),
+            catalogItem(catalog, text(g.SkinID), 'skin'),
+          ].find((item) => item.weaponId === weaponId) ??
+          catalogItem(catalog, text(g.SkinLevelID) || text(g.SkinID), 'skin'),
         chroma = catalogItem(catalog, text(g.ChromaID), 'chroma');
       const skin =
         chroma.weaponId === weaponId && chroma.canonicalId === level.canonicalId
@@ -77,6 +88,8 @@ export function normalizeLiveEquipment(
       weapons.set(weaponId, {
         weaponId,
         weapon: meta?.name ?? skin?.weapon ?? 'Weapon',
+        weaponImage: meta?.image,
+        category: meta?.category,
         skin,
         levelId: text(g.SkinLevelID) || undefined,
         chromaId: text(g.ChromaID) || undefined,

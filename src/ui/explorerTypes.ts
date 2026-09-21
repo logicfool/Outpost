@@ -7,6 +7,7 @@ export type ExplorerRoute =
   | { type: 'match'; id: string; subject?: string }
   | { type: 'career'; rank: Ranked }
   | { type: 'live' }
+  | { type: 'live-player'; matchId: string; subject: string }
   | { type: 'identity'; initialTab?: 'card' | 'title' }
   | {
       type: 'collection';

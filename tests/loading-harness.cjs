@@ -80,7 +80,10 @@ function harness({ os = 'android', reduced = true, overrides = {} } = {}) {
         : content(props.ListEmptyComponent),
       content(props.ListFooterComponent),
     );
-  const polling = { LivePollingContext: React.createContext(true) };
+  const polling = {
+    LivePollingContext: React.createContext(true),
+    useLivePolling: () => ({ busy: false, refreshing: false, refresh() {} }),
+  };
   function load(file) {
     file = path.resolve(root, file);
     if (cache.has(file)) return cache.get(file).exports;
