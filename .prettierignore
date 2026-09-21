@@ -1,0 +1,10 @@
+node_modules/
+android/
+ios/
+dist/
+dist-*/
+builds/
+docs/
+.expo/
+.test-build/
+package-lock.json
