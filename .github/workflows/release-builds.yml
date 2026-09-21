@@ -121,15 +121,15 @@ jobs:
   ios:
     needs: checks
     if: github.event_name == 'push' || inputs.platform != 'android'
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      # Expo SDK 57 does not compile with Xcode 26: its expo-modules-jsi sources use `weak let`,
-      # which the Swift 6.2 compiler rejects. Pin the Xcode 16 line it was released against.
+      # expo-modules-jsi (Expo SDK 57) declares Swift tools 6.2 and uses `weak let`, which needs
+      # Swift 6.3. That means Xcode 26.4 or newer; earlier Xcode releases cannot build it.
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16.4'
+          xcode-version: '26.6'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

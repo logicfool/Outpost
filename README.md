@@ -48,7 +48,7 @@ npm run test:ui
 gh secret set ANDROID_DEBUG_KEYSTORE_BASE64 --body "$(base64 -i android/app/debug.keystore)"
 ```
 
-The iOS job builds with Xcode 16. The IPA is unsigned and must be signed before it can be installed on an iPhone.
+The iOS job builds with Xcode 26.6; building iOS locally needs Xcode 26.4 or newer. The IPA is unsigned and must be signed before it can be installed on an iPhone.
 
 ## Privacy
 
