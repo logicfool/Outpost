@@ -10,8 +10,6 @@ ios/
 *.keystore
 *.p12
 *.mobileprovision
-# npm is the package manager (package-lock.json); keep EAS from picking pnpm
-pnpm-lock.yaml
 
 # Local/cloud build outputs and validation caches
 builds/
