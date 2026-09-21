@@ -1,0 +1,198 @@
+name: Release builds
+
+# Compiles a real Gradle APK and an unsigned iPhone IPA from source, on GitHub's runners,
+# on GitHub-hosted runners. Assumes this app is the repository root (like ci.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Which platform to build
+        type: choice
+        options: [both, android, ios]
+        default: both
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-builds-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run check:syntax
+
+  android:
+    needs: checks
+    if: github.event_name == 'push' || inputs.platform != 'ios'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+
+      - name: Generate the native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Prebuild writes a fresh template debug.keystore. The release build is signed with that
+      # file, so it must be replaced with the key existing installs were signed with, or the
+      # APK cannot install over the current app.
+      - name: Restore the update signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+          EXPECTED_SIGNER: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::Add the ANDROID_DEBUG_KEYSTORE_BASE64 secret; without it the APK cannot update existing installs."
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 --decode > android/app/debug.keystore
+          actual=$(keytool -list -v -keystore android/app/debug.keystore -storepass android -alias androiddebugkey \
+            | awk -F': ' '/SHA256:/{gsub(":","",$2); print tolower($2); exit}')
+          if [ "$actual" != "$EXPECTED_SIGNER" ]; then
+            echo "::error::Keystore fingerprint $actual does not match the published signer."
+            exit 1
+          fi
+
+      - name: Compile the release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Verify the APK
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          VERSION=$(node -p "require('./package.json').version")
+          BUILD_TOOLS=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee signature.txt
+          grep -qi "certificate SHA-256 digest: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c" signature.txt
+          python3 - "$APK" "$VERSION" <<'PY'
+          import importlib.util, sys, zipfile
+          spec = importlib.util.spec_from_file_location('audit', 'scripts/audit-android.py')
+          audit = importlib.util.module_from_spec(spec); spec.loader.exec_module(audit)
+          apk, version = sys.argv[1], sys.argv[2]
+          with zipfile.ZipFile(apk) as archive:
+              assert archive.testzip() is None, 'APK archive CRC failed'
+              rows = audit.manifest_elements(archive.read('AndroidManifest.xml'))
+              manifest = next(r for r in rows if r['element'] == 'manifest')
+              assert manifest['package'] == 'app.outpost.valorant', manifest
+              assert manifest['versionName'] == version, (manifest['versionName'], version)
+              service = next(r for r in rows if r.get('name') == 'app.outpost.historysync.OutpostHistorySyncService')
+              assert service['exported'] == 0, service
+              arches = sorted({n.split('/')[1] for n in archive.namelist() if n.startswith('lib/') and n.endswith('.so')})
+              assert arches == ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'], arches
+          print('verified', manifest['versionName'], manifest['versionCode'], arches)
+          PY
+          mkdir -p dist-release
+          cp "$APK" "dist-release/Outpost-$VERSION-android.apk"
+          (cd dist-release && sha256sum *.apk > SHA256SUMS-android.txt && cat SHA256SUMS-android.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outpost-android
+          path: |
+            dist-release/*.apk
+            dist-release/SHA256SUMS-android.txt
+            signature.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    needs: checks
+    if: github.event_name == 'push' || inputs.platform != 'android'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      # Expo SDK 57 does not compile with Xcode 26: its expo-modules-jsi sources use `weak let`,
+      # which the Swift 6.2 compiler rejects. Pin the Xcode 16 line it was released against.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.4'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      - name: Generate the native iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock', 'package-lock.json') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios
+        run: pod install
+
+      # A device (iphoneos) build with signing switched off: a real arm64 iPhone binary that
+      # still needs signing before it installs on a stock iPhone. No Apple account is used.
+      - name: Compile the release app
+        working-directory: ios
+        run: |
+          if ! xcodebuild -workspace Outpost.xcworkspace -scheme Outpost -configuration Release \
+              -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS="" \
+              build > xcodebuild.log 2>&1; then
+            grep -E " error: " xcodebuild.log | head -40
+            tail -60 xcodebuild.log
+            exit 1
+          fi
+          grep -E "\*\* BUILD" xcodebuild.log
+          test -d build/Build/Products/Release-iphoneos/Outpost.app
+
+      - name: Package and verify the unsigned IPA
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          APP=ios/build/Build/Products/Release-iphoneos/Outpost.app
+          test ! -e "$APP/_CodeSignature" && test ! -e "$APP/embedded.mobileprovision"
+          test -s "$APP/main.jsbundle"
+          lipo -archs "$APP/Outpost" | grep -qw arm64
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")" = "$VERSION" ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")" = "app.outpost.valorant" ]
+          /usr/libexec/PlistBuddy -c 'Print CFBundleSupportedPlatforms' "$APP/Info.plist" | grep -q iPhoneOS
+          mkdir -p dist-release/Payload
+          cp -R "$APP" dist-release/Payload/
+          (cd dist-release && zip -qry "Outpost-$VERSION-ios-unsigned.ipa" Payload && rm -rf Payload)
+          unzip -tq "dist-release/Outpost-$VERSION-ios-unsigned.ipa"
+          (cd dist-release && shasum -a 256 *.ipa > SHA256SUMS-ios.txt && cat SHA256SUMS-ios.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outpost-ios-unsigned
+          path: |
+            dist-release/*.ipa
+            dist-release/SHA256SUMS-ios.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: outpost-ios-build-log
+          path: ios/xcodebuild.log
+          retention-days: 7
