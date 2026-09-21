@@ -16,3 +16,11 @@ builds/
 dist-*/
 playwright-report/
 test-results/
+
+# Local notes, test evidence and screenshots
+docs/
+references/
+
+# OS and tool caches
+.DS_Store
+__pycache__/
