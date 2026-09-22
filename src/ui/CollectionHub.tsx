@@ -6,6 +6,7 @@ import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
 import { ArtworkBoundary } from './ArtworkBoundary';
 import React, { memo, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   FlatList,
   Pressable,
   RefreshControl,
@@ -80,7 +81,7 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
     [owned, model.snapshot?.store, model.history],
   );
   return (
-    <ScrollView
+    <Animated.ScrollView
       {...scrollHeader}
       testID="collection-home"
       showsVerticalScrollIndicator={false}
@@ -208,7 +209,7 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           last
         />
       </ListGroup>
-    </ScrollView>
+    </Animated.ScrollView>
   );
 }
 const CollectionTile = memo(function CollectionTile({

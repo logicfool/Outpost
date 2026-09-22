@@ -10,7 +10,7 @@ import React, {
   useState,
   useDeferredValue,
 } from 'react';
-import { Platform, SectionList, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { Animated, Platform, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
 import type { Friend } from '../core/chatTypes';
@@ -182,7 +182,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   );
   return (
     <View style={{ flex: 1 }}>
-      <SectionList
+      <Animated.SectionList
         {...scrollHeader}
         onViewableItemsChanged={portraits.onViewableItemsChanged}
         viewabilityConfig={portraits.viewabilityConfig}

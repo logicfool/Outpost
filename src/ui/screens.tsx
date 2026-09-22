@@ -33,6 +33,7 @@ import {
   ActivityIndicator,
   ActionSheetIOS,
   Alert,
+  Animated,
   FlatList,
   Modal,
   Platform,
@@ -137,7 +138,7 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
   const scrollHeader = useScrollHeader();
 
   return (
-    <ScrollView
+    <Animated.ScrollView
       {...scrollHeader}
       contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
       refreshControl={
@@ -150,7 +151,7 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
       showsVerticalScrollIndicator={false}
     >
       {children}
-    </ScrollView>
+    </Animated.ScrollView>
   );
 }
 function Heading({ eyebrow, title }: { eyebrow: string; title: React.ReactNode }) {
@@ -525,7 +526,7 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
           ? store?.nightMarket?.expiresAt
           : undefined;
   return (
-    <FlatList
+    <Animated.FlatList
       {...scrollHeader}
       data={rows}
       renderItem={render}
@@ -1578,7 +1579,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
         ? 'Agent select'
         : 'Not in a game';
   return (
-    <FlatList
+    <Animated.FlatList
       {...scrollHeader}
       data={shown}
       renderItem={render}
