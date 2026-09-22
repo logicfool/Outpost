@@ -9,6 +9,8 @@ test('iOS 26 uses the native bottom tab view while other platforms retain the cu
   const config = fs.readFileSync('app.config.ts', 'utf8');
   assert.match(ios, /from 'react-native-bottom-tabs'/);
   assert.match(ios, /nativeGlassAvailable\(\)/);
+  assert.match(ios, /UIManager\.getViewManagerConfig\('RNCTabView'\)/);
+  assert.match(ios, /!!NativeTabView/);
   assert.match(ios, /selectionTick\(\)/);
   assert.match(ios, /sfSymbol/);
   assert.match(fallback, /return false/);

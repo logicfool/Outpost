@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
-import { View } from 'react-native';
-import TabView, { type AppleIcon } from 'react-native-bottom-tabs';
+import { UIManager, View } from 'react-native';
+import type { AppleIcon } from 'react-native-bottom-tabs';
 import { selectionTick } from '../platform/haptics';
 import { LivePollingContext } from '../state/useLivePolling';
 import type { ScreenName } from './screens';
@@ -59,8 +59,14 @@ const routes: NativeRoute[] = [
   },
 ];
 
+let NativeTabView: typeof import('react-native-bottom-tabs').default | undefined;
+try {
+  if (UIManager.getViewManagerConfig('RNCTabView'))
+    NativeTabView = require('react-native-bottom-tabs').default;
+} catch {}
+
 export function nativeTabsAvailable() {
-  return nativeGlassAvailable();
+  return nativeGlassAvailable() && !!NativeTabView;
 }
 
 export function NativeTabs({
@@ -74,6 +80,8 @@ export function NativeTabs({
   onChange(tab: ScreenName): void;
   render(tab: ScreenName, visible: boolean): React.ReactNode;
 }) {
+  if (!NativeTabView) return null;
+  const TabView = NativeTabView;
   const index = Math.max(
     0,
     routes.findIndex((route) => route.key === active),
