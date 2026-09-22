@@ -1,5 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SocialHandoff, type SocialState } from '../core/socialHandoff';
+import { loginDocument, socialAuthorization, socialResumeDocument } from '../core/socialLogin';
+import {
+  parseSocialBridgeMessage,
+  socialPopupBridge,
+  socialStatusProbe,
+} from '../core/socialBridge';
 import { WebView } from 'react-native-webview';
 import {
   decodeJwtClaimsUnverified,
@@ -29,6 +46,16 @@ export default function Login({
 }: LoginProps) {
   const { C, S } = useTheme();
   const [state, setState] = useState<LoginState>({ phase: 'start' });
+  const [social, setSocial] = useState<SocialState>({ status: 'idle' });
+  const [socialNow, setSocialNow] = useState(Date.now());
+  const web = useRef<WebView | null>(null),
+    socialKey = useRef(''),
+    socialActive = useRef<() => boolean>(() => false);
+  const socialRef = useRef<SocialHandoff | null>(null);
+  const originalRiotPage = useRef(''),
+    recoveredProvider = useRef(''),
+    resumePage = useRef<() => void>(() => {});
+  const [resumeSource, setResumeSource] = useState<string>();
   const [region, setRegion] = useState<'auto' | Region>('auto'),
     [advanced, setAdvanced] = useState(false);
   const [access, setAccess] = useState(''),
@@ -93,17 +120,79 @@ export default function Login({
       diagnostic: recordLogin,
     });
   const flow = flowRef.current;
+  if (!socialRef.current)
+    socialRef.current = new SocialHandoff({
+      current: () => socialActive.current(),
+      openBrowser: (url) => Linking.openURL(url),
+      probe: (id) => {
+        if (!web.current)
+          throw new AppError('SOCIAL_BROWSER', 'The sign-in page is no longer available.');
+        web.current.injectJavaScript(socialStatusProbe(socialKey.current, id));
+      },
+      continueRiot: (url) => {
+        if (isCallback(url)) flowRef.current?.navigate(url);
+        else {
+          if (!web.current)
+            throw new AppError('SOCIAL_BROWSER', 'The original Riot window is unavailable.');
+          web.current.injectJavaScript(
+            `window.__outpostCloseSocialPopups?.(${JSON.stringify(socialKey.current)});window.location.assign(${JSON.stringify(url)});true;`,
+          );
+        }
+      },
+      resumeRiot: () => resumePage.current(),
+      emit: (value) => {
+        if (alive.current) setSocial(value);
+      },
+      diagnostic: (code) => recordLogin('social', code),
+    });
+  const handoff = socialRef.current;
+  useEffect(() => {
+    setSocialNow(Date.now());
+    if (!social.retryAt || social.retryAt <= Date.now()) return;
+    const timer = setTimeout(
+      () => setSocialNow(Date.now()),
+      Math.min(2147480000, Math.max(1, social.retryAt - Date.now())),
+    );
+    return () => clearTimeout(timer);
+  }, [social.retryAt]);
+  socialActive.current = () =>
+    alive.current &&
+    hostActive.current?.() !== false &&
+    browserGeneration === generation.current &&
+    flow.snapshot.phase === 'browser';
+  useEffect(() => {
+    const resume = () => {
+      if (AppState.currentState === 'active' && socialActive.current()) handoff.check();
+    };
+    const listener = AppState.addEventListener('change', (value) => {
+      if (value === 'active') resume();
+    });
+    const focus =
+      Platform.OS === 'android' ? AppState.addEventListener('focus', resume) : undefined;
+    return () => {
+      listener.remove();
+      focus?.remove();
+    };
+  }, [handoff]);
+  useEffect(() => {
+    if (state.phase !== 'browser') {
+      handoff.dispose();
+      setSocial({ status: 'idle' });
+    }
+  }, [state.phase, handoff]);
+
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
       generation.current++;
+      handoff.dispose();
       flow.dispose();
       browserReady.current?.reject(new AppError('LOGIN_CANCELLED', 'Sign-in closed.'));
       browserReady.current = null;
       notifyBusy.current?.(false);
     };
-  }, [flow]);
+  }, [flow, handoff]);
   const working = state.phase === 'preparing' || state.phase === 'exchange';
   const begin = () => {
     if (
@@ -113,6 +202,12 @@ export default function Login({
       flow.snapshot.phase !== 'start'
     )
       return;
+    handoff.cancel();
+    socialKey.current = randomHex();
+    currentUrl.current = '';
+    originalRiotPage.current = '';
+    recoveredProvider.current = '';
+    setResumeSource(undefined);
     attemptConfig.current = latest.current;
     let resolve!: () => void, reject!: (reason: Error) => void;
     browserReady.current = {
@@ -129,7 +224,25 @@ export default function Login({
   const close = () => {
     if (!working) onClose();
   };
-  const source = useMemo(() => loginWebSource(state.url), [state.url]);
+  const source = useMemo(
+    () => loginWebSource(resumeSource ?? state.url),
+    [state.url, resumeSource],
+  );
+  resumePage.current = () => {
+    const target = originalRiotPage.current;
+    if (!socialActive.current() || !socialResumeDocument(target) || !web.current)
+      throw new AppError('SOCIAL_BROWSER', 'The original Riot page is unavailable.');
+    web.current.injectJavaScript(
+      `window.__outpostCloseSocialPopups?.(${JSON.stringify(socialKey.current)});true;`,
+    );
+    if (resumeSource === target)
+      web.current.injectJavaScript(`window.location.replace(${JSON.stringify(target)});true;`);
+    else setResumeSource(target);
+  };
+  const popupBridge = useMemo(
+    () => (socialKey.current ? socialPopupBridge(socialKey.current) : 'true;'),
+    [browserGeneration],
+  );
   const hasBrowser =
     browserGeneration > 0 &&
     (state.phase === 'preparing' ||
@@ -148,6 +261,26 @@ export default function Login({
         browserReady.current?.reject(new AppError(code, message));
       flow.browserError(message, code);
     }
+  };
+  const popup = (url: string, documentUrl = currentUrl.current || flow.snapshot.url || '') => {
+    if (!currentBrowser() || flow.snapshot.phase !== 'browser' || !loginDocument(documentUrl))
+      return;
+    if (!url || url === 'about:blank') {
+      if (handoff.snapshot.status === 'idle') {
+        setSocial({
+          status: 'error',
+          code: 'SOCIAL_EMPTY_WINDOW',
+          message:
+            'Riot opened an empty sign-in window. Retry the provider button or choose another sign-in option.',
+        });
+        recordLogin('social', 'SOCIAL_EMPTY_WINDOW');
+      }
+      return;
+    }
+    if (loginDocument(url)) {
+      // Riot first creates its provider challenge using the app's existing cookie jar.
+      web.current?.injectJavaScript(`window.location.assign(${JSON.stringify(url)});true;`);
+    } else void handoff.open(url, documentUrl);
   };
   return (
     <ModalPage>
@@ -266,12 +399,64 @@ export default function Login({
           )}
         </ScrollView>
       )}
+      {state.phase === 'browser' && social.status !== 'idle' && (
+        <View
+          style={[
+            S.card,
+            { marginHorizontal: 16, marginBottom: 8, padding: 12, gap: 8, width: undefined },
+          ]}
+        >
+          <Text style={S.h3}>{social.provider ?? 'Social'} sign-in</Text>
+          <Text
+            style={[S.small, social.status === 'error' && { color: C.gold }]}
+            accessibilityRole={social.status === 'error' ? 'alert' : undefined}
+          >
+            {social.message ?? 'Opening your system browser...'}
+          </Text>
+          {!!social.provider && (
+            <Button
+              title={
+                social.status === 'checking'
+                  ? 'Checking Riot...'
+                  : (social.retryAt ?? 0) > socialNow
+                    ? 'Waiting before the next check'
+                    : 'Check completed sign-in'
+              }
+              secondary
+              disabled={
+                ['opening', 'checking', 'continuing'].includes(social.status) ||
+                (social.retryAt ?? 0) > socialNow
+              }
+              onPress={() => handoff.check()}
+            />
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Use another sign-in method"
+            onPress={() => {
+              handoff.cancel();
+              failed(
+                'Choose another sign-in method or try the social button again.',
+                'SOCIAL_CANCELLED',
+              );
+            }}
+            style={{ paddingVertical: 6 }}
+          >
+            <Text style={[S.small, { textAlign: 'center' }]}>Use another sign-in method</Text>
+          </Pressable>
+        </View>
+      )}
       {hasBrowser && (
         <View style={{ flex: 1, minHeight: 160 }}>
           <WebView
             testID="riot-signin-webview"
             key={browserGeneration}
+            ref={web}
             source={source}
+            injectedJavaScriptBeforeContentLoaded={popupBridge}
+            injectedJavaScript={popupBridge}
+            injectedJavaScriptBeforeContentLoadedForMainFrameOnly
+            injectedJavaScriptForMainFrameOnly
             style={{ flex: 1 }}
             pointerEvents={state.phase === 'browser' ? 'auto' : 'none'}
             incognito={false}
@@ -315,29 +500,62 @@ export default function Login({
                   return false;
                 }
               }
+              if (socialAuthorization(request.url)) {
+                popup(request.url);
+                return false;
+              }
+              if (socialResumeDocument(request.url)) originalRiotPage.current = request.url;
+              if (!isLoginNavigationAllowed(request.url)) {
+                popup(request.url);
+                return false;
+              }
               return flow.navigate(request.url);
             }}
             onNavigationStateChange={(event) => {
               if (!currentBrowser()) return;
               if (!event.loading) ready(event.url);
               if (isCallback(event.url)) flow.navigate(event.url);
-              else {
-                currentUrl.current = event.url;
+              else if (flow.snapshot.phase === 'browser' && socialAuthorization(event.url)) {
+                web.current?.stopLoading?.();
+                popup(event.url);
+                if (originalRiotPage.current && recoveredProvider.current !== event.url) {
+                  recoveredProvider.current = event.url;
+                  try {
+                    resumePage.current();
+                  } catch {
+                    failed(
+                      'The original Riot window could not resume. Retry sign-in.',
+                      'SOCIAL_RESUME_DOCUMENT',
+                    );
+                  }
+                }
+              } else {
                 if (isLoginNavigationAllowed(event.url)) {
+                  currentUrl.current = event.url;
+                  if (socialResumeDocument(event.url)) originalRiotPage.current = event.url;
                   try {
                     setOrigin(new URL(event.url).origin);
                   } catch {}
                 }
               }
             }}
-            onOpenWindow={() =>
-              failed(
-                'This option needs an external window. Use Riot username/password sign-in here.',
-              )
-            }
-            onError={() =>
-              failed('Riot sign-in could not load. Retry without removing your account.')
-            }
+            onOpenWindow={(event) => popup(event.nativeEvent.targetUrl)}
+            onMessage={(event) => {
+              if (!currentBrowser() || flow.snapshot.phase !== 'browser') return;
+              const message = parseSocialBridgeMessage(
+                event.nativeEvent.data,
+                event.nativeEvent.url,
+                socialKey.current,
+              );
+              if (message?.type === 'outpost-social-popup')
+                popup(message.url, event.nativeEvent.url);
+              if (message?.type === 'outpost-social-status') handoff.result(message);
+            }}
+            onError={(event) => {
+              if (handoff.snapshot.status !== 'idle' && [-999, -3].includes(event.nativeEvent.code))
+                return;
+              failed('Riot sign-in could not load. Retry without removing your account.');
+            }}
             onHttpError={(event) => {
               if (
                 event.nativeEvent.statusCode >= 400 &&

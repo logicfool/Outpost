@@ -82,6 +82,17 @@ function harness(options = {}) {
   };
   const RN = {
     Platform: { OS: options.platform ?? 'ios' },
+    AppState: {
+      currentState: 'active',
+      addEventListener() {
+        return { remove() {} };
+      },
+    },
+    Linking: {
+      openURL: async () => {
+        throw Error('No social browser expected in this test');
+      },
+    },
     Keyboard: { dismiss() {} },
     Modal: NativeModal,
     View: 'View',

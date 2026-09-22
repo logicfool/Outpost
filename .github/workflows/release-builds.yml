@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -41,16 +41,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - run: npm ci
 
       - name: Generate the native Android project
@@ -84,7 +84,7 @@ jobs:
         run: |
           APK=android/app/build/outputs/apk/release/app-release.apk
           VERSION=$(node -p "require('./package.json').version")
-          BUILD_TOOLS=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -1)
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | tee signature.txt
           grep -qi "certificate SHA-256 digest: fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c" signature.txt
           python3 - "$APK" "$VERSION" <<'PY'
@@ -105,17 +105,17 @@ jobs:
           print('verified', manifest['versionName'], manifest['versionCode'], arches)
           PY
           mkdir -p dist-release
+          cp signature.txt dist-release/SIGNATURE-android.txt
           cp "$APK" "dist-release/Outpost-$VERSION-android.apk"
-          (cd dist-release && sha256sum *.apk > SHA256SUMS-android.txt && cat SHA256SUMS-android.txt)
+          (cd dist-release && sha256sum ./*.apk > SHA256SUMS-android.txt && cat SHA256SUMS-android.txt)
 
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-release-artifact
         with:
           name: outpost-android
           path: |
             dist-release/*.apk
             dist-release/SHA256SUMS-android.txt
-            signature.txt
-          if-no-files-found: error
+            dist-release/SIGNATURE-android.txt
           retention-days: 30
 
   ios:
@@ -124,13 +124,13 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # expo-modules-jsi (Expo SDK 57) declares Swift tools 6.2 and uses `weak let`, which needs
       # Swift 6.3. That means Xcode 26.4 or newer; earlier Xcode releases cannot build it.
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.6'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -139,7 +139,7 @@ jobs:
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ios/Pods
           key: pods-${{ runner.os }}-${{ hashFiles('ios/Podfile.lock', 'package-lock.json') }}
@@ -179,18 +179,17 @@ jobs:
           cp -R "$APP" dist-release/Payload/
           (cd dist-release && zip -qry "Outpost-$VERSION-ios-unsigned.ipa" Payload && rm -rf Payload)
           unzip -tq "dist-release/Outpost-$VERSION-ios-unsigned.ipa"
-          (cd dist-release && shasum -a 256 *.ipa > SHA256SUMS-ios.txt && cat SHA256SUMS-ios.txt)
+          (cd dist-release && shasum -a 256 ./*.ipa > SHA256SUMS-ios.txt && cat SHA256SUMS-ios.txt)
 
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-release-artifact
         with:
           name: outpost-ios-unsigned
           path: |
             dist-release/*.ipa
             dist-release/SHA256SUMS-ios.txt
-          if-no-files-found: error
           retention-days: 30
 
-      - uses: actions/upload-artifact@v4
+      - uses: ./.github/actions/upload-release-artifact
         if: failure()
         with:
           name: outpost-ios-build-log

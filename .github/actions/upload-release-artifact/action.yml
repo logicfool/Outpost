@@ -1,0 +1,91 @@
+name: Upload release artifact with bounded recovery
+description: Retry transient finalization failures without recompiling or hiding failed delivery.
+inputs:
+  name:
+    description: Stable artifact name prefix
+    required: true
+  path:
+    description: Explicit files to upload
+    required: true
+  retention-days:
+    description: Artifact retention period
+    default: '30'
+outputs:
+  artifact-id:
+    description: ID of the successfully finalized artifact
+    value: ${{ steps.result.outputs.artifact-id }}
+  artifact-url:
+    description: Link to the successfully finalized artifact
+    value: ${{ steps.result.outputs.artifact-url }}
+  artifact-name:
+    description: Successful attempt name
+    value: ${{ steps.result.outputs.artifact-name }}
+runs:
+  using: composite
+  steps:
+    - name: Validate artifact inputs
+      shell: bash
+      env:
+        ARTIFACT_PREFIX: ${{ inputs.name }}
+        RETENTION_DAYS: ${{ inputs.retention-days }}
+      run: node "$GITHUB_ACTION_PATH/report.cjs" validate
+    - name: Upload artifact - attempt 1
+      id: upload_1
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+      with:
+        name: ${{ inputs.name }}-${{ github.run_id }}-${{ github.run_attempt }}-try1
+        path: ${{ inputs.path }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: 6
+        include-hidden-files: false
+    - name: Wait before upload retry
+      if: ${{ !cancelled() && steps.upload_1.outcome == 'failure' }}
+      shell: bash
+      run: sleep 15
+    - name: Upload artifact - attempt 2
+      id: upload_2
+      if: ${{ !cancelled() && steps.upload_1.outcome == 'failure' }}
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+      with:
+        name: ${{ inputs.name }}-${{ github.run_id }}-${{ github.run_attempt }}-try2
+        path: ${{ inputs.path }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: 6
+        include-hidden-files: false
+    - name: Wait before final upload retry
+      if: ${{ !cancelled() && steps.upload_2.outcome == 'failure' }}
+      shell: bash
+      run: sleep 30
+    - name: Upload artifact - attempt 3
+      id: upload_3
+      if: ${{ !cancelled() && steps.upload_2.outcome == 'failure' }}
+      continue-on-error: true
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1, Node 24
+      with:
+        name: ${{ inputs.name }}-${{ github.run_id }}-${{ github.run_attempt }}-try3
+        path: ${{ inputs.path }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: 6
+        include-hidden-files: false
+    - name: Require successful delivery and report the download
+      id: result
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        ARTIFACT_PREFIX: ${{ inputs.name }}
+        RETENTION_DAYS: ${{ inputs.retention-days }}
+        OUTCOME_1: ${{ steps.upload_1.outcome }}
+        OUTCOME_2: ${{ steps.upload_2.outcome }}
+        OUTCOME_3: ${{ steps.upload_3.outcome }}
+        ID_1: ${{ steps.upload_1.outputs.artifact-id }}
+        ID_2: ${{ steps.upload_2.outputs.artifact-id }}
+        ID_3: ${{ steps.upload_3.outputs.artifact-id }}
+        URL_1: ${{ steps.upload_1.outputs.artifact-url }}
+        URL_2: ${{ steps.upload_2.outputs.artifact-url }}
+        URL_3: ${{ steps.upload_3.outputs.artifact-url }}
+      run: node "$GITHUB_ACTION_PATH/report.cjs" report

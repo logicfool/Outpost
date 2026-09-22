@@ -514,6 +514,13 @@ try {
       await page
         .getByRole('textbox', { name: 'Search friends directory', exact: true })
         .fill('Lumen');
+      // Friends deliberately defers filtering so typing remains responsive. Wait for that render.
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll(
+            '[data-testid="tab-scene-friends"] button[aria-label^="Chat with "]',
+          ).length === 1,
+      );
       assert.equal(await page.getByRole('button', { name: /^Chat with / }).count(), 1);
       await click('Chat with Lumen');
       assert.equal(
