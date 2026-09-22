@@ -1,5 +1,11 @@
 import { RetainedTabs } from './src/ui/RetainedTabs';
 import { NativeTabs, nativeTabsAvailable } from './src/ui/NativeTabs';
+import { uiCrash, type UiCrash } from './src/core/crashReport';
+import { requestDiagnostics } from './src/core/diagnostics';
+import { detailedDiagnosticReport, flushDetailedDiagnostics } from './src/core/detailedDiagnostics';
+import { diagnosticContext } from './src/platform/diagnosticContext';
+import { saveDiagnosticFile } from './src/platform/diagnosticExport';
+import { safeError } from './src/core/validation';
 import { ScrollHeader } from './src/ui/ScrollHeader';
 import { sameScreenModel } from './src/core/screenInputs';
 import { NavSurface, useNavGlass } from './src/ui/NavSurface';
@@ -62,24 +68,123 @@ const SCREEN_TITLES: Record<ScreenName, string> = {
   matches: 'Profile',
   account: 'Account',
 };
-class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+class Boundary extends React.Component<
+  { children: React.ReactNode; model?: AppModel },
+  { crash: UiCrash | null }
+> {
+  state: { crash: UiCrash | null } = { crash: null };
+  static getDerivedStateFromError(error: unknown) {
+    return { crash: uiCrash(error) };
+  }
+  componentDidCatch(error: unknown, info: React.ErrorInfo) {
+    this.setState({ crash: uiCrash(error, info.componentStack) });
   }
   render() {
-    return this.state.failed ? <BoundaryFallback /> : this.props.children;
+    return this.state.crash ? (
+      <BoundaryFallback
+        crash={this.state.crash}
+        model={this.props.model}
+        onRetry={() => this.setState({ crash: null })}
+      />
+    ) : (
+      this.props.children
+    );
   }
 }
-function BoundaryFallback() {
-  const { C, S, isDark } = useTheme();
+function BoundaryFallback({
+  crash,
+  model,
+  onRetry,
+}: {
+  crash: UiCrash;
+  model?: AppModel;
+  onRetry(): void;
+}) {
+  const { C, S } = useTheme();
+  const [busy, setBusy] = useState(false),
+    [message, setMessage] = useState('');
+  const errorSummary = `${crash.name}: ${crash.message}`;
+  const exportDiagnostics = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await flushDetailedDiagnostics();
+      let application: unknown = { unavailable: 'The app model did not finish loading.' };
+      if (model)
+        try {
+          application = await diagnosticContext(model, () => {});
+        } catch (error) {
+          const issue = safeError(error);
+          application = { contextError: { code: issue.code, message: issue.message } };
+        }
+      let nativeTabs = false;
+      try {
+        nativeTabs = nativeTabsAvailable();
+      } catch {}
+      const report = detailedDiagnosticReport(
+        {
+          crash,
+          runtime: { platform: Platform.OS, platformVersion: Platform.Version, nativeTabs },
+          application,
+        },
+        requestDiagnostics(),
+      );
+      const filename =
+        'Outpost-crash-' + new Date(crash.at).toISOString().replace(/[:.]/g, '-') + '.json';
+      setMessage(await saveDiagnosticFile(JSON.stringify(report), filename));
+    } catch (error) {
+      setMessage(safeError(error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <View
-      style={[S.page, { alignItems: 'center', justifyContent: 'center', padding: 30, gap: 12 }]}
-    >
-      <Text style={S.h2}>Something went wrong.</Text>
-      <Text style={S.body}>Close and reopen Outpost.</Text>
-    </View>
+    <SafeAreaView style={S.page}>
+      <ScrollView
+        alwaysBounceVertical={false}
+        contentContainerStyle={{
+          flexGrow: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 30,
+          gap: 12,
+        }}
+      >
+        <Feather name="alert-triangle" color={C.gold} size={28} />
+        <Text accessibilityRole="header" style={S.h2}>
+          Outpost hit a display error
+        </Text>
+        <Text style={[S.body, { maxWidth: 420, textAlign: 'center' }]}>
+          Export a redacted JSON report with the error and recent request diagnostics, then share it
+          privately with the developer.
+        </Text>
+        <Text
+          selectable
+          numberOfLines={6}
+          style={[S.small, { maxWidth: 420, fontFamily: 'monospace', textAlign: 'center' }]}
+        >
+          {errorSummary}
+        </Text>
+        <View style={{ width: '100%', maxWidth: 360, gap: 10 }}>
+          <Button
+            title={busy ? 'Preparing diagnostics...' : 'Export diagnostics (JSON)'}
+            icon="download"
+            disabled={busy}
+            onPress={() => void exportDiagnostics()}
+          />
+          <Button secondary title="Try again" icon="refresh-cw" disabled={busy} onPress={onRetry} />
+        </View>
+        {message ? (
+          <Text
+            accessibilityRole="alert"
+            style={[S.small, { maxWidth: 420, color: C.gold, textAlign: 'center' }]}
+          >
+            {message}
+          </Text>
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 function Main() {
@@ -87,7 +192,9 @@ function Main() {
   return (
     <ThemeProvider preference={model.settings.theme}>
       <SkeletonProvider>
-        <AppContent model={model} />
+        <Boundary model={model}>
+          <AppContent model={model} />
+        </Boundary>
       </SkeletonProvider>
     </ThemeProvider>
   );
