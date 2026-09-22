@@ -6,6 +6,8 @@ export type ExplorerRoute =
   | { type: 'player'; player: PlayerRef }
   | { type: 'match'; id: string; subject?: string }
   | { type: 'career'; rank: Ranked }
+  | { type: 'rank-history' }
+  | { type: 'ranked-rewind' }
   | { type: 'live' }
   | { type: 'live-player'; matchId: string; subject: string }
   | { type: 'identity'; initialTab?: 'card' | 'title' }

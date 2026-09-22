@@ -16,6 +16,7 @@ export function tierMeta(catalog: Catalog, tier: number | null) {
     name:
       meta?.name ?? (tier === null ? 'Rank not returned' : (TIER_NAMES[tier] ?? `Tier ${tier}`)),
     image: meta?.image,
+    smallArt: meta?.smallArt,
   };
 }
 export function catalogWithContent(catalog: Catalog, raw: unknown): Catalog {
@@ -87,7 +88,13 @@ export function resolveRank(raw: unknown, catalog: Catalog, activeSeasonId?: str
         .map(([id, entry]) => {
           const info = object(entry),
             actTier = nullableNumber(info.CompetitiveTier),
-            meta = tierMeta(catalog, actTier);
+            meta = tierMeta(catalog, actTier),
+            peakTier = Object.entries(object(info.WinsByTier))
+              .filter(([, wins]) => typeof wins === 'number' && wins > 0)
+              .map(([key]) => Number(key))
+              .filter((value) => Number.isInteger(value) && value >= 0 && value <= 27)
+              .sort((a, b) => b - a)[0],
+            peakMeta = peakTier === undefined ? undefined : tierMeta(catalog, peakTier);
           return {
             seasonId: id,
             name: metadata[id]?.name ?? 'Earlier act',
@@ -96,6 +103,11 @@ export function resolveRank(raw: unknown, catalog: Catalog, activeSeasonId?: str
             tier: actTier,
             tierName: meta.name,
             image: meta.image,
+            smallArt: meta.smallArt,
+            peakTier,
+            peakName: peakMeta?.name,
+            peakImage: peakMeta?.image,
+            peakSmallArt: peakMeta?.smallArt,
             rr: nullableNumber(info.RankedRating),
             wins: number(info.NumberOfWinsWithPlacements, number(info.NumberOfWins)),
             games: number(info.NumberOfGames),

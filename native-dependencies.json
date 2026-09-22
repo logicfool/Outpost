@@ -20,5 +20,6 @@
   "@react-native-cookies/cookies",
   "expo-image",
   "expo-system-ui",
-  "expo-file-system"
+  "expo-file-system",
+  "react-native-bottom-tabs"
 ]

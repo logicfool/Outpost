@@ -19,6 +19,7 @@ import type { AppModel } from '../state/useApp';
 import type { CatalogItem, ItemKind } from '../core/types';
 import type { Navigate } from './explorerTypes';
 import { hydrateItem } from '../core/catalog';
+import { collectionValue } from '../core/collectionValue';
 import { Image } from './CachedImage';
 import {
   ItemArt,
@@ -69,6 +70,15 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
     return values;
   }, [owned]);
   const count = (kind: ItemKind) => (owned ? String(counts.get(kind)?.size ?? 0) : undefined);
+  const value = useMemo(
+    () =>
+      collectionValue(
+        owned ?? [],
+        model.snapshot?.store.status === 'ready' ? model.snapshot.store.data : undefined,
+        model.history,
+      ),
+    [owned, model.snapshot?.store, model.history],
+  );
   return (
     <ScrollView
       {...scrollHeader}
@@ -123,6 +133,21 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
           </Text>
         </View>
       ) : null}
+      <ListGroup>
+        <ListRow
+          icon="dollar-sign"
+          title="Collection value"
+          subtitle={`${value.owned} skins, ${value.priced} with a known price`}
+          value={value.priced ? `~${value.value.toLocaleString()} VP` : 'Estimate unavailable'}
+        />
+        <ListRow
+          title="Wishlist"
+          icon="heart"
+          value={String(model.wishlist.length)}
+          onPress={() => onNavigate({ type: 'collection', kind: 'all', scope: 'wishlist' })}
+          last
+        />
+      </ListGroup>
       <Text style={S.h2}>Loadout</Text>
       <ListGroup>
         <ListRow
@@ -176,12 +201,6 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
         ))}
       </ListGroup>
       <ListGroup>
-        <ListRow
-          title="Wishlist"
-          icon="heart"
-          value={String(model.wishlist.length)}
-          onPress={() => onNavigate({ type: 'collection', kind: 'all', scope: 'wishlist' })}
-        />
         <ListRow
           title="All items"
           icon="grid"

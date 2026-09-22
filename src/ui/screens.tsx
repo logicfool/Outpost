@@ -26,10 +26,13 @@ import { Image } from './CachedImage';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
 import type { Navigate } from './explorerTypes';
 import { playerLabel } from '../core/playerNames';
-import { PlayerCover, LiveCard } from './profileViews';
+import { PlayerCover } from './profileViews';
+import { groupRankedRewind, rewindEntryLabel } from '../core/rankedRewind';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  ActionSheetIOS,
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -594,13 +597,7 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
           {expiry !== undefined && (
             <View style={[S.between, { paddingHorizontal: 4, paddingVertical: 2 }]}>
               <View style={{ gap: 3 }}>
-                <Text style={S.small}>
-                  {tab === 'daily'
-                    ? 'Next rotation'
-                    : tab === 'night'
-                      ? 'Night Market ends'
-                      : 'Accessories reset'}
-                </Text>
+                <Text style={S.small}>{tab === 'night' ? 'Ends in' : 'Resets in'}</Text>
                 <Text style={[S.small, { fontSize: 11 }]}>Pull down to refresh</Text>
               </View>
               <View style={S.row}>
@@ -1568,6 +1565,18 @@ export function MatchesScreen({ model, onNavigate }: Props) {
     [details, previews.issue, open],
   );
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
+  const game =
+    model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data : undefined;
+  const rewindDays = useMemo(
+    () => groupRankedRewind(matches ?? [], model.catalog.tiers),
+    [matches, model.catalog.tiers],
+  );
+  const liveTitle =
+    game?.state === 'in_game'
+      ? `In game${game.map ? ` · ${game.map}` : ''}`
+      : game?.state === 'agent_select'
+        ? 'Agent select'
+        : 'Not in a game';
   return (
     <FlatList
       {...scrollHeader}
@@ -1598,12 +1607,21 @@ export function MatchesScreen({ model, onNavigate }: Props) {
           {model.snapshot?.profileIssue && (
             <Text style={[S.small, { color: C.gold }]}>{model.snapshot.profileIssue.message}</Text>
           )}
-          <LiveCard
-            model={model}
-            loading={polling.busy}
-            onOpen={() => onNavigate({ type: 'live' })}
-          />
           <ListGroup>
+            <ListRow
+              icon="award"
+              title="Rank History"
+              subtitle={rank?.seasonName ?? 'Act-by-act ranked performance'}
+              label="Open rank history"
+              onPress={() => onNavigate({ type: 'rank-history' })}
+            />
+            <ListRow
+              icon="rewind"
+              title="Ranked Rewind"
+              subtitle={rewindEntryLabel(rewindDays)}
+              label="Open ranked rewind"
+              onPress={() => onNavigate({ type: 'ranked-rewind' })}
+            />
             <ListRow
               icon="users"
               title="Party"
@@ -1611,6 +1629,14 @@ export function MatchesScreen({ model, onNavigate }: Props) {
               label="Open your party"
               testID="open-party"
               onPress={() => onNavigate({ type: 'party' })}
+            />
+            <ListRow
+              icon={game?.state === 'in_game' ? 'radio' : 'moon'}
+              title={liveTitle}
+              subtitle={polling.busy ? 'Checking live status' : 'Live match watcher is running'}
+              label="View live game details"
+              trailing={polling.busy ? <ActivityIndicator size="small" color={C.muted} /> : null}
+              onPress={() => onNavigate({ type: 'live' })}
               last
             />
           </ListGroup>
@@ -1691,6 +1717,49 @@ export function AccountScreen({ model, onLink }: Props) {
   };
   const live = active.expiresAt > Date.now(),
     renewable = active.canReauth;
+  const theme = model.settings.theme ?? 'navy';
+  const themeLabel = { system: 'System', navy: 'Navy', dark: 'Dark', light: 'Light' }[theme];
+  const chooseTheme = () => {
+    const choices = [
+      { label: 'System', value: 'system' as const },
+      { label: 'Navy', value: 'navy' as const },
+      { label: 'Dark', value: 'dark' as const },
+      { label: 'Light', value: 'light' as const },
+    ];
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: 'Theme',
+          options: [...choices.map((choice) => choice.label), 'Cancel'],
+          cancelButtonIndex: choices.length,
+        },
+        (index) => {
+          const choice = choices[index];
+          if (choice) void model.setTheme(choice.value);
+        },
+      );
+      return;
+    }
+    Alert.alert(
+      'Theme',
+      undefined,
+      choices.map((choice) => ({
+        text: choice.label,
+        onPress: () => void model.setTheme(choice.value),
+      })),
+    );
+  };
+  const showPlatform = () =>
+    Platform.OS === 'ios'
+      ? ActionSheetIOS.showActionSheetWithOptions(
+          {
+            title: 'Outpost supports PC VALORANT accounts.',
+            options: ['PC', 'Cancel'],
+            cancelButtonIndex: 1,
+          },
+          () => {},
+        )
+      : Alert.alert('Platform', 'Outpost supports PC VALORANT accounts.');
   return (
     <>
       <Page model={model}>
@@ -1800,18 +1869,38 @@ export function AccountScreen({ model, onLink }: Props) {
         )}
         {active.demo && <Button title="Leave demo" secondary onPress={model.leaveDemo} />}
         <SectionHeader title="Appearance" />
-        <View style={S.card}>
-          <Tabs
-            value={model.settings.theme ?? 'navy'}
-            onChange={(choice) => void model.setTheme(choice)}
-            items={[
-              { id: 'navy', label: 'Navy' },
-              { id: 'dark', label: 'Dark' },
-              { id: 'light', label: 'Light' },
-              { id: 'system', label: 'System' },
-            ]}
-          />
-        </View>
+        {Platform.OS === 'ios' ? (
+          <ListGroup>
+            <ListRow
+              icon="moon"
+              title="Theme"
+              subtitle="System follows your device appearance"
+              value={themeLabel}
+              onPress={chooseTheme}
+            />
+            <ListRow
+              icon="monitor"
+              title="Platform"
+              subtitle="Riot account platform"
+              value="PC"
+              onPress={showPlatform}
+              last
+            />
+          </ListGroup>
+        ) : (
+          <View style={S.card}>
+            <Tabs
+              value={theme}
+              onChange={(choice) => void model.setTheme(choice)}
+              items={[
+                { id: 'navy', label: 'Navy' },
+                { id: 'dark', label: 'Dark' },
+                { id: 'light', label: 'Light' },
+                { id: 'system', label: 'System' },
+              ]}
+            />
+          </View>
+        )}
         <SectionHeader title="Video" />
         <ListGroup>
           <Setting

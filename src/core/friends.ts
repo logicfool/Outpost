@@ -87,23 +87,16 @@ export function friendSections(
     : saved.flatMap((c) => (c.friend ? [{ ...c.friend, presence: 'offline' as const }] : []));
   const groups: FriendSection[] = connected
     ? [
-        { key: 'valorant', title: 'VALORANT', data: [] },
-        { key: 'other', title: 'RIOT & OTHER GAMES', data: [] },
-        { key: 'offline', title: 'OFFLINE', data: [] },
+        { key: 'online', title: 'Online', data: [] },
+        { key: 'offline', title: 'Offline', data: [] },
       ]
-    : [{ key: 'saved', title: 'SAVED FRIENDS', data: [] }];
+    : [{ key: 'offline', title: 'Offline', data: [] }];
   const seen = new Set<string>();
   for (const f of entries) {
     if (seen.has(f.subject) || (query && !`${f.name}#${f.tag}`.toLocaleLowerCase().includes(query)))
       continue;
     seen.add(f.subject);
-    const index = !connected
-      ? 0
-      : f.presence === 'offline'
-        ? 2
-        : f.presenceSource === 'valorant'
-          ? 0
-          : 1;
+    const index = !connected || f.presence === 'offline' ? groups.length - 1 : 0;
     groups[index]!.data.push(f);
   }
   for (const group of groups)

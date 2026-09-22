@@ -23,6 +23,8 @@ import { ChatSettings } from './ChatSettings';
 import { PlayerAvatar } from './PlayerAvatar';
 import { PresetsPanel } from './PresetsPanel';
 import { PartyPanel } from './PartyPanel';
+import { RankHistoryPanel } from './RankHistoryPanel';
+import { RankedRewindPanel } from './RankedRewindPanel';
 import {
   MatchFilterBar,
   applyMatchFilter,
@@ -442,6 +444,10 @@ export function ExplorerModal({
       )}
       {route?.type === 'career' && (
         <CareerModal rank={route.rank} visible onClose={onBack} embedded />
+      )}
+      {route?.type === 'rank-history' && <RankHistoryPanel model={model} onBack={onBack} />}
+      {route?.type === 'ranked-rewind' && (
+        <RankedRewindPanel model={model} onBack={onBack} onNavigate={onNavigate} />
       )}
       {route?.type === 'live' && (
         <LiveMatchPanel key={`${model.active?.puuid}:${currentMatch}`} {...props} view={liveView} />

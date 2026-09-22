@@ -10,7 +10,7 @@ import React, {
   useState,
   useDeferredValue,
 } from 'react';
-import { SectionList, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { Platform, SectionList, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
 import type { Friend } from '../core/chatTypes';
@@ -166,104 +166,115 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
           : game?.state === 'agent_select'
             ? 'Agent select'
             : 'Your account';
+  const searchField = (
+    <View style={[S.row, styles.search]}>
+      <Feather name="search" color={C.subtle} size={17} />
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        accessibilityLabel="Search friends directory"
+        placeholder="Find a friend"
+        placeholderTextColor={C.subtle}
+        autoCorrect={false}
+        style={{ color: C.ink, flex: 1, minWidth: 0, paddingVertical: 8 }}
+      />
+    </View>
+  );
   return (
-    <SectionList
-      {...scrollHeader}
-      onViewableItemsChanged={portraits.onViewableItemsChanged}
-      viewabilityConfig={portraits.viewabilityConfig}
-      sections={sections}
-      keyExtractor={friendKey}
-      renderItem={renderItem}
-      initialNumToRender={10}
-      maxToRenderPerBatch={8}
-      updateCellsBatchingPeriod={32}
-      windowSize={5}
-      stickySectionHeadersEnabled={false}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={[styles.content, { paddingBottom: 24 + navInset }]}
-      renderSectionHeader={({ section }) => (
-        <Text style={styles.section}>
-          {section.title} - {section.data.length}
-        </Text>
-      )}
-      ListHeaderComponent={
-        <View style={{ gap: 14 }}>
-          <View style={S.between}>
-            <Text accessibilityRole="header" style={S.title}>
-              Friends
-            </Text>
-            <Pressable
-              style={styles.headerAction}
-              accessibilityRole="button"
-              accessibilityLabel="Open chats"
-              onPress={() => onNavigate({ type: 'friends' })}
-            >
-              <Feather name="message-square" color={C.ink} size={21} />
-            </Pressable>
-          </View>
-          <Button
-            title={
-              'Friend requests (' +
-              (model.chat.friendRequests ?? []).filter((r) => r.direction === 'incoming').length +
-              ')'
-            }
-            secondary
-            icon="user-plus"
-            onPress={() => onNavigate({ type: 'friend-requests' })}
-          />
-          <View style={[styles.row, { marginBottom: 0 }]}>
-            <PlayerAvatar card={ownCard ?? self?.card} catalog={model.catalog} size={40} />
-            <View style={styles.identity}>
-              <Text style={S.h3} numberOfLines={1}>
-                {model.active?.gameName}
-                <Text style={{ fontWeight: '400', color: C.subtle }}>
-                  {' '}
-                  #{model.active?.tagLine}
-                </Text>
+    <View style={{ flex: 1 }}>
+      <SectionList
+        {...scrollHeader}
+        onViewableItemsChanged={portraits.onViewableItemsChanged}
+        viewabilityConfig={portraits.viewabilityConfig}
+        sections={sections}
+        keyExtractor={friendKey}
+        renderItem={renderItem}
+        initialNumToRender={10}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={32}
+        windowSize={5}
+        stickySectionHeadersEnabled={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 24 + navInset + (Platform.OS === 'ios' ? 62 : 0) },
+        ]}
+        renderSectionHeader={({ section }) => (
+          <Text style={styles.section}>
+            {section.title} {section.data.length}
+          </Text>
+        )}
+        ListHeaderComponent={
+          <View style={{ gap: 14 }}>
+            <View style={S.between}>
+              <Text accessibilityRole="header" style={S.title}>
+                Friends
               </Text>
-              <Text style={S.small}>{ownStatus}</Text>
+              <Pressable
+                style={styles.headerAction}
+                accessibilityRole="button"
+                accessibilityLabel="Open chats"
+                onPress={() => onNavigate({ type: 'friends' })}
+              >
+                <Feather name="message-square" color={C.ink} size={21} />
+              </Pressable>
             </View>
-            <Text style={[S.small, { color: C.accent, fontWeight: '700' }]}>YOU</Text>
-            {rank?.image && (
-              <Image
-                source={{ uri: rank.image }}
-                contentFit="contain"
-                style={styles.rank}
-                transition={0}
-              />
-            )}
-          </View>
-          <View style={[S.row, styles.search]}>
-            <Feather name="search" color={C.subtle} size={17} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              accessibilityLabel="Search friends directory"
-              placeholder="Find a friend"
-              placeholderTextColor={C.subtle}
-              autoCorrect={false}
-              style={{ color: C.ink, flex: 1, minWidth: 0, paddingVertical: 8 }}
+            <Button
+              title={
+                'Friend requests (' +
+                (model.chat.friendRequests ?? []).filter((r) => r.direction === 'incoming').length +
+                ')'
+              }
+              secondary
+              icon="user-plus"
+              onPress={() => onNavigate({ type: 'friend-requests' })}
             />
+            <View style={[styles.row, { marginBottom: 0 }]}>
+              <PlayerAvatar card={ownCard ?? self?.card} catalog={model.catalog} size={40} />
+              <View style={styles.identity}>
+                <Text style={S.h3} numberOfLines={1}>
+                  {model.active?.gameName}
+                  <Text style={{ fontWeight: '400', color: C.subtle }}>
+                    {' '}
+                    #{model.active?.tagLine}
+                  </Text>
+                </Text>
+                <Text style={S.small}>{ownStatus}</Text>
+              </View>
+              <Text style={[S.small, { color: C.accent, fontWeight: '700' }]}>YOU</Text>
+              {rank?.image && (
+                <Image
+                  source={{ uri: rank.image }}
+                  contentFit="contain"
+                  style={styles.rank}
+                  transition={0}
+                />
+              )}
+            </View>
+            {Platform.OS === 'ios' ? null : searchField}
+            <ChatConnectionNotice chat={model.chat} />
           </View>
-          <ChatConnectionNotice chat={model.chat} />
-        </View>
-      }
-      ListEmptyComponent={
-        <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
-          {search
-            ? 'No matching friends.'
-            : connected
-              ? 'No friends returned by Riot.'
-              : model.historyLoading
-                ? 'Loading saved friends...'
-                : busy
-                  ? 'Connecting to chat...'
-                  : 'Friends will appear when the connection returns.'}
-        </Text>
-      }
-    />
+        }
+        ListEmptyComponent={
+          <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
+            {search
+              ? 'No matching friends.'
+              : connected
+                ? 'No friends returned by Riot.'
+                : model.historyLoading
+                  ? 'Loading saved friends...'
+                  : busy
+                    ? 'Connecting to chat...'
+                    : 'Friends will appear when the connection returns.'}
+          </Text>
+        }
+      />
+      {Platform.OS === 'ios' ? (
+        <View style={[styles.bottomSearch, { bottom: navInset - 2 }]}>{searchField}</View>
+      ) : null}
+    </View>
   );
 }
 const makeStyles = (C: Palette) =>
@@ -292,6 +303,17 @@ const makeStyles = (C: Palette) =>
       paddingBottom: 12,
     },
     search: { paddingHorizontal: 14, minHeight: 44, borderRadius: 14, backgroundColor: C.surface },
+    bottomSearch: {
+      position: 'absolute',
+      left: 16,
+      right: 16,
+      borderRadius: 16,
+      shadowColor: C.border,
+      shadowOpacity: 0.16,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 12,
+      elevation: 7,
+    },
     headerAction: {
       width: 44,
       height: 44,

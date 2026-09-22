@@ -7,6 +7,10 @@ export function useNavGlass(): boolean {
   return false;
 }
 
+export function nativeGlassAvailable(): boolean {
+  return false;
+}
+
 export function NavSurface({ glassRadius: _glassRadius, ...props }: NavSurfaceProps) {
   return <View {...props} />;
 }

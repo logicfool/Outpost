@@ -2,15 +2,7 @@ export type Shard = 'ap' | 'eu' | 'na' | 'kr' | 'pbe';
 export type Region = 'ap' | 'eu' | 'na' | 'br' | 'latam' | 'kr' | 'pbe';
 export type JsonObject = Record<string, unknown>;
 export type ItemKind =
-  | 'skin'
-  | 'chroma'
-  | 'buddy'
-  | 'spray'
-  | 'card'
-  | 'title'
-  | 'agent'
-  | 'currency'
-  | 'unknown';
+  'skin' | 'chroma' | 'buddy' | 'spray' | 'card' | 'title' | 'agent' | 'currency' | 'unknown';
 export interface Account {
   puuid: string;
   gameName: string;
@@ -165,6 +157,10 @@ export interface ActStat {
   tierName: string;
   image?: string;
   smallArt?: string;
+  peakTier?: number;
+  peakName?: string;
+  peakImage?: string;
+  peakSmallArt?: string;
   rr: number | null;
   wins: number;
   games: number;
@@ -205,6 +201,7 @@ export interface MatchSummary {
   mapImage?: string;
   rrChange?: number;
   tierAfter?: number;
+  rrAfter?: number;
   tierImage?: string;
 }
 export type RoundOutcome = 'elimination' | 'detonate' | 'defuse' | 'time' | 'surrender' | 'other';

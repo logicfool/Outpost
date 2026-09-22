@@ -46,7 +46,7 @@ test('public card metadata retains its distinct portrait dimension', () => {
   assert.match(c.items[ID].smallArt, /smallart.png$/);
   assert.match(c.items[ID].wideArt, /wideart.png$/);
 });
-test('friend directory groups VALORANT, other games and offline, not a combined chat feed', () => {
+test('friend directory groups online and offline friends for quick scanning', () => {
   const f = [
     friend({ presenceSource: 'valorant' }),
     friend({ subject: OTHER, presence: 'offline' }),
@@ -54,7 +54,7 @@ test('friend directory groups VALORANT, other games and offline, not a combined 
   ];
   assert.deepEqual(
     friendSections(f, [], true).map((g) => g.key),
-    ['valorant', 'other', 'offline'],
+    ['online', 'offline'],
   );
 });
 test('friend statuses distinguish menus, in-game map and queue without guessing other games', () => {

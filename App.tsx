@@ -1,4 +1,5 @@
 import { RetainedTabs } from './src/ui/RetainedTabs';
+import { NativeTabs, nativeTabsAvailable } from './src/ui/NativeTabs';
 import { ScrollHeader } from './src/ui/ScrollHeader';
 import { sameScreenModel } from './src/core/screenInputs';
 import { NavSurface, useNavGlass } from './src/ui/NavSurface';
@@ -110,6 +111,7 @@ function AppContent({ model }: { model: AppModel }) {
   }, [model.settings.theme]);
   const narrow = useWindowDimensions().width < 360;
   const navGlass = useNavGlass();
+  const nativeTabs = nativeTabsAvailable();
   const [tab, setTab] = useState<ScreenName>('store'),
     [item, setItem] = useState<{ accountId: string; value: CatalogItem } | null>(null);
   const [explorer, setExplorer] = useState<{ accountId: string; routes: ExplorerRoute[] } | null>(
@@ -262,11 +264,11 @@ function AppContent({ model }: { model: AppModel }) {
               </Pressable>
             )}
             <NavInsetContext.Provider value={76 + insets.bottom}>
-              <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
-                <RetainedTabs
-                  key={model.active.puuid}
+              {nativeTabs ? (
+                <NativeTabs
                   active={tab}
                   interactive={!explorer && !item && !accountRoute}
+                  onChange={setTab}
                   render={(scene, visible) => (
                     <ScreenSlot
                       key={scene}
@@ -279,50 +281,73 @@ function AppContent({ model }: { model: AppModel }) {
                     />
                   )}
                 />
-              </ScreenTransition>
+              ) : (
+                <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
+                  <RetainedTabs
+                    key={model.active.puuid}
+                    active={tab}
+                    interactive={!explorer && !item && !accountRoute}
+                    render={(scene, visible) => (
+                      <ScreenSlot
+                        key={scene}
+                        visible={visible}
+                        tab={scene}
+                        model={model}
+                        onItem={onItem}
+                        onLink={onLink}
+                        onNavigate={onNavigate}
+                      />
+                    )}
+                  />
+                </ScreenTransition>
+              )}
             </NavInsetContext.Provider>
-            <NavSurface
-              testID="floating-bottom-nav"
-              style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
-            >
-              {NAV.map((nav) => {
-                const selected = tab === nav.id;
-                return (
-                  <Pressable
-                    key={nav.id}
-                    testID={`tab-${nav.id}`}
-                    accessibilityRole="tab"
-                    accessibilityLabel={nav.label}
-                    aria-selected={selected}
-                    accessibilityState={{ selected }}
-                    style={styles.navItem}
-                    onPress={() => {
-                      if (!selected) selectionTick();
-                      setTab(nav.id);
-                    }}
-                  >
-                    {selected && <View style={[styles.navIndicator, navGlass && styles.navLens]} />}
-                    <Feather
-                      name={nav.icon}
-                      size={20}
-                      color={selected ? C.accent : navGlass ? C.muted : C.subtle}
-                    />
-                    <Text
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.85}
-                      style={[
-                        styles.navLabel,
-                        narrow && { fontSize: 9 },
-                        selected && { color: C.ink, fontWeight: '700' },
-                      ]}
+            {!nativeTabs && (
+              <NavSurface
+                testID="floating-bottom-nav"
+                style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
+              >
+                {NAV.map((nav) => {
+                  const selected = tab === nav.id;
+                  return (
+                    <Pressable
+                      key={nav.id}
+                      testID={`tab-${nav.id}`}
+                      accessibilityRole="tab"
+                      accessibilityLabel={nav.label}
+                      aria-selected={selected}
+                      accessibilityState={{ selected }}
+                      style={styles.navItem}
+                      onPress={() => {
+                        if (!selected) selectionTick();
+                        setTab(nav.id);
+                      }}
                     >
-                      {nav.id === 'progress' ? 'Pass' : nav.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </NavSurface>
+                      {selected && (
+                        <View style={[styles.navIndicator, navGlass && styles.navLens]} />
+                      )}
+                      <Feather
+                        name={nav.icon}
+                        size={20}
+                        color={selected ? C.accent : navGlass ? C.muted : C.subtle}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                        style={[
+                          styles.navLabel,
+                          narrow && { fontSize: 9 },
+                          selected && { color: C.ink, fontWeight: '700' },
+                        ]}
+                      >
+                        {nav.id === 'progress' ? 'Pass' : nav.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </NavSurface>
+            )}
           </>
         )}
         {model.message && (

@@ -61,6 +61,8 @@ test('career lists acts newest first with names, totals and peak', () => {
   assert.equal(rank.peak.tier, 16);
   assert.equal(rank.peak.name, 'PLATINUM 2');
   assert.equal(rank.peak.seasonName, 'V25 // ACT III');
+  assert.equal(rank.career[0].acts[1].peakTier, 16);
+  assert.equal(rank.career[0].acts[1].peakName, 'PLATINUM 2');
 });
 test('match report builds scoreboard, round outcomes and personal duels', () => {
   const data = {

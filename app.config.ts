@@ -57,6 +57,7 @@ const config: ExpoConfig = {
     'expo-background-task',
     'expo-status-bar',
     'expo-video',
+    'react-native-bottom-tabs',
     './plugins/with-history-sync.cjs',
   ],
   web: { bundler: 'metro', name: 'Outpost demo' },

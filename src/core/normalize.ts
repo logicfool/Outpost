@@ -300,6 +300,7 @@ export function normalizeMatches(raw: unknown, updates: unknown, catalog: Catalo
       mapId = text(update?.MapID),
       meta = catalog.maps[mapId];
     const tierAfter = nullableNumber(update?.TierAfterUpdate) ?? undefined;
+    const rrAfter = nullableNumber(update?.RankedRatingAfterUpdate) ?? undefined;
     return {
       id,
       startedAt: number(m.GameStartTime),
@@ -309,6 +310,7 @@ export function normalizeMatches(raw: unknown, updates: unknown, catalog: Catalo
       rrChange:
         typeof update?.RankedRatingEarned === 'number' ? update.RankedRatingEarned : undefined,
       tierAfter,
+      rrAfter,
       tierImage: tierAfter ? catalog.tiers[String(tierAfter)]?.image : undefined,
     };
   });

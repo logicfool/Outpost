@@ -104,7 +104,26 @@ try {
   await check('profile cover and current/peak ranks render', async () => {
     await page.getByText('Nightshift #DEMO', { exact: true }).waitFor();
     await page.getByText('DIAMOND 2', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Open rank history', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Open ranked rewind', exact: true }).waitFor();
     await shot('profile');
+  });
+  await check('rank history and ranked rewind open as detailed profile sheets', async () => {
+    await click('Open rank history');
+    const rankHistory = page.getByRole('dialog');
+    await rankHistory.getByText('V26 // ACT V', { exact: true }).waitFor();
+    await rankHistory.getByText('END OF ACT', { exact: true }).first().waitFor();
+    await shot('rank-history');
+    await click('Back from rank history');
+    await click('Open ranked rewind');
+    const rewind = page.getByRole('dialog');
+    await rewind.getByText('Ranked Rewind', { exact: true }).waitFor();
+    await rewind
+      .getByText(/\+6 RR/)
+      .first()
+      .waitFor();
+    await shot('ranked-rewind');
+    await click('Back from ranked rewind');
   });
   await check('live game opens a team-switching roster and contextual player details', async () => {
     await click('View live game details');
@@ -315,6 +334,7 @@ try {
       await tab('Collection');
       const collectionHome = page.getByTestId('collection-home');
       await collectionHome.waitFor();
+      await collectionHome.getByText(/VP$/, { exact: false }).waitFor();
       const compactHeader = page.getByTestId('compact-scroll-header-collection');
       await collectionHome.evaluate((node) => {
         node.scrollTop = 0;
@@ -532,7 +552,7 @@ try {
         await page.getByRole('button', { name: 'Connect friends', exact: true }).count(),
         0,
       );
-      await page.getByText('VALORANT - 2', { exact: true }).waitFor();
+      await page.getByText('Online 2', { exact: true }).waitFor();
       const row = page.getByRole('button', { name: 'View Lumen profile', exact: true });
       await row.waitFor();
       const portrait = row.getByRole('img', { name: 'Player card portrait' });

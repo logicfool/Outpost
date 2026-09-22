@@ -316,13 +316,16 @@ export function makeDemo(now = Date.now()): {
     quantity: 1,
     price: o.prices[0]!.amount,
   }));
+  const matchAges = [3600000, 3 * 3600000, 26 * 3600000, 28 * 3600000, 52 * 3600000];
   const matches = ['Ascent', 'Lotus', 'Haven', 'Bind', 'Split'].map((map, index) => ({
     id: `00000000-0000-4000-8003-${String(index + 1).padStart(12, '0')}`,
-    startedAt: now - (index + 1) * 3600000,
+    startedAt: now - matchAges[index]!,
     queue: QUEUES[index]!,
     map,
     mapImage: DEMO_ART.maps[map]?.image,
     rrChange: QUEUES[index] === 'competitive' ? [22, -16, 18, 25, -13][index] : undefined,
+    tierAfter: QUEUES[index] === 'competitive' ? 19 : undefined,
+    rrAfter: QUEUES[index] === 'competitive' ? [67, 45, 61, 43, 18][index] : undefined,
   }));
   const act = (
     seasonId: string,
@@ -334,6 +337,11 @@ export function makeDemo(now = Date.now()): {
     games: number,
     current = false,
   ) => ({
+    peakTier: Math.min(27, tier + (current && tier ? 1 : 0)),
+    peakName:
+      DEMO_ART.tiers[String(Math.min(27, tier + (current && tier ? 1 : 0)))]?.name ?? tierName,
+    peakImage: DEMO_ART.tiers[String(Math.min(27, tier + (current && tier ? 1 : 0)))]?.image,
+    peakSmallArt: DEMO_ART.tiers[String(Math.min(27, tier + (current && tier ? 1 : 0)))]?.smallArt,
     seasonId,
     name,
     tier,
