@@ -182,7 +182,7 @@ export class RiotClient {
   private cache = new SingleFlightCache();
   private aliases = new Map<string, { name: string; tag: string; until: number }>();
   private loadoutEndpoint: 'v3' | 'v2' = 'v3';
-  private storeEndpoint: 'v2' | 'v3' = 'v2';
+  private storeEndpoint: 'v2' | 'v3' = 'v3';
   private identityWrite: Promise<Loadout> | undefined;
   private disposed = false;
   private sessionRejected = false;
@@ -463,20 +463,22 @@ export class RiotClient {
   async store(fresh = false): Promise<Store> {
     const id = this.session.account.puuid;
 
+    const storefront = (version: 'v2' | 'v3') =>
+      this.read(
+        `/store/${version}/storefront/${id}`,
+        fresh ? 0 : 60000,
+        version === 'v3' ? 'POST' : 'GET',
+      );
     let result,
       endpoint = this.storeEndpoint;
     try {
-      result = await this.read(
-        `/store/${endpoint}/storefront/${id}`,
-        fresh ? 0 : 60000,
-        endpoint === 'v3' ? 'POST' : 'GET',
-      );
+      result = await storefront(endpoint);
     } catch (error) {
       const e = safeError(error);
-      if (endpoint !== 'v2' || (e.status !== 404 && e.status !== 405 && e.status !== 410)) throw e;
-      endpoint = 'v3';
-      result = await this.read(`/store/v3/storefront/${id}`, fresh ? 0 : 60000, 'POST');
-      this.storeEndpoint = 'v3';
+      if (e.status !== 404 && e.status !== 405 && e.status !== 410) throw e;
+      endpoint = endpoint === 'v3' ? 'v2' : 'v3';
+      result = await storefront(endpoint);
+      this.storeEndpoint = endpoint;
     }
     let fallbackPrices: unknown;
     const panel = object(object(result.data).SkinsPanelLayout);

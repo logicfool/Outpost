@@ -176,22 +176,41 @@ test('tokens belonging to two different accounts cannot be combined', async () =
   );
 });
 const publicStub = { version: async () => 'release-10.00-test' };
-test('v2 disappearance allows documented v3 POST fallback with same own-account scope', async () => {
+test('the storefront is read with the v3 POST route first', async () => {
   const calls = [];
   const client = new RiotClient(
     session(),
     new HttpClient(async (url, init) => {
       calls.push({ url, init });
-      return url.includes('/v2/') ? response({}, 404) : response(storefront());
+      return response(storefront());
     }),
     publicStub,
     catalog(),
   );
   const data = await client.store();
   assert.equal(data.endpoint, 'v3');
-  assert.equal(calls[1].init.method, 'POST');
-  assert.equal(calls[1].init.body, '{}');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.includes('/store/v3/storefront/'));
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.body, '{}');
+});
+test('v3 disappearance falls back to the v2 GET route with the same own-account scope', async () => {
+  const calls = [];
+  const client = new RiotClient(
+    session(),
+    new HttpClient(async (url, init) => {
+      calls.push({ url, init });
+      return url.includes('/v3/') ? response({}, 404) : response(storefront());
+    }),
+    publicStub,
+    catalog(),
+  );
+  const data = await client.store();
+  assert.equal(data.endpoint, 'v2');
+  assert.equal(calls[1].init.method ?? 'GET', 'GET');
   assert.ok(calls.every((c) => c.url.endsWith(ID)));
+  await client.store(true);
+  assert.ok(calls[2].url.includes('/store/v2/storefront/'), 'the working route is remembered');
 });
 for (const status of [401, 403, 429])
   test(`${status} cannot trigger alternate store endpoint`, async () => {
