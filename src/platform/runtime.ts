@@ -1749,7 +1749,7 @@ export class Runtime {
         price: quote.price,
         at: this.now(),
         state: 'submitting',
-        protocol: 'direct-v2',
+        protocol: 'order-v1',
         phase: 'prepared',
         balanceBefore: wallet.find((m) => m.currencyId === CURRENCIES.VP)?.amount,
       };
@@ -1760,7 +1760,7 @@ export class Runtime {
           ? (before: () => Promise<void>) =>
               client.purchaseBundle(quote.bundle!.lines, record.price, before)
           : (before: () => Promise<void>) =>
-              client.purchaseOffer(record.offerId, record.price, before);
+              client.purchaseOffer(record.id, record.offerId, before);
         const result = await submit(async () => {
           guard();
           if (!(await this.repository.settings()).allowPurchases)

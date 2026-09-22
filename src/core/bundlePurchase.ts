@@ -151,14 +151,3 @@ export function bundleQuoteKey(quote: PurchaseQuote): string {
       .sort(),
   ]);
 }
-
-export function bundlePurchaseBody(lines: readonly BundleLine[], maximum: number) {
-  validateBundleLines(lines);
-  if (
-    !Number.isSafeInteger(maximum) ||
-    maximum <= 0 ||
-    lines.reduce((sum, l) => sum + l.price, 0) !== maximum
-  )
-    throw new AppError('BUNDLE_PRICE', 'The reviewed total no longer matches the bundle.');
-  return lines.map((l) => ({ OfferID: l.offerId, CurrencyID: CURRENCIES.VP, Price: l.price }));
-}

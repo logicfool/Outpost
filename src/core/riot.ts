@@ -19,7 +19,7 @@ import {
   type LoadoutEditor,
 } from './presets';
 import { orderResult } from './purchases';
-import { submitConfirmedOffer, submitConfirmedBundle } from './purchaseRequest';
+import { submitConfirmedOffer } from './purchaseRequest';
 import { ownedItemIds, ownedQuantities } from './ownership';
 import { assertCookieSubject, cleanSessionCookies } from './sessionCookies';
 import {
@@ -825,24 +825,16 @@ export class RiotClient {
     return ownedQuantities(raw, type);
   }
   async purchaseBundle(
-    lines: import('./types').BundleLine[],
-    price: number,
-    beforeDispatch: () => Promise<void>,
-  ) {
-    const result = await submitConfirmedBundle(
-      (path, body, policy) =>
-        this.read(path, 0, 'POST', body, this.session.account.puuid, 'pd', policy),
-      lines,
-      price,
-      async () => {
-        if (!this.isActive()) throw new AppError('SESSION_EXPIRED', 'The account session changed.');
-        await beforeDispatch();
-        if (!this.isActive()) throw new AppError('SESSION_EXPIRED', 'The account session changed.');
-      },
+    _lines: import('./types').BundleLine[],
+    _price: number,
+    _beforeDispatch: () => Promise<void>,
+  ): Promise<never> {
+    throw new AppError(
+      'BUNDLE_ROUTE',
+      "Bundle purchases aren't supported on Riot's current store route yet. No request was sent. Buy this bundle in VALORANT.",
     );
-    this.cache.clear();
-    return result;
   }
+
   async wallet(fresh = false) {
     return normalizeWallet(
       (await this.read(`/store/v1/wallet/${this.session.account.puuid}`, fresh ? 0 : 60000)).data,
@@ -1234,12 +1226,12 @@ export class RiotClient {
     }
   }
 
-  async purchaseOffer(offerId: string, price: number, beforeDispatch: () => Promise<void>) {
+  async purchaseOffer(orderKey: string, offerId: string, beforeDispatch: () => Promise<void>) {
     const result = await submitConfirmedOffer(
       (path, body, policy) =>
         this.read(path, 0, 'POST', body, this.session.account.puuid, 'pd', policy),
+      orderKey,
       offerId,
-      price,
       async () => {
         if (!this.isActive())
           throw new AppError('SESSION_EXPIRED', 'The selected session expired before submission.');

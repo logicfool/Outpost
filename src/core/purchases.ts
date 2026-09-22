@@ -141,24 +141,20 @@ export function unresolvedForItem(
     )
   );
 }
-export function directPurchaseBody(offerId: string, price: number) {
-  if (!Number.isSafeInteger(price) || price <= 0)
-    throw new AppError('PURCHASE_PRICE', 'A valid VP price is required.');
-  return [{ OfferID: uuid(offerId), CurrencyID: CURRENCIES.VP, Price: price }];
+export function createOrderBody(orderKey: string, offerId: string) {
+  return { XID: uuid(orderKey), OfferID: uuid(offerId) };
 }
-
-export function directPurchaseReply(raw: unknown): {
+export function createOrderReply(raw: unknown): {
   orderId?: string;
   state: 'accepted' | 'failed';
   errorCode?: string;
 } {
-  const list = Array.isArray(raw) ? raw : [raw];
-  if (list.length > 1)
+  if (Array.isArray(raw))
     throw new AppError(
       'ORDER_UNKNOWN',
-      'Riot returned an ambiguous purchase result. Check ownership before retrying.',
+      'Riot returned an unexpected purchase result. Check ownership before retrying.',
     );
-  const result = object(list[0]),
+  const result = object(raw),
     rejection = purchaseRejection(result);
   if (rejection) return { state: 'failed', errorCode: rejection.code };
   if (

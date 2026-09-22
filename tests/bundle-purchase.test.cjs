@@ -10,11 +10,7 @@ const {
   CURRENCIES,
 } = require('./bundle-fixture.cjs');
 const { bundleMetadata } = require('../.test-build/bundleMetadata.js');
-const {
-  quoteBundlePurchase,
-  bundleQuoteKey,
-  bundlePurchaseBody,
-} = require('../.test-build/bundlePurchase.js');
+const { quoteBundlePurchase, bundleQuoteKey } = require('../.test-build/bundlePurchase.js');
 const { validatePurchaseQuote } = require('../.test-build/purchases.js');
 const { ownedQuantities } = require('../.test-build/ownership.js');
 const parse = (h) => bundleMetadata(h.raw, h.catalog, CURRENCIES.VP, ITEM_TYPES);
@@ -67,11 +63,10 @@ test('promotional zero-price bundle items stay in the reviewed batch', () => {
   h.raw.Items[0].DiscountedPrice = 0;
   h.raw.TotalDiscountedCost[CURRENCIES.VP] = 653;
   h.bundle.checkout = parse(h);
-  const q = quote(h),
-    body = bundlePurchaseBody(q.bundle.lines, q.price);
+  const q = quote(h);
   assert.equal(q.price, 653);
-  assert.equal(body.length, 3);
-  assert.equal(body[0].Price, 0);
+  assert.equal(q.bundle.lines.length, 3);
+  assert.equal(q.bundle.lines[0].price, 0);
 });
 test('missing inventory, partial buddy ownership, insufficient VP and near expiry cannot produce a quote', () => {
   for (const [mutate, code] of [
@@ -132,7 +127,7 @@ test('reordering the same bundle lines does not invalidate a confirmation', () =
   h.bundle.checkout.lines.reverse();
   assert.doesNotThrow(() => validatePurchaseQuote(q, quote(h)));
 });
-test('bundle transport sends one guarded VP-only batch with exact per-line prices', async () => {
+test('whole-bundle checkout sends nothing until a bundle route is confirmed', async () => {
   const { RiotClient } = require('../.test-build/riot.js'),
     { HttpClient } = require('../.test-build/http.js'),
     { session, response } = require('./helpers.cjs');
@@ -143,46 +138,19 @@ test('bundle transport sends one guarded VP-only batch with exact per-line price
     session(),
     new HttpClient(async (url, init) => {
       requests.push({ url, ...init });
-      return response([{ Status: 'ACCEPTED' }, { Status: 'ACCEPTED' }, { Status: 'ACCEPTED' }]);
+      return response({});
     }),
     { version: async () => 'release-fixture' },
     h.catalog,
   );
-  await client.purchaseBundle(h.bundle.checkout.lines, 1160, async () => {
-    guards++;
-  });
-  assert.equal(guards, 1);
-  assert.equal(requests.length, 1);
-  assert.equal(new URL(requests[0].url).pathname, '/store/v2/purchase');
-  assert.equal(requests[0].method, 'POST');
-  assert.deepEqual(
-    JSON.parse(requests[0].body),
-    h.bundle.checkout.lines.map((l) => ({
-      OfferID: l.offerId,
-      CurrencyID: CURRENCIES.VP,
-      Price: l.price,
-    })),
-  );
-});
-test('bundle transport never submits when the final guard rejects', async () => {
-  const { submitConfirmedBundle } = require('../.test-build/purchaseRequest.js');
-  const h = bundleFixture();
-  let calls = 0;
   await assert.rejects(
-    submitConfirmedBundle(
-      async (_p, _b, policy) => {
-        await policy.beforeDispatch();
-        calls++;
-        return { status: 200, data: [] };
-      },
-      h.bundle.checkout.lines,
-      1160,
-      async () => {
-        throw Error('account changed');
-      },
-    ),
+    client.purchaseBundle(h.bundle.checkout.lines, 1160, async () => {
+      guards++;
+    }),
+    (e) => e.code === 'BUNDLE_ROUTE' && e.message.includes('No request was sent'),
   );
-  assert.equal(calls, 0);
+  assert.equal(guards, 0);
+  assert.equal(requests.length, 0);
 });
 test('conflicting ownership instances are rejected instead of counted twice', () => {
   const raw = {

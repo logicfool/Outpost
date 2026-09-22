@@ -61,7 +61,9 @@ function fixture() {
       store: async () => snapshot.store.data,
       wallet: async () => snapshot.wallet.data,
       ownedIds: async () => owned,
-      purchaseOffer: async (offer, price, beforeDispatch) => {
+      purchaseOffer: async (orderKey, offer, beforeDispatch) => {
+        assert.match(orderKey, /^[0-9a-f-]{36}$/);
+        assert.equal(orderKey, [...records.values()].at(-1).id, 'XID is the saved receipt id');
         if (dispatchWait) await dispatchWait;
         await beforeDispatch();
         assert.equal([...records.values()].at(-1).phase, 'dispatching');
@@ -179,7 +181,7 @@ test('read-only order reconciliation is account scoped and rate limited', async 
   await assert.rejects(h.runtime.checkPurchase(OTHER, q.id), code('ORDER_SCOPE'));
   assert.equal(h.posts, 1);
 });
-test('RiotClient direct purchase includes the confirmed offer, VP currency and exact price', async () => {
+test('RiotClient purchase creates one order for the confirmed offer', async () => {
   const { RiotClient } = require('../.test-build/riot.js'),
     { HttpClient } = require('../.test-build/http.js');
   const requests = [];
@@ -188,22 +190,21 @@ test('RiotClient direct purchase includes the confirmed offer, VP currency and e
     session(),
     new HttpClient(async (url, init) => {
       requests.push({ url, ...init });
-      return response({ Status: 'ACCEPTED' });
+      return response({ OrderID: OTHER, Status: 'ACCEPTED' });
     }),
     { version: async () => 'release-fixture' },
     catalog(),
   );
-  const result = await client.purchaseOffer(LEVEL, 1775, async () => {
+  const result = await client.purchaseOffer(OTHER, LEVEL, async () => {
     checks++;
   });
   assert.equal(checks, 1);
   assert.equal(requests.length, 1);
-  assert.equal(new URL(requests[0].url).pathname, '/store/v2/purchase');
+  assert.equal(new URL(requests[0].url).pathname, '/store/v1/order/');
   assert.equal(requests[0].method, 'POST');
-  assert.deepEqual(JSON.parse(requests[0].body), [
-    { OfferID: LEVEL, CurrencyID: '85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741', Price: 1775 },
-  ]);
+  assert.deepEqual(JSON.parse(requests[0].body), { XID: OTHER, OfferID: LEVEL });
   assert.equal(result.state, 'accepted');
+  assert.equal(result.orderId, OTHER);
   assert.equal(result.httpStatus, 200);
 });
 

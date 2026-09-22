@@ -22,8 +22,7 @@ export function serviceLabel(url: string): string {
   if (path.includes('/service/chat')) return 'Chat token';
   return (
     [
-      ['/store/v2/purchase', 'VP purchase'],
-      ['/store/v1/order/', 'Purchase order'],
+      ['/store/v1/order/', 'VP purchase'],
       ['/name-service/', 'Player names'],
       ['/mmr/', 'Rank'],
       ['/personalization/', 'Loadout'],

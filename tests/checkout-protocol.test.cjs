@@ -15,11 +15,7 @@ const {
 const { HttpClient } = require('../.test-build/http.js');
 const { RiotClient } = require('../.test-build/riot.js');
 const { ownedItemIds } = require('../.test-build/ownership.js');
-const {
-  directPurchaseBody,
-  directPurchaseReply,
-  quotePurchase,
-} = require('../.test-build/purchases.js');
+const { createOrderBody, createOrderReply, quotePurchase } = require('../.test-build/purchases.js');
 const { ITEM_TYPES, CURRENCIES, normalizeStore } = require('../.test-build/normalize.js');
 function clientWith(fetcher) {
   return new RiotClient(
@@ -77,7 +73,7 @@ test('a cosmetic ID resolves to its actual distinct OfferID for submission', () 
     );
   assert.equal(q.offer.id, MATCH);
   assert.equal(q.offer.item.id, LEVEL);
-  assert.equal(directPurchaseBody(q.offer.id, q.price)[0].OfferID, MATCH);
+  assert.deepEqual(createOrderBody(OTHER, q.offer.id), { XID: OTHER, OfferID: MATCH });
 });
 test('a 204 purchase reply is accepted for verification, not treated as malformed JSON', async () => {
   let posts = 0,
@@ -86,7 +82,7 @@ test('a 204 purchase reply is accepted for verification, not treated as malforme
     posts++;
     return new Response(null, { status: 204 });
   });
-  const r = await c.purchaseOffer(LEVEL, 1775, async () => {
+  const r = await c.purchaseOffer(OTHER, LEVEL, async () => {
     checks++;
   });
   assert.equal(r.state, 'accepted');
@@ -94,17 +90,40 @@ test('a 204 purchase reply is accepted for verification, not treated as malforme
   assert.equal(posts, 1);
   assert.equal(checks, 1);
 });
-test('empty/array purchase replies are not represented as delivered', () => {
-  for (const value of [null, {}, [], [{ Status: 'COMPLETE' }]])
-    assert.equal(directPurchaseReply(value).state, 'accepted');
-  assert.throws(() => directPurchaseReply([{}, {}]), code('ORDER_UNKNOWN'));
+test('order replies are never represented as delivered before entitlements confirm it', () => {
+  for (const value of [null, {}, { Status: 'ACCEPTED' }, { Status: 'COMPLETE' }])
+    assert.equal(createOrderReply(value).state, 'accepted');
+  assert.deepEqual(createOrderReply({ OrderID: OTHER, Status: 'ACCEPTED' }), {
+    state: 'accepted',
+    orderId: OTHER,
+  });
+  assert.equal(createOrderReply({ OrderID: OTHER, Status: 'FAILED' }).state, 'failed');
+  assert.throws(() => createOrderReply([{ Status: 'ACCEPTED' }]), code('ORDER_UNKNOWN'));
+  assert.throws(() => createOrderReply({ Status: 'PENDING' }), code('ORDER_UNKNOWN'));
+});
+test('a purchase is one POST to the order route carrying only the order key and offer', async () => {
+  const requests = [];
+  let checks = 0;
+  const c = clientWith(async (url, init) => {
+    requests.push({ url, ...init });
+    return response({ OrderID: MATCH, Status: 'ACCEPTED' });
+  });
+  const result = await c.purchaseOffer(OTHER, LEVEL, async () => {
+    checks++;
+  });
+  assert.equal(checks, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(new URL(requests[0].url).pathname, '/store/v1/order/');
+  assert.equal(requests[0].method, 'POST');
+  assert.deepEqual(JSON.parse(requests[0].body), { XID: OTHER, OfferID: LEVEL });
+  assert.deepEqual(result, { state: 'accepted', orderId: MATCH, httpStatus: 200 });
 });
 test('safe rejection categories do not leak arbitrary upstream text', async () => {
   const c = clientWith(async () =>
     response({ errorCode: 'INSUFFICIENT_FUNDS', message: 'private token contents' }, 400),
   );
   await assert.rejects(
-    c.purchaseOffer(LEVEL, 1775, async () => {}),
+    c.purchaseOffer(OTHER, LEVEL, async () => {}),
     (e) => e.code === 'INSUFFICIENT_VP' && e.status === 400 && !e.message.includes('private'),
   );
 });
@@ -113,7 +132,7 @@ test('unknown rejection returns a local diagnostic rather than an upstream strin
     response({ errorCode: 'SECRET_USER_ID', message: 'secret session' }, 422),
   );
   await assert.rejects(
-    c.purchaseOffer(LEVEL, 1775, async () => {}),
+    c.purchaseOffer(OTHER, LEVEL, async () => {}),
     (e) =>
       e.code === 'PURCHASE_REQUEST' &&
       !e.message.includes('SECRET') &&
@@ -127,24 +146,28 @@ test('unavailable direct route never probes another mutation', async () => {
     return response({}, 404);
   });
   await assert.rejects(
-    c.purchaseOffer(LEVEL, 1775, async () => {}),
+    c.purchaseOffer(OTHER, LEVEL, async () => {}),
     code('PURCHASE_ENDPOINT'),
   );
   assert.equal(calls.length, 1);
-  assert.ok(calls[0][0].endsWith('/store/v2/purchase'));
+  assert.ok(calls[0][0].endsWith('/store/v1/order/'));
 });
-test('invalid price cannot reach the network or dispatch callback', async () => {
+test('an invalid order key or offer cannot reach the network or dispatch callback', async () => {
   let calls = 0;
   const c = clientWith(async () => {
     calls++;
     return response({});
   });
-  for (const price of [0, -1, 1.2, NaN, Infinity])
+  for (const [key, offer] of [
+    ['not-a-uuid', LEVEL],
+    [OTHER, 'not-a-uuid'],
+    ['', LEVEL],
+  ])
     await assert.rejects(
-      c.purchaseOffer(LEVEL, price, async () => {
+      c.purchaseOffer(key, offer, async () => {
         calls++;
       }),
-      code('PURCHASE_PRICE'),
+      code('INVALID_ID'),
     );
   assert.equal(calls, 0);
 });
@@ -163,7 +186,7 @@ test('queued request rechecks consent after obtaining its HTTP permit', async ()
   );
   const first = http.json('https://pd.ap.a.pvp.net/fixture');
   const second = http.json(
-    'https://pd.ap.a.pvp.net/store/v2/purchase',
+    'https://pd.ap.a.pvp.net/store/v1/order/',
     { method: 'POST' },
     {
       purchase: true,
@@ -190,7 +213,7 @@ test('HTML purchase reply remains uncertain and cannot trigger a second POST', a
     });
   });
   await assert.rejects(
-    c.purchaseOffer(LEVEL, 1775, async () => {}),
+    c.purchaseOffer(OTHER, LEVEL, async () => {}),
     code('SCHEMA'),
   );
   assert.equal(calls, 1);

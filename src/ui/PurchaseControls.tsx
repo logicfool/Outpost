@@ -333,7 +333,7 @@ export function PurchaseHistory({ model }: { model: AppModel }) {
             </Text>
             <Text style={S.small}>
               {new Date(record.at).toLocaleString()} ·{' '}
-              {record.protocol === 'direct-v2' ? 'Price-confirmed request' : 'Legacy order'}
+              {record.protocol === 'direct-v2' ? 'Earlier purchase route' : 'Riot store order'}
             </Text>
             <Receipt record={record} />
             {pending(record) && (
