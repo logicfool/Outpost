@@ -16,7 +16,7 @@ export interface PartyModel {
   working: string | null;
   error: string | null;
   refresh(): void;
-  run(action: string, command: (client: RiotClient) => Promise<Party>): Promise<void>;
+  run(action: string, command: (client: RiotClient) => Promise<Party>): Promise<boolean>;
   dismissError(): void;
 }
 
@@ -76,7 +76,7 @@ export function useParty(model: AppModel, active: boolean): PartyModel {
 
   const run = useCallback(
     async (action: string, command: (client: RiotClient) => Promise<Party>) => {
-      if (!accountId || working) return;
+      if (!accountId || working) return false;
       const stamp = generation.current;
       setWorking(action);
       setError(null);
@@ -85,9 +85,11 @@ export function useParty(model: AppModel, active: boolean): PartyModel {
         const data = await (await getRuntime()).partyCommand(accountId, command);
         if (stamp === generation.current)
           setSection({ status: 'ready', data, fetchedAt: Date.now() });
+        return true;
       } catch (reason) {
         if (stamp === generation.current) setError(safeError(reason).message);
         if (stamp === generation.current) void load(true);
+        return false;
       } finally {
         if (stamp === generation.current) setWorking(null);
       }

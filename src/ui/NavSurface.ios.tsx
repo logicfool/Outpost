@@ -10,9 +10,7 @@ export function nativeGlassAvailable(): boolean {
   }
 }
 
-export function NavSurface({ style, children, ...props }: ViewProps) {
-  const { C, isDark } = useTheme();
-
+export function useNavGlass(): boolean {
   const [reduceTransparency, setReduceTransparency] = useState(true);
   useEffect(() => {
     let active = true,
@@ -31,7 +29,12 @@ export function NavSurface({ style, children, ...props }: ViewProps) {
       sub.remove();
     };
   }, []);
-  const glass = !reduceTransparency && nativeGlassAvailable();
+  return !reduceTransparency && nativeGlassAvailable();
+}
+
+export function NavSurface({ style, children, ...props }: ViewProps) {
+  const { C, isDark } = useTheme();
+  const glass = useNavGlass();
   return (
     <View
       {...props}

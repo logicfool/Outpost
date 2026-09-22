@@ -117,23 +117,24 @@ try {
   await check('profile exposes a party entry point', async () => {
     await page.getByTestId('open-party').waitFor();
     await page.getByTestId('open-party').click();
-    await page.getByText('PARTY LOBBY', { exact: true }).waitFor();
+    await page.getByTestId('party-hero').waitFor();
   });
   await check('party shows queue, members, ready state and leader controls', async () => {
     await page.getByText('Competitive', { exact: true }).first().waitFor();
-    await page.getByText('3 / 5 players', { exact: true }).waitFor();
-    await page.getByText('Halfstep', { exact: true }).waitFor();
-    assert.equal(
-      await page.getByText('WAITING', { exact: true }).count(),
-      1,
-      'One member is not ready',
-    );
-    assert.equal(await page.getByText('READY', { exact: true }).count(), 2);
+    await page.getByText('LOBBY', { exact: true }).waitFor();
+    await page
+      .getByText(/^Halfstep/)
+      .first()
+      .waitFor();
+    await page.getByText('2 of 3 ready', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Not ready', { exact: true }).count(), 1);
+    assert.equal(await page.getByText('Leader', { exact: true }).count(), 1);
     await shot('party-lobby');
   });
   await check('the queue cannot start while a member is not ready', async () => {
     assert.equal(await button('Start queue').isDisabled(), true);
-    await page.getByText(/Halfstep\s+is\s+not ready/).waitFor();
+    await page.getByTestId('party-queue-hint').waitFor();
+    assert.match(await page.getByTestId('party-queue-hint').innerText(), /Halfstep/);
   });
   await check('queue options are selectable and the current queue is marked', async () => {
     await page.getByTestId('party-queue-unrated').waitFor();
@@ -141,23 +142,31 @@ try {
     await shot('party-queues');
   });
   await check('party actions in demo never contact Riot and report that clearly', async () => {
-    await button('Ready up')
-      .click()
-      .catch(() => {});
-    await button('Not ready')
-      .click()
-      .catch(() => {});
+    await page.getByTestId('party-queue-unrated').click();
     await page.getByTestId('party-error').waitFor();
     assert.match(await page.getByTestId('party-error').innerText(), /Demo/i);
     await shot('party-demo-blocked');
   });
-  await check('party access, code and invite controls are present', async () => {
-    await page.getByTestId('party-access-closed').waitFor();
+  await check('party settings, invites and codes follow the members list', async () => {
+    const y = async (id) => (await page.getByTestId(id).boundingBox()).y;
     await page.getByTestId('party-access-open').waitFor();
-    await button('Create party code').waitFor();
+    await page.getByTestId('party-access-closed').waitFor();
+    await page.getByTestId('party-ready').waitFor();
+    await button('Generate party code').waitFor();
     await page.getByTestId('party-invite-input').waitFor();
     await page.getByTestId('party-code-input').waitFor();
+    assert.ok((await y('party-edit-members')) < (await y('party-queue-unrated')));
+    assert.ok((await y('party-queue-unrated')) < (await y('party-access-open')));
+    assert.ok((await y('party-access-open')) < (await y('party-code-input')));
     await page.getByText(/Outpost never readies up, queues or invites on its own/).waitFor();
+  });
+  await check('only online friends outside a party are offered for invite', async () => {
+    const friends = page.locator('[data-testid^="party-invite-friend-"]');
+    assert.equal(await friends.count(), 2);
+    await page.getByText(/^Lowtide/).waitFor();
+    assert.equal(await page.getByText(/^Stairwell/).count(), 0);
+    assert.equal(await page.getByText(/^Overpass/).count(), 0);
+    await shot('party-invite');
   });
   await button('Back from party').click();
 
@@ -230,7 +239,7 @@ try {
     await shot('missions-320');
     await tab('Profile').click();
     await page.getByTestId('open-party').click();
-    await page.getByText('PARTY LOBBY', { exact: true }).waitFor();
+    await page.getByTestId('party-hero').waitFor();
     const partyOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -247,7 +256,7 @@ try {
     await shot('missions-light');
     await tab('Profile').click();
     await page.getByTestId('open-party').click();
-    await page.getByText('PARTY LOBBY', { exact: true }).waitFor();
+    await page.getByTestId('party-hero').waitFor();
     await shot('party-light');
     await button('Back from party').click();
   });

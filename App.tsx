@@ -1,6 +1,7 @@
 import { RetainedTabs } from './src/ui/RetainedTabs';
 import { sameScreenModel } from './src/core/screenInputs';
-import { NavSurface } from './src/ui/NavSurface';
+import { NavSurface, useNavGlass } from './src/ui/NavSurface';
+import { selectionTick } from './src/platform/haptics';
 import { SkeletonProvider } from './src/ui/Skeleton';
 import { AccountsModal, type AccountRoute } from './src/ui/AccountsModal';
 import { NavInsetContext } from './src/ui/NavInsets';
@@ -99,6 +100,7 @@ function AppContent({ model }: { model: AppModel }) {
       );
   }, [model.settings.theme]);
   const narrow = useWindowDimensions().width < 360;
+  const navGlass = useNavGlass();
   const [tab, setTab] = useState<ScreenName>('store'),
     [item, setItem] = useState<{ accountId: string; value: CatalogItem } | null>(null);
   const [explorer, setExplorer] = useState<{ accountId: string; routes: ExplorerRoute[] } | null>(
@@ -122,6 +124,7 @@ function AppContent({ model }: { model: AppModel }) {
       ),
     [],
   );
+  const onCloseExplorer = useCallback(() => setExplorer(null), []);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30000);
@@ -284,10 +287,17 @@ function AppContent({ model }: { model: AppModel }) {
                     aria-selected={selected}
                     accessibilityState={{ selected }}
                     style={styles.navItem}
-                    onPress={() => setTab(nav.id)}
+                    onPress={() => {
+                      if (!selected) selectionTick();
+                      setTab(nav.id);
+                    }}
                   >
-                    {selected && <View style={styles.navIndicator} />}
-                    <Feather name={nav.icon} size={20} color={selected ? C.accent : C.subtle} />
+                    {selected && <View style={[styles.navIndicator, navGlass && styles.navLens]} />}
+                    <Feather
+                      name={nav.icon}
+                      size={20}
+                      color={selected ? C.accent : navGlass ? C.muted : C.subtle}
+                    />
                     <Text
                       numberOfLines={1}
                       adjustsFontSizeToFit
@@ -332,6 +342,7 @@ function AppContent({ model }: { model: AppModel }) {
         routes={explorer?.accountId === model.active?.puuid ? (explorer?.routes ?? []) : []}
         onNavigate={onNavigate}
         onBack={onBack}
+        onClose={onCloseExplorer}
       />
       <PrivacyGuard />
     </SafeAreaView>
@@ -465,6 +476,7 @@ const makeStyles = (C: Palette) =>
       borderRadius: 20,
       backgroundColor: `${C.accent}16`,
     },
+    navLens: { top: 1, bottom: 1, borderRadius: 22, backgroundColor: `${C.ink}14` },
     welcome: { flexGrow: 1, padding: 22, paddingBottom: 36, gap: 26 },
     welcomeArt: { height: 250, alignItems: 'center', justifyContent: 'center', borderRadius: 28 },
     welcomeLogo: { width: 160, height: 160, borderRadius: 40 },

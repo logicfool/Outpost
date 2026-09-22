@@ -70,6 +70,7 @@ import {
   Resource,
   SectionHeader,
   Tabs,
+  sheetPresentation,
 } from './components';
 import { CareerModal, HistoryRow, MatchCard, MatchReport } from './screens';
 import { playerLabel } from '../core/playerNames';
@@ -379,11 +380,13 @@ export function ExplorerModal({
   routes,
   onNavigate,
   onBack,
+  onClose,
 }: {
   model: AppModel;
   routes: ExplorerRoute[];
   onNavigate: Navigate;
   onBack(): void;
+  onClose(): void;
 }) {
   const route = routes.at(-1),
     props = { model, onNavigate, onBack };
@@ -406,7 +409,12 @@ export function ExplorerModal({
   const chatView =
     route?.type === 'friends' ? chatViews.forRoute(model.active?.puuid, route) : undefined;
   return (
-    <Modal visible={!!route} animationType="slide" onRequestClose={onBack}>
+    <Modal
+      visible={!!route}
+      animationType="slide"
+      onRequestClose={Platform.OS === 'ios' ? onClose : onBack}
+      {...sheetPresentation()}
+    >
       {route?.type === 'market-history' && (
         <MarketHistoryPanel
           key={`${model.active?.puuid}:${marketView?.navigationId}`}

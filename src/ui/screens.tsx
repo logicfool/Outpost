@@ -78,6 +78,7 @@ import {
   Tabs,
   Timer,
   WishButton,
+  sheetPresentation,
 } from './components';
 import { rarityColor, useTheme, useThemedStyles, type Palette } from './theme';
 
@@ -1140,7 +1141,12 @@ export function CareerModal({
   return embedded ? (
     content
   ) : (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      {...sheetPresentation()}
+    >
       {content}
     </Modal>
   );
@@ -1505,7 +1511,12 @@ export function MatchReport({
   return embedded ? (
     content
   ) : (
-    <Modal visible={id !== null} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={id !== null}
+      animationType="slide"
+      onRequestClose={onClose}
+      {...sheetPresentation()}
+    >
       {content}
     </Modal>
   );
@@ -2169,7 +2180,7 @@ export function ItemModal({
   return embedded ? (
     content
   ) : (
-    <Modal visible={!!item} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={!!item} animationType="slide" onRequestClose={onClose} {...sheetPresentation()}>
       {content}
     </Modal>
   );

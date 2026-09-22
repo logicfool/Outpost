@@ -263,6 +263,31 @@ export function demoParty(now: number): import('./partyTypes').Party {
     observedAt: now,
   };
 }
+export function demoPartyFriends(now: number): import('./chatTypes').Friend[] {
+  const card = Object.values(demoCatalog(now).items).find((i) => i.kind === 'card');
+  const friend = (
+    n: number,
+    name: string,
+    presence: import('./chatTypes').Friend['presence'],
+    partySize = 1,
+  ) => ({
+    subject: `00000000-0000-4000-800e-${String(n).padStart(12, '0')}`,
+    jid: `00000000-0000-4000-800e-${String(n).padStart(12, '0')}@demo.pvp.net`,
+    name,
+    tag: 'DEMO',
+    card,
+    presence,
+    presenceSource: 'valorant' as const,
+    partySize,
+    updatedAt: now,
+  });
+  return [
+    friend(1, 'Lowtide', 'online'),
+    friend(2, 'Brightline', 'away'),
+    friend(3, 'Stairwell', 'online', 3),
+    friend(4, 'Overpass', 'in_game'),
+  ];
+}
 const QUEUES = ['competitive', 'competitive', 'unrated', 'swiftplay', 'competitive'];
 export function makeDemo(now = Date.now()): {
   account: Account;

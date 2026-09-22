@@ -5,12 +5,13 @@ import { isUnloadedSection } from '../core/refreshPolicy';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  View,
   type ViewStyle,
+  View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -45,7 +46,8 @@ export function Button({
   const { C, S, isDark } = useTheme();
   const styles = useThemedStyles(makeStyles);
 
-  const color = secondary ? C.ink : '#FFFFFF';
+  const muted = disabled && !secondary;
+  const color = muted ? C.subtle : secondary ? C.ink : '#FFFFFF';
   return (
     <Pressable
       accessibilityRole="button"
@@ -55,8 +57,8 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
-        secondary ? styles.buttonSecondary : { backgroundColor: C.accent },
-        { opacity: disabled ? 0.4 : pressed ? 0.8 : 1 },
+        secondary ? styles.buttonSecondary : { backgroundColor: muted ? C.raised : C.accent },
+        { opacity: disabled ? (muted ? 1 : 0.4) : pressed ? 0.8 : 1 },
       ]}
     >
       {icon && <Feather name={icon} size={16} color={color} />}
@@ -139,12 +141,20 @@ export function Tabs<T extends string>({
     </ScrollView>
   );
 }
-export function SectionHeader({ title, detail }: { title: string; detail?: string }) {
-  const { C, S, isDark } = useTheme();
+export function SectionHeader({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail?: string;
+  action?: React.ReactNode;
+}) {
+  const { S } = useTheme();
   return (
     <View style={S.between}>
       <Text style={[S.h2, { flexShrink: 1 }]}>{title}</Text>
-      {detail ? <Text style={[S.small, { flexShrink: 0 }]}>{detail}</Text> : null}
+      {action ?? (detail ? <Text style={[S.small, { flexShrink: 0 }]}>{detail}</Text> : null)}
     </View>
   );
 }
@@ -600,6 +610,12 @@ export function InfoRow({ label, value }: { label: string; value: string }) {
       </Text>
     </View>
   );
+}
+
+export function sheetPresentation() {
+  return Platform.OS === 'ios'
+    ? ({ presentationStyle: 'pageSheet', allowSwipeDismissal: true } as const)
+    : {};
 }
 
 export function ModalPage({ children }: { children: React.ReactNode }) {
