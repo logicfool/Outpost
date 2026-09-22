@@ -11,10 +11,20 @@ export function ChatConnectionNotice({ chat }: { chat: ChatState }) {
     <View
       testID="chat-auto-connection"
       accessibilityLiveRegion="polite"
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 }}
+      style={{
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        paddingHorizontal: 11,
+        paddingVertical: 7,
+        borderRadius: 999,
+        backgroundColor: C.raised,
+        maxWidth: '100%',
+      }}
     >
       {busy && <ActivityIndicator size="small" color={C.subtle} />}
-      <Text style={[S.small, { flex: 1 }]}>{chatConnectionLabel(chat)}</Text>
+      <Text style={[S.small, { flexShrink: 1 }]}>{chatConnectionLabel(chat)}</Text>
     </View>
   );
 }

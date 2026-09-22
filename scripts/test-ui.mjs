@@ -313,7 +313,37 @@ try {
     'Collection home groups loadout actions and categories instead of a giant grid',
     async () => {
       await tab('Collection');
-      await page.getByTestId('collection-home').waitFor();
+      const collectionHome = page.getByTestId('collection-home');
+      await collectionHome.waitFor();
+      const compactHeader = page.getByTestId('compact-scroll-header-collection');
+      await collectionHome.evaluate((node) => {
+        node.scrollTop = 0;
+        node.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      await page.waitForFunction(
+        () =>
+          Number(
+            getComputedStyle(
+              document.querySelector('[data-testid="compact-scroll-header-collection"]'),
+            ).opacity,
+          ) < 0.1,
+      );
+      assert.equal(
+        Number(await compactHeader.evaluate((node) => getComputedStyle(node).opacity)),
+        0,
+      );
+      await collectionHome.evaluate((node) => {
+        node.scrollTop = 80;
+        node.dispatchEvent(new Event('scroll', { bubbles: true }));
+      });
+      await page.waitForFunction(
+        () =>
+          Number(
+            getComputedStyle(
+              document.querySelector('[data-testid="compact-scroll-header-collection"]'),
+            ).opacity,
+          ) > 0.9,
+      );
       for (const label of [
         'Change banner',
         'Change title',

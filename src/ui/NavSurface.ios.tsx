@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, View, StyleSheet, type ViewProps } from 'react-native';
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from 'expo-glass-effect';
 import { useTheme } from './theme';
+type NavSurfaceProps = ViewProps & { glassRadius?: number };
 export function nativeGlassAvailable(): boolean {
   try {
     return isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
@@ -32,7 +33,7 @@ export function useNavGlass(): boolean {
   return !reduceTransparency && nativeGlassAvailable();
 }
 
-export function NavSurface({ style, children, ...props }: ViewProps) {
+export function NavSurface({ style, children, glassRadius = 28, ...props }: NavSurfaceProps) {
   const { C, isDark } = useTheme();
   const glass = useNavGlass();
   return (
@@ -50,7 +51,7 @@ export function NavSurface({ style, children, ...props }: ViewProps) {
           pointerEvents="none"
           glassEffectStyle="regular"
           colorScheme={isDark ? 'dark' : 'light'}
-          style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
+          style={[StyleSheet.absoluteFill, { borderRadius: glassRadius }]}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
         />

@@ -1,5 +1,4 @@
 import { ChatConnectionNotice } from './ChatConnectionNotice';
-import { Skeleton } from './Skeleton';
 import { useFriendPortraits } from '../state/useFriendPortraits';
 import { useNavInset } from './NavInsets';
 import React, {
@@ -11,15 +10,7 @@ import React, {
   useState,
   useDeferredValue,
 } from 'react';
-import {
-  SectionList,
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
-  ActivityIndicator,
-} from 'react-native';
+import { SectionList, View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AppModel } from '../state/useApp';
 import type { Friend } from '../core/chatTypes';
@@ -32,6 +23,7 @@ import { Image } from './CachedImage';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Button } from './components';
 import { useTheme, useThemedStyles, type Palette } from './theme';
+import { useScrollHeader } from './ScrollHeader';
 
 const FriendRow = memo(function FriendRow({
   friend,
@@ -117,6 +109,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles);
   const navInset = useNavInset();
+  const scrollHeader = useScrollHeader();
   const portraits = useFriendPortraits(model);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -175,6 +168,7 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
             : 'Your account';
   return (
     <SectionList
+      {...scrollHeader}
       onViewableItemsChanged={portraits.onViewableItemsChanged}
       viewabilityConfig={portraits.viewabilityConfig}
       sections={sections}
@@ -197,7 +191,9 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
       ListHeaderComponent={
         <View style={{ gap: 14 }}>
           <View style={S.between}>
-            <Text style={S.title}>Friends</Text>
+            <Text accessibilityRole="header" style={S.title}>
+              Friends
+            </Text>
             <Pressable
               style={styles.headerAction}
               accessibilityRole="button"
@@ -255,17 +251,17 @@ export function FriendsScreen({ model, onNavigate }: { model: AppModel; onNaviga
         </View>
       }
       ListEmptyComponent={
-        busy || model.historyLoading ? (
-          <Skeleton kind="row" count={4} label="Loading friends" style={{ paddingTop: 16 }} />
-        ) : (
-          <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
-            {search
-              ? 'No matching friends.'
-              : connected
-                ? 'No friends returned by Riot.'
-                : 'Friends will appear when the connection returns.'}
-          </Text>
-        )
+        <Text style={[S.body, { paddingVertical: 24, textAlign: 'center' }]}>
+          {search
+            ? 'No matching friends.'
+            : connected
+              ? 'No friends returned by Riot.'
+              : model.historyLoading
+                ? 'Loading saved friends...'
+                : busy
+                  ? 'Connecting to chat...'
+                  : 'Friends will appear when the connection returns.'}
+        </Text>
       }
     />
   );

@@ -20,8 +20,18 @@ import type { CatalogItem, ItemKind } from '../core/types';
 import type { Navigate } from './explorerTypes';
 import { hydrateItem } from '../core/catalog';
 import { Image } from './CachedImage';
-import { ItemArt, ModalHeader, ModalPage, Resource, Tabs, WishButton } from './components';
+import {
+  ItemArt,
+  ListGroup,
+  ListRow,
+  ModalHeader,
+  ModalPage,
+  Resource,
+  Tabs,
+  WishButton,
+} from './components';
 import { useNavInset } from './NavInsets';
+import { useScrollHeader } from './ScrollHeader';
 import { useTheme } from './theme';
 
 export type CollectionKind = ItemKind | 'all';
@@ -39,51 +49,10 @@ const CATEGORIES: {
   { kind: 'chroma', title: 'Colours', icon: 'droplet' },
   { kind: 'agent', title: 'Agents', icon: 'users' },
 ];
-function MenuRow({
-  title,
-  detail,
-  icon,
-  onPress,
-  last = false,
-  label,
-}: {
-  title: string;
-  detail?: string;
-  icon: React.ComponentProps<typeof Feather>['name'];
-  onPress(): void;
-  last?: boolean;
-  label?: string;
-}) {
-  const { C, S } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label ?? title}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: 55,
-        paddingHorizontal: 15,
-        paddingVertical: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        borderBottomWidth: last ? 0 : 0.5,
-        borderBottomColor: C.border,
-        opacity: pressed ? 0.65 : 1,
-      })}
-    >
-      <Feather name={icon} size={19} color={C.accent} />
-      <Text style={[S.h3, { flexShrink: 0 }]}>{title}</Text>
-      <Text style={[S.small, { flex: 1, textAlign: 'right', marginLeft: 4 }]} numberOfLines={1}>
-        {detail}
-      </Text>
-      <Feather name="chevron-right" size={17} color={C.subtle} />
-    </Pressable>
-  );
-}
 export function CollectionHub({ model, onNavigate }: { model: AppModel; onNavigate: Navigate }) {
   const { C, S } = useTheme(),
     bottom = useNavInset();
+  const scrollHeader = useScrollHeader();
   const equipped =
     model.snapshot?.loadout.status === 'ready' ? model.snapshot.loadout.data : undefined;
   const card = equipped?.card ?? model.observedIdentity?.player.card,
@@ -100,9 +69,9 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
     return values;
   }, [owned]);
   const count = (kind: ItemKind) => (owned ? String(counts.get(kind)?.size ?? 0) : undefined);
-  const group = { backgroundColor: C.surface, borderRadius: 20, overflow: 'hidden' as const };
   return (
     <ScrollView
+      {...scrollHeader}
       testID="collection-home"
       showsVerticalScrollIndicator={false}
       contentContainerStyle={[S.content, { gap: 18, paddingBottom: bottom + 24 }]}
@@ -115,7 +84,9 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
       }
     >
       <View style={S.between}>
-        <Text style={S.title}>Collection</Text>
+        <Text accessibilityRole="header" style={S.title}>
+          Collection
+        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Search all collection items"
@@ -153,71 +124,71 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
         </View>
       ) : null}
       <Text style={S.h2}>Loadout</Text>
-      <View style={group}>
-        <MenuRow
+      <ListGroup>
+        <ListRow
           title="Change banner"
           icon="flag"
-          detail={card?.name}
+          value={card?.name}
           onPress={() => onNavigate({ type: 'identity', initialTab: 'card' })}
         />
-        <MenuRow
+        <ListRow
           title="Change title"
           icon="type"
-          detail={equipped?.title?.name}
+          value={equipped?.title?.name}
           onPress={() => onNavigate({ type: 'identity', initialTab: 'title' })}
         />
-        <MenuRow
+        <ListRow
           title="Weapon loadout"
           icon="crosshair"
-          detail={equipped ? `${equipped.guns.length} slots` : undefined}
+          value={equipped ? `${equipped.guns.length} slots` : undefined}
           onPress={() => onNavigate({ type: 'equipped' })}
         />
-        <MenuRow
+        <ListRow
           title="Weapon buddies"
           icon="award"
           onPress={() => onNavigate({ type: 'buddies' })}
         />
-        <MenuRow
+        <ListRow
           title="Change sprays"
           icon="droplet"
           onPress={() => onNavigate({ type: 'sprays' })}
         />
-        <MenuRow
+        <ListRow
           title="Loadout presets"
           label="Saved loadouts"
           icon="layers"
           onPress={() => onNavigate({ type: 'presets' })}
           last
         />
-      </View>
+      </ListGroup>
       <AimCollectionRows model={model} onNavigate={onNavigate} />
       <Text style={S.h2}>Browse collection</Text>
-      <View style={group}>
+      <ListGroup>
         {CATEGORIES.map((category, index) => (
-          <MenuRow
+          <ListRow
             key={category.kind}
             title={category.title}
             icon={category.icon}
-            detail={count(category.kind as ItemKind)}
+            value={count(category.kind as ItemKind)}
             last={index === CATEGORIES.length - 1}
             onPress={() => onNavigate({ type: 'collection', kind: category.kind, scope: 'owned' })}
           />
         ))}
-      </View>
-      <View style={group}>
-        <MenuRow
+      </ListGroup>
+      <ListGroup>
+        <ListRow
           title="Wishlist"
           icon="heart"
-          detail={String(model.wishlist.length)}
+          value={String(model.wishlist.length)}
           onPress={() => onNavigate({ type: 'collection', kind: 'all', scope: 'wishlist' })}
         />
-        <MenuRow
+        <ListRow
           title="All items"
           icon="grid"
           onPress={() => onNavigate({ type: 'collection', kind: 'all', scope: 'catalog' })}
           last
         />
-      </View>
+      </ListGroup>
     </ScrollView>
   );
 }
@@ -491,19 +462,19 @@ export function EquippedPanel({
           />
         }
         ListHeaderComponent={
-          <View style={{ backgroundColor: C.surface, borderRadius: 16 }}>
-            <MenuRow
+          <ListGroup>
+            <ListRow
               title="Edit a loadout preset"
               icon="layers"
               onPress={() => onNavigate({ type: 'presets' })}
             />
-            <MenuRow
+            <ListRow
               title="Manage buddies"
               icon="award"
               onPress={() => onNavigate({ type: 'buddies' })}
               last
             />
-          </View>
+          </ListGroup>
         }
         ListEmptyComponent={
           <Resource title="Equipped weapons" section={loadout} loading={model.busy}>

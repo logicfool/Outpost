@@ -1,4 +1,5 @@
 import { RetainedTabs } from './src/ui/RetainedTabs';
+import { ScrollHeader } from './src/ui/ScrollHeader';
 import { sameScreenModel } from './src/core/screenInputs';
 import { NavSurface, useNavGlass } from './src/ui/NavSurface';
 import { selectionTick } from './src/platform/haptics';
@@ -52,6 +53,14 @@ const NAV: { id: ScreenName; label: string; icon: React.ComponentProps<typeof Fe
     { id: 'matches', label: 'Profile', icon: 'user' },
     { id: 'account', label: 'Settings', icon: 'settings' },
   ];
+const SCREEN_TITLES: Record<ScreenName, string> = {
+  store: 'Store',
+  progress: 'Battle Pass',
+  collection: 'Collection',
+  friends: 'Friends',
+  matches: 'Profile',
+  account: 'Account',
+};
 class Boundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -374,7 +383,11 @@ const ScreenSlot = memo(
       friends: FriendsScreen,
     };
     const Screen = screens[tab];
-    return <Screen model={model} onItem={onItem} onLink={onLink} onNavigate={onNavigate} />;
+    return (
+      <ScrollHeader title={SCREEN_TITLES[tab]}>
+        <Screen model={model} onItem={onItem} onLink={onLink} onNavigate={onNavigate} />
+      </ScrollHeader>
+    );
   },
   (a, b) => {
     if (

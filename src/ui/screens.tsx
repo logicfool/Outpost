@@ -18,6 +18,7 @@ import {
 import { RoundOverview, DuelMatrix } from './MatchVisuals';
 import { PurchaseControls, PurchaseHistory } from './PurchaseControls';
 import { useNavInset } from './NavInsets';
+import { useScrollHeader } from './ScrollHeader';
 import { SessionStatus } from './SessionStatus';
 import { useMatchPreviews } from '../state/useMatchPreviews';
 import { ChatSettings } from './ChatSettings';
@@ -67,6 +68,8 @@ import {
   Empty,
   InfoRow,
   ItemArt,
+  ListGroup,
+  ListRow,
   ModalHeader,
   ModalPage,
   MoneyText,
@@ -128,9 +131,11 @@ function Page({ model, children }: { model: AppModel; children: React.ReactNode 
   const pull = usePullRefresh(model.refresh, model.active?.puuid);
   const { C, S, isDark } = useTheme();
   const navInset = useNavInset();
+  const scrollHeader = useScrollHeader();
 
   return (
     <ScrollView
+      {...scrollHeader}
       contentContainerStyle={[S.content, { paddingBottom: 24 + navInset }]}
       refreshControl={
         <RefreshControl
@@ -159,7 +164,7 @@ function Heading({ eyebrow, title }: { eyebrow: string; title: React.ReactNode }
         flexWrap: 'wrap',
       }}
     >
-      <Text style={S.title} numberOfLines={1}>
+      <Text accessibilityRole="header" style={S.title} numberOfLines={1}>
         {title}
       </Text>
       <Text style={[S.eyebrow, { fontSize: 9, letterSpacing: 1 }]}>{eyebrow}</Text>
@@ -336,6 +341,7 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
   const { C, S } = useTheme(),
     styles = useThemedStyles(makeStyles),
     navInset = useNavInset();
+  const scrollHeader = useScrollHeader();
   const [bundleLimit, setBundleLimit] = useState(12),
     [bundleSearch, setBundleSearch] = useState(false),
     [bundleQuery, setBundleQuery] = useState('');
@@ -517,6 +523,7 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
           : undefined;
   return (
     <FlatList
+      {...scrollHeader}
       data={rows}
       renderItem={render}
       keyExtractor={storeKey}
@@ -1540,6 +1547,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   const polling = useLivePolling(model);
   const { C, S } = useTheme(),
     navInset = useNavInset();
+  const scrollHeader = useScrollHeader();
   const [filter, setFilter] = useState<MatchFilter>(EMPTY_FILTER),
     [loadingOlder, setLoadingOlder] = useState(false);
   const previews = useMatchPreviews(model),
@@ -1562,6 +1570,7 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
   return (
     <FlatList
+      {...scrollHeader}
       data={shown}
       renderItem={render}
       keyExtractor={matchKey}
@@ -1594,22 +1603,17 @@ export function MatchesScreen({ model, onNavigate }: Props) {
             loading={polling.busy}
             onOpen={() => onNavigate({ type: 'live' })}
           />
-          <Pressable
-            testID="open-party"
-            accessibilityRole="button"
-            accessibilityLabel="Open your party"
-            onPress={() => onNavigate({ type: 'party' })}
-            style={[S.card, S.between, { paddingVertical: 14 }]}
-          >
-            <View style={[S.row, { gap: 11, alignItems: 'center', flex: 1 }]}>
-              <Feather name="users" size={17} color={C.accent} />
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={S.h3}>Party</Text>
-                <Text style={S.small}>Queue, invites and party code</Text>
-              </View>
-            </View>
-            <Feather name="chevron-right" size={18} color={C.subtle} />
-          </Pressable>
+          <ListGroup>
+            <ListRow
+              icon="users"
+              title="Party"
+              subtitle="Queue, invites and party code"
+              label="Open your party"
+              testID="open-party"
+              onPress={() => onNavigate({ type: 'party' })}
+              last
+            />
+          </ListGroup>
           <SectionHeader title="Match history" />
           {!!matches?.length && (
             <MatchFilterBar
@@ -1809,21 +1813,21 @@ export function AccountScreen({ model, onLink }: Props) {
           />
         </View>
         <SectionHeader title="Video" />
-        <View style={S.card}>
+        <ListGroup>
           <Setting
             title="Autoplay previews"
             detail="Play skin previews automatically."
             value={model.settings.autoplayVideos !== false}
             onChange={(value) => void model.setAutoplayVideos(value)}
           />
-          <View style={S.divider} />
           <Setting
             title="Video sound"
             detail="Start previews with sound."
             value={model.settings.videoSound !== false}
             onChange={(value) => void model.setVideoSound(value)}
+            last
           />
-        </View>
+        </ListGroup>
         <SectionHeader title="Chat history" />
         <View style={S.card}>
           <ChatSettings model={model} />
@@ -1841,7 +1845,7 @@ export function AccountScreen({ model, onLink }: Props) {
           </Text>
         </View>
         <SectionHeader title="Notifications" />
-        <View style={S.card}>
+        <ListGroup>
           <Setting
             title="Store reminders"
             detail="At the daily reset."
@@ -1849,7 +1853,6 @@ export function AccountScreen({ model, onLink }: Props) {
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) => void model.saveSettings({ ...model.settings, reminders: value })}
           />
-          <View style={S.divider} />
           <Setting
             title="Wishlist alerts"
             detail="Daily store, Night Market and bundles."
@@ -1859,7 +1862,6 @@ export function AccountScreen({ model, onLink }: Props) {
               void model.saveSettings({ ...model.settings, wishlistAlerts: value })
             }
           />
-          <View style={S.divider} />
           <Setting
             title="Chat alerts"
             detail="New messages while Outpost is open."
@@ -1867,7 +1869,6 @@ export function AccountScreen({ model, onLink }: Props) {
             disabled={active.demo || Platform.OS === 'web'}
             onChange={(value) => void model.saveSettings({ ...model.settings, chatAlerts: value })}
           />
-          <View style={S.divider} />
           <Setting
             title="Notification previews"
             detail="Show names and message text on the lock screen."
@@ -1877,7 +1878,6 @@ export function AccountScreen({ model, onLink }: Props) {
               void model.saveSettings({ ...model.settings, notificationPreviews: value })
             }
           />
-          <View style={S.divider} />
           <Setting
             title="Background refresh"
             detail="At store reset, when your phone allows it."
@@ -1886,8 +1886,9 @@ export function AccountScreen({ model, onLink }: Props) {
             onChange={(value) =>
               void model.saveSettings({ ...model.settings, backgroundSync: value })
             }
+            last
           />
-        </View>
+        </ListGroup>
         <SectionHeader title="Phone purchases" />
         <View style={S.card}>
           <Setting
@@ -1987,30 +1988,33 @@ function Setting({
   value,
   onChange,
   disabled,
+  last,
 }: {
   title: string;
   detail: string;
   value: boolean;
   onChange(value: boolean): void;
   disabled?: boolean;
+  last?: boolean;
 }) {
-  const { C, S, isDark } = useTheme();
-  const navInset = useNavInset();
+  const { C } = useTheme();
   return (
-    <View style={S.row}>
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text style={S.h3}>{title}</Text>
-        <Text style={S.small}>{detail}</Text>
-      </View>
-      <Switch
-        accessibilityLabel={title}
-        value={value}
-        disabled={disabled}
-        onValueChange={onChange}
-        trackColor={{ false: C.raised, true: C.accent }}
-        thumbColor={C.ink}
-      />
-    </View>
+    <ListRow
+      title={title}
+      subtitle={detail}
+      disabled={disabled}
+      last={last}
+      trailing={
+        <Switch
+          accessibilityLabel={title}
+          value={value}
+          disabled={disabled}
+          onValueChange={onChange}
+          trackColor={{ false: C.raised, true: C.accent }}
+          thumbColor={C.ink}
+        />
+      }
+    />
   );
 }
 export function ItemModal({

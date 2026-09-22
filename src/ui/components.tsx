@@ -28,6 +28,121 @@ import {
   type Palette,
 } from './theme';
 type IconName = React.ComponentProps<typeof Feather>['name'];
+export function ListGroup({ label, children }: { label?: string; children: React.ReactNode }) {
+  const { C, S } = useTheme();
+  return (
+    <View style={{ gap: 8 }}>
+      {label ? (
+        <Text style={[S.small, { paddingHorizontal: 4, fontSize: 11, letterSpacing: 0.7 }]}>
+          {label.toUpperCase()}
+        </Text>
+      ) : null}
+      <View style={{ overflow: 'hidden', borderRadius: 16, backgroundColor: C.surface }}>
+        {children}
+      </View>
+    </View>
+  );
+}
+export function ListRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  trailing,
+  chevron,
+  last = false,
+  disabled = false,
+  label,
+  testID,
+  onPress,
+}: {
+  icon?: IconName;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  value?: React.ReactNode;
+  trailing?: React.ReactNode;
+  chevron?: boolean;
+  last?: boolean;
+  disabled?: boolean;
+  label?: string;
+  testID?: string;
+  onPress?: () => void;
+}) {
+  const { C, S } = useTheme();
+  const content = (
+    <>
+      {icon ? (
+        <View
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: C.raised,
+          }}
+        >
+          <Feather name={icon} size={16} color={C.accent} />
+        </View>
+      ) : null}
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        {typeof title === 'string' ? (
+          <Text style={S.h3} numberOfLines={1}>
+            {title}
+          </Text>
+        ) : (
+          title
+        )}
+        {subtitle ? (
+          typeof subtitle === 'string' ? (
+            <Text style={S.small} numberOfLines={2}>
+              {subtitle}
+            </Text>
+          ) : (
+            subtitle
+          )
+        ) : null}
+      </View>
+      {value ? (
+        typeof value === 'string' ? (
+          <Text style={[S.small, { maxWidth: '38%', textAlign: 'right' }]} numberOfLines={1}>
+            {value}
+          </Text>
+        ) : (
+          value
+        )
+      ) : null}
+      {trailing}
+      {(chevron ?? !!onPress) ? <Feather name="chevron-right" size={17} color={C.subtle} /> : null}
+    </>
+  );
+  const style = {
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 11,
+    borderBottomWidth: last ? 0 : StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+    opacity: disabled ? 0.5 : 1,
+  };
+  return onPress ? (
+    <Pressable
+      accessibilityRole="button"
+      testID={testID}
+      accessibilityLabel={label ?? (typeof title === 'string' ? title : undefined)}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [style, { opacity: disabled ? 0.5 : pressed ? 0.72 : 1 }]}
+    >
+      {content}
+    </Pressable>
+  ) : (
+    <View style={style}>{content}</View>
+  );
+}
 export function Button({
   title,
   label,
