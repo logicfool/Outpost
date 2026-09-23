@@ -265,7 +265,7 @@ export class SingleFlightCache {
     if (existing) return existing as Promise<T>;
     const generation = this.generation;
     const work = loader().then((data) => {
-      if (generation !== this.generation) return data;
+      if (generation !== this.generation || this.pending.get(key) !== work) return data;
 
       if (this.values.size >= 128) this.values.delete(this.values.keys().next().value!);
       this.values.set(key, { data, until: this.now() + ttlMs });
@@ -277,6 +277,16 @@ export class SingleFlightCache {
     } finally {
       if (this.pending.get(key) === work) this.pending.delete(key);
     }
+  }
+  /** Replace one cached value without allowing an older in-flight load to restore it. */
+  prime<T>(key: string, ttlMs: number, data: T): void {
+    this.pending.delete(key);
+    if (this.values.size >= 128) this.values.delete(this.values.keys().next().value!);
+    this.values.set(key, { data, until: this.now() + ttlMs });
+  }
+  invalidate(key: string): void {
+    this.values.delete(key);
+    this.pending.delete(key);
   }
   clear() {
     this.generation++;

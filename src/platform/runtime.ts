@@ -204,6 +204,9 @@ export class Runtime {
   }
   async loadCatalog(force = false, allowNetwork = true): Promise<Catalog> {
     if (!allowNetwork && Object.keys(this.catalog.items).length) return this.catalog;
+    // Do not let a full refresh race a targeted repair and overwrite its newer metadata.
+    // Cache-only startup reads above remain non-blocking.
+    if (allowNetwork && this.metadataRepairFlight) await this.metadataRepairFlight.catch(() => {});
     if (this.catalogFlight) return this.catalogFlight;
     const work = async () => {
       const cached = Object.keys(this.catalog.items).length

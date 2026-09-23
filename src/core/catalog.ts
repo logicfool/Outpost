@@ -411,6 +411,11 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
         previous.items[id]
           ? {
               ...item,
+              collectionName:
+                item.collectionName ??
+                (item.collectionKey === previous.items[id]!.collectionKey
+                  ? previous.items[id]!.collectionName
+                  : undefined),
               image: item.image ?? previous.items[id]!.image,
               smallArt: item.smallArt ?? previous.items[id]!.smallArt,
               wideArt: item.wideArt ?? previous.items[id]!.wideArt,
@@ -423,6 +428,12 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
     bundles: Object.fromEntries(
       Object.entries({ ...previous.bundles, ...fresh.bundles }).map(([id, bundle]) => {
         const old = previous.bundles[id];
+        // An empty inferred list means unavailable context, not a published empty bundle.
+        const retainMembership =
+          old?.membershipSource === 'store' ||
+          (old?.membershipSource === 'catalog-theme' &&
+            !bundle.itemIds?.length &&
+            bundle.collectionKey === old.collectionKey);
         return [
           id,
           {
@@ -431,11 +442,11 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
             imageFallbacks: bundle.imageFallbacks?.length
               ? bundle.imageFallbacks
               : old?.imageFallbacks,
-            ...(old?.membershipSource === 'store'
+            ...(old && retainMembership
               ? {
                   itemIds: old.itemIds,
                   itemKinds: old.itemKinds,
-                  membershipSource: 'store' as const,
+                  membershipSource: old.membershipSource,
                 }
               : {}),
           },
@@ -452,8 +463,10 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
 }
 export class CatalogClient {
   private cache = new SingleFlightCache();
+  private generation = 0;
   constructor(private http: HttpClient) {}
   clear(): void {
+    this.generation++;
     this.cache.clear();
   }
   async version(): Promise<string> {
@@ -466,6 +479,7 @@ export class CatalogClient {
     });
   }
   async repair(previous: Catalog, paths: CatalogPath[]): Promise<Catalog> {
+    const generation = this.generation;
     const requested = [...new Set(paths)]
       .filter((path) => CATALOG_PATHS.includes(path))
       .slice(0, 7);
@@ -480,6 +494,8 @@ export class CatalogClient {
               })
             ).data;
             if (!Array.isArray(object(data).data)) throw new Error('Invalid catalogue category');
+            if (generation === this.generation)
+              this.cache.prime(`category:${path}`, 24 * 60 * 60 * 1000, data);
             return data;
           });
           return [path, result] as const;
@@ -489,6 +505,9 @@ export class CatalogClient {
         }
       }),
     );
+    // Rebuild normal loads from repaired categories, not an older aggregate.
+    if (generation === this.generation && entries.some(([, data]) => data !== undefined))
+      this.cache.invalidate('catalog');
     const fresh = await buildCatalogAsync(Object.fromEntries(entries));
     fresh.failedPaths = [
       ...new Set([

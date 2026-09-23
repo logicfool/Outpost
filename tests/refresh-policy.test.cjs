@@ -653,3 +653,34 @@ test('persisted metadata cooldown survives an instance restart and save failure 
   await assert.rejects(f.runtime.repairCatalog(s), /disk full/);
   assert.equal(calls, 0);
 });
+
+test('network catalogue maintenance waits for repair while cache-only reads remain immediate', async () => {
+  const f = fixture(),
+    load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  const before = { ...makeDemo().catalog, schemaVersion: 0, fetchedAt: 0 };
+  const after = { ...before, repairedMarker: true };
+  f.runtime.catalog = before;
+  let release,
+    requests = 0;
+  f.runtime.metadataRepairFlight = new Promise((resolve) => {
+    release = resolve;
+  }).then(() => {
+    f.runtime.catalog = after;
+    f.runtime.metadataRepairFlight = undefined;
+    return after;
+  });
+  f.runtime.publicClient = {
+    load: async (previous) => {
+      requests++;
+      assert.equal(previous.repairedMarker, true);
+      return previous;
+    },
+  };
+  const updating = load.call(f.runtime);
+  await Promise.resolve();
+  assert.equal(requests, 0);
+  assert.equal(await load.call(f.runtime, false, false), before);
+  release();
+  assert.equal(await updating, after);
+  assert.equal(requests, 1);
+});
