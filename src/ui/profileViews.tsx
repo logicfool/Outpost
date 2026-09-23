@@ -1,5 +1,6 @@
-import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
-import { ArtworkBoundary } from './ArtworkBoundary';
+import { cardArtworkCandidates } from '../core/playerCardArt';
+import { ArtworkImage } from './ArtworkImage';
+import { Skeleton } from './Skeleton';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Image } from './CachedImage';
 import { ownLiveProgress, progressLabel } from '../core/liveProgress';
@@ -34,7 +35,8 @@ export function PlayerCover({
 
   const card = player.card ? hydrateItem(catalog, player.card) : undefined;
   const title = player.title ? hydrateItem(catalog, player.title) : undefined;
-  const image = card?.wideArt ?? card?.wallpaper ?? card?.image;
+  const candidates = cardArtworkCandidates(card, 'wide', catalog);
+  const image = candidates[0];
   const [expanded, setExpanded] = useState(false);
   const you = player.subject === ownId;
   return (
@@ -56,24 +58,13 @@ export function PlayerCover({
         }
       >
         {image ? (
-          <ArtworkBoundary
-            identity={`cover-${player.subject}-${image}`}
-            urls={[image]}
-            placeholder={
-              <SkeletonGroup label="Loading player card artwork">
-                <Bone height="auto" radius={0} style={{ aspectRatio: 3.1 }} />
-              </SkeletonGroup>
-            }
-          >
-            <Image
-              key={image}
-              accessibilityLabel={card?.name ?? 'Equipped player card'}
-              source={{ uri: image }}
-              contentFit="cover"
-              priority="high"
-              style={{ width: '100%', aspectRatio: 3.1 }}
-            />
-          </ArtworkBoundary>
+          <ArtworkImage
+            candidates={candidates}
+            label={card?.name ?? 'Equipped player card'}
+            contentFit="cover"
+            priority="high"
+            style={{ width: '100%', aspectRatio: 3.1 }}
+          />
         ) : (
           <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 16 }}>
             <Text style={S.small}>Player card not available</Text>
@@ -137,8 +128,9 @@ export function PlayerCover({
           </Pressable>
         )}
         {expanded && card?.wallpaper && (
-          <Image
-            source={{ uri: card.wallpaper }}
+          <ArtworkImage
+            candidates={cardArtworkCandidates(card, 'large', catalog)}
+            label="Full player card artwork"
             contentFit="contain"
             style={{ width: '100%', height: 340 }}
           />

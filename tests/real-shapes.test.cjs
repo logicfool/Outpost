@@ -308,7 +308,7 @@ test('metadata failures are recorded and a subsequent refresh preserves previous
     result = await c.load(old);
   assert.ok(result.failedPaths.includes('sprays'));
   assert.ok(result.items[SKIN]);
-  assert.equal(result.schemaVersion, 10);
+  assert.equal(result.schemaVersion, 11);
 });
 test('artwork warmup does not preload the whole collection', () => {
   const item = {

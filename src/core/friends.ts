@@ -1,6 +1,6 @@
 import type { Catalog, CatalogItem } from './types';
 import type { Friend, Conversation } from './chatTypes';
-import { safeImage } from './validation';
+import { cardArtworkCandidates } from './playerCardArt';
 import { queueName } from './normalize';
 import { progressLabel } from './liveProgress';
 import { presencePriority } from './chatPresence';
@@ -9,30 +9,7 @@ export const DEFAULT_CARD_ART =
   'https://media.valorant-api.com/playercards/9fb348bc-41a0-91ad-8a3e-818035c4e561/displayicon.png';
 
 export function squareCardCandidates(card: CatalogItem | undefined, catalog?: Catalog): string[] {
-  if (!card) return [DEFAULT_CARD_ART];
-  const resolved = catalog?.items[card.id.toLowerCase()] ?? card;
-  const id = (resolved.canonicalId || resolved.id).toLowerCase();
-  const square = (url?: string) =>
-    url && /\/(smallart|displayicon)\./i.test(url) ? safeImage(url) : undefined;
-  const generated =
-    resolved.kind === 'card' && /^[a-f0-9-]{36}$/.test(id)
-      ? [
-          `https://media.valorant-api.com/playercards/${id}/displayicon.png`,
-          `https://media.valorant-api.com/playercards/${id}/smallart.png`,
-        ]
-      : [];
-  return [
-    ...new Set(
-      [
-        square(resolved.image),
-        square(resolved.smallArt),
-        square(card.image),
-        square(card.smallArt),
-        ...generated,
-        DEFAULT_CARD_ART,
-      ].filter((v): v is string => !!v),
-    ),
-  ];
+  return [...new Set([...cardArtworkCandidates(card, 'square', catalog), DEFAULT_CARD_ART])];
 }
 export function squareCardArt(
   card: CatalogItem | undefined,

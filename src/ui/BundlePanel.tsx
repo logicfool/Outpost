@@ -1,13 +1,12 @@
+import { ArtworkImage } from './ArtworkImage';
 import { PurchaseControls } from './PurchaseControls';
-import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
-import { ArtworkBoundary } from './ArtworkBoundary';
+import { Skeleton } from './Skeleton';
 import React, { useMemo, useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, View, RefreshControl } from 'react-native';
 import type { AppModel } from '../state/useApp';
 import type { Navigate } from './explorerTypes';
 import { safeError } from '../core/validation';
 import { bundleContents } from '../core/bundles';
-import { Image } from './CachedImage';
 import { ItemArt, Empty, ModalHeader, ModalPage, MoneyText } from './components';
 import { useTheme } from './theme';
 export function BundlePanel({
@@ -80,21 +79,12 @@ export function BundlePanel({
           <View style={{ gap: 16 }}>
             {error && <Text style={[S.small, { color: C.gold }]}>{error}</Text>}
             {detail.image && (
-              <ArtworkBoundary
-                identity={`bundle-art-${id}`}
-                urls={[detail.image]}
-                placeholder={
-                  <SkeletonGroup label="Loading bundle artwork">
-                    <Bone height="auto" radius={20} style={{ aspectRatio: 2 }} />
-                  </SkeletonGroup>
-                }
-              >
-                <Image
-                  source={{ uri: detail.image }}
-                  style={{ width: '100%', aspectRatio: 2, borderRadius: 20 }}
-                  contentFit="cover"
-                />
-              </ArtworkBoundary>
+              <ArtworkImage
+                candidates={[detail.image, ...detail.imageFallbacks]}
+                label={detail.name}
+                style={{ width: '100%', aspectRatio: 2, borderRadius: 20 }}
+                contentFit="cover"
+              />
             )}
             <View style={S.between}>
               <Text style={S.h3}>

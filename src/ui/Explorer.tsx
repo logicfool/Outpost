@@ -1,3 +1,4 @@
+import { hydrateMatchSummary } from '../core/maps';
 import { FriendActions } from './FriendActions';
 import { FriendRequestsPanel } from './FriendRequestsPanel';
 import { ChatsPanel } from './ChatsPanel';
@@ -196,7 +197,13 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
     model.snapshot?.liveGame.status === 'ready' ? model.snapshot.liveGame.data : undefined;
   const liveParticipant =
     !!live?.matchId && !!live.players?.some((p) => p.subject === player.subject && !p.hidden);
-  const matches = data?.matches.status === 'ready' ? data.matches.data : [];
+  const matches = useMemo(
+    () =>
+      (data?.matches.status === 'ready' ? data.matches.data : []).map((row) =>
+        hydrateMatchSummary(model.catalog, row),
+      ),
+    [data?.matches, model.catalog.maps],
+  );
   const more = async () => {
     if (loading) return;
     const stamp = generation.current;
@@ -223,14 +230,11 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
       if (generation.current === stamp) setLoading(false);
     }
   };
-  const filterOptions = useMemo(
-    () => matchFilterOptions(matches, details),
-    [data?.matches, details],
-  );
+  const filterOptions = useMemo(() => matchFilterOptions(matches, details), [matches, details]);
   const active = useMemo(() => reconcileFilter(queue, filterOptions), [queue, filterOptions]);
   const shown = useMemo(
     () => applyMatchFilter(matches, active, details),
-    [data?.matches, active, details],
+    [matches, active, details],
   );
   const open = useCallback(
     (id: string) => onNavigate({ type: 'match', id, subject: player.subject }),
@@ -239,10 +243,16 @@ function PlayerPanel({ model, player, onBack, onNavigate }: PanelProps & { playe
   const render = useCallback(
     ({ item }: { item: MatchSummary }) => (
       <View style={{ marginBottom: 12 }}>
-        <HistoryRow match={item} detail={details[item.id]} issue={previews.issue} onOpen={open} />
+        <HistoryRow
+          catalog={model.catalog}
+          match={item}
+          detail={details[item.id]}
+          issue={previews.issue}
+          onOpen={open}
+        />
       </View>
     ),
-    [details, previews.issue, open],
+    [details, previews.issue, open, model.catalog],
   );
   return (
     <ModalPage>

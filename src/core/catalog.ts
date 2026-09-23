@@ -1,3 +1,4 @@
+import { cardFallbackArt } from './playerCardArt';
 import { drainCooperatively } from './cooperative';
 import { missionDefinitions, objectiveDirectives } from './missions';
 import type { Catalog, CatalogItem, ItemKind, JsonObject } from './types';
@@ -15,7 +16,7 @@ import {
 import { HttpClient, SingleFlightCache } from './http';
 export const PUBLIC_ORIGIN = 'https://valorant-api.com';
 
-export const CATALOG_SCHEMA_VERSION = 10;
+export const CATALOG_SCHEMA_VERSION = 11;
 export const CATALOG_PATHS = [
   'weapons',
   'buddies',
@@ -90,7 +91,11 @@ function* catalogSteps(
   );
   const add = (id: string, item: CatalogItem) => {
     if (id && id !== '__proto__')
-      catalog.items[id.toLowerCase()] = { ...item, id: id.toLowerCase() };
+      catalog.items[id.toLowerCase()] = {
+        ...item,
+        id: id.toLowerCase(),
+        canonicalId: item.canonicalId.toLowerCase(),
+      };
   };
   for (const rawWeapon of dataList(responses.weapons)) {
     const weapon = object(rawWeapon),
@@ -249,9 +254,12 @@ function* catalogSteps(
     let itemIds = collectionKey ? [...(keys.get(collectionKey) ?? [])] : [];
     const display = text(e.displayName).trim();
     if (!itemIds.length && counts.get(display) === 1) itemIds = [...(names.get(display) ?? [])];
-    catalog.bundles[text(e.uuid)] = {
+    catalog.bundles[text(e.uuid).toLowerCase()] = {
       name: text(e.displayName),
-      image: safeImage(e.displayIcon),
+      image: safeImage(e.displayIcon) ?? safeImage(e.displayIcon2) ?? safeImage(e.displayIcon3),
+      imageFallbacks: [safeImage(e.displayIcon2), safeImage(e.displayIcon3)].filter(
+        (v): v is string => !!v,
+      ),
       collectionKey,
       itemIds,
       ...(itemIds.length ? { membershipSource: 'catalog-theme' } : {}),
@@ -363,17 +371,29 @@ export function catalogItem(
       id,
       canonicalId: id,
       kind: fallbackKind,
+      ...(fallbackKind === 'card' ? cardFallbackArt(key) : {}),
       name: `Unresolved item · ${id.slice(0, 8) || 'unknown'}`,
     }
   );
 }
 export function hydrateItem(catalog: Catalog, item: CatalogItem): CatalogItem {
   const fresh = catalogItem(catalog, item.id, item.kind);
+  if (fresh.name.startsWith('Unresolved') && item.kind === 'card') {
+    const art = cardFallbackArt(item.canonicalId || item.id);
+    return {
+      ...item,
+      image: item.image ?? art.image,
+      smallArt: item.smallArt ?? art.smallArt,
+      wideArt: item.wideArt ?? art.wideArt,
+      wallpaper: item.wallpaper ?? art.wallpaper,
+    };
+  }
   if (fresh.name.startsWith('Unresolved')) return item;
   return {
     ...item,
     ...fresh,
     image: fresh.image ?? item.image,
+    smallArt: fresh.smallArt ?? item.smallArt,
     imageFallbacks: [...new Set([...(fresh.imageFallbacks ?? []), ...(item.imageFallbacks ?? [])])],
     wideArt: fresh.wideArt ?? item.wideArt,
     wallpaper: fresh.wallpaper ?? item.wallpaper,
@@ -383,16 +403,44 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
   if (!previous) return fresh;
   return {
     ...fresh,
+    repairAfter: Math.max(previous.repairAfter ?? 0, fresh.repairAfter ?? 0) || undefined,
     weapons: { ...previous.weapons, ...fresh.weapons },
-    items: { ...previous.items, ...fresh.items },
+    items: Object.fromEntries(
+      Object.entries({ ...previous.items, ...fresh.items }).map(([id, item]) => [
+        id,
+        previous.items[id]
+          ? {
+              ...item,
+              image: item.image ?? previous.items[id]!.image,
+              smallArt: item.smallArt ?? previous.items[id]!.smallArt,
+              wideArt: item.wideArt ?? previous.items[id]!.wideArt,
+              wallpaper: item.wallpaper ?? previous.items[id]!.wallpaper,
+            }
+          : item,
+      ]),
+    ),
     maps: { ...previous.maps, ...fresh.maps },
     bundles: Object.fromEntries(
-      Object.entries({ ...previous.bundles, ...fresh.bundles }).map(([id, bundle]) => [
-        id,
-        previous.bundles[id]?.membershipSource === 'store'
-          ? { ...bundle, itemIds: previous.bundles[id]!.itemIds, membershipSource: 'store' }
-          : bundle,
-      ]),
+      Object.entries({ ...previous.bundles, ...fresh.bundles }).map(([id, bundle]) => {
+        const old = previous.bundles[id];
+        return [
+          id,
+          {
+            ...bundle,
+            image: bundle.image ?? old?.image,
+            imageFallbacks: bundle.imageFallbacks?.length
+              ? bundle.imageFallbacks
+              : old?.imageFallbacks,
+            ...(old?.membershipSource === 'store'
+              ? {
+                  itemIds: old.itemIds,
+                  itemKinds: old.itemKinds,
+                  membershipSource: 'store' as const,
+                }
+              : {}),
+          },
+        ];
+      }),
     ),
     tiers: { ...previous.tiers, ...fresh.tiers },
     contracts: { ...previous.contracts, ...fresh.contracts },
@@ -416,6 +464,43 @@ export class CatalogClient {
         throw new Error('Version unavailable');
       return version;
     });
+  }
+  async repair(previous: Catalog, paths: CatalogPath[]): Promise<Catalog> {
+    const requested = [...new Set(paths)]
+      .filter((path) => CATALOG_PATHS.includes(path))
+      .slice(0, 7);
+    const failed: string[] = [];
+    const entries = await Promise.all(
+      requested.map(async (path) => {
+        try {
+          const result = await this.cache.get(`repair:${path}`, 10 * 60000, async () => {
+            const data = (
+              await this.http.json(`${PUBLIC_ORIGIN}/v1/${path}?language=en-US`, {
+                cache: 'no-store',
+              })
+            ).data;
+            if (!Array.isArray(object(data).data)) throw new Error('Invalid catalogue category');
+            return data;
+          });
+          return [path, result] as const;
+        } catch {
+          failed.push(path);
+          return [path, undefined] as const;
+        }
+      }),
+    );
+    const fresh = await buildCatalogAsync(Object.fromEntries(entries));
+    fresh.failedPaths = [
+      ...new Set([
+        ...(previous.failedPaths ?? []).filter((p) => !requested.includes(p as CatalogPath)),
+        ...failed,
+      ]),
+    ];
+    return {
+      ...mergeCatalog(previous, fresh),
+      schemaVersion: previous.schemaVersion,
+      fetchedAt: previous.fetchedAt,
+    };
   }
   async weaponSkins(): Promise<unknown> {
     return this.cache.get(

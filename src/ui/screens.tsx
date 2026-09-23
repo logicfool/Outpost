@@ -1,3 +1,6 @@
+import { bundleContents, bundleArtwork } from '../core/bundles';
+import { ArtworkImage } from './ArtworkImage';
+import { hydrateMatchSummary, hydrateMatchDetail } from '../core/maps';
 import { usePullRefresh } from '../state/usePullRefresh';
 import { useLivePolling } from '../state/useLivePolling';
 import { BackupPanel } from './BackupPanel';
@@ -451,16 +454,13 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
                 onPress={() => onNavigate({ type: 'bundle', id })}
                 style={[styles.archiveCard, { flex: 1, width: undefined }]}
               >
-                {bundle.image ? (
-                  <Image
-                    source={{ uri: bundle.image }}
-                    style={styles.archiveImage}
-                    contentFit="cover"
-                    transition={0}
-                  />
-                ) : (
-                  <View style={styles.archiveImage} />
-                )}
+                <ArtworkImage
+                  candidates={bundleArtwork(id, bundle)}
+                  label={bundle.name}
+                  style={styles.archiveImage}
+                  contentFit="cover"
+                  transition={0}
+                />
                 <Text style={[S.h3, { fontSize: 13, paddingHorizontal: 10 }]} numberOfLines={2}>
                   {bundle.name}
                 </Text>
@@ -469,7 +469,13 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
             {row.entries.length === 1 && <View style={{ flex: 1 }} />}
           </View>
         );
-      const bundle = row.bundle;
+      const info = bundleContents(model.catalog, row.bundle.id, store);
+      const bundle = {
+        ...row.bundle,
+        name: info.name,
+        image: info.image,
+        imageFallbacks: info.imageFallbacks,
+      };
       return (
         <Pressable
           accessibilityRole="button"
@@ -477,14 +483,13 @@ export function StoreScreen({ model, onItem, onNavigate }: Props) {
           onPress={() => onNavigate({ type: 'bundle', id: bundle.id })}
           style={styles.bundle}
         >
-          {bundle.image && (
-            <Image
-              source={{ uri: bundle.image }}
-              contentFit="cover"
-              style={fill}
-              accessibilityLabel={bundle.name}
-            />
-          )}
+          <ArtworkImage
+            candidates={bundleArtwork(bundle.catalogId ?? bundle.id, bundle)}
+            label={bundle.name}
+            containerStyle={fill}
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+          />
           <LinearGradient colors={[`${C.background}00`, `${C.background}F0`]} style={fill} />
           <View style={styles.bundleInfo}>
             <Text style={[S.eyebrow, { color: C.ink }]}>FEATURED BUNDLE</Text>
@@ -1531,13 +1536,22 @@ export const HistoryRow = memo(function HistoryRow({
   detail,
   issue,
   onOpen,
+  catalog,
 }: {
+  catalog?: import('../core/types').Catalog;
   match: MatchSummary;
   detail?: MatchDetail;
   issue?: PreviewIssue;
   onOpen(id: string): void;
 }) {
-  return <MatchCard match={match} detail={detail} issue={issue} onPress={() => onOpen(match.id)} />;
+  return (
+    <MatchCard
+      match={catalog ? hydrateMatchSummary(catalog, match) : match}
+      detail={detail && catalog ? hydrateMatchDetail(catalog, detail) : detail}
+      issue={issue}
+      onPress={() => onOpen(match.id)}
+    />
+  );
 });
 const matchKey = (match: MatchSummary) => match.id;
 const HistoryGap = () => <View style={{ height: 12 }} />;
@@ -1550,8 +1564,12 @@ export function MatchesScreen({ model, onNavigate }: Props) {
     [loadingOlder, setLoadingOlder] = useState(false);
   const previews = useMatchPreviews(model),
     details = previews.details;
-  const matches =
+  const savedMatches =
     model.snapshot?.matches.status === 'ready' ? model.snapshot.matches.data : undefined;
+  const matches = useMemo(
+    () => savedMatches?.map((row) => hydrateMatchSummary(model.catalog, row)),
+    [savedMatches, model.catalog.maps],
+  );
   const options = useMemo(() => matchFilterOptions(matches ?? [], details), [matches, details]);
   const active = useMemo(() => reconcileFilter(filter, options), [filter, options]);
   const shown = useMemo(
@@ -1561,9 +1579,15 @@ export function MatchesScreen({ model, onNavigate }: Props) {
   const open = useCallback((id: string) => onNavigate({ type: 'match', id }), [onNavigate]);
   const render = useCallback(
     ({ item }: { item: MatchSummary }) => (
-      <HistoryRow match={item} detail={details[item.id]} issue={previews.issue} onOpen={open} />
+      <HistoryRow
+        catalog={model.catalog}
+        match={item}
+        detail={details[item.id]}
+        issue={previews.issue}
+        onOpen={open}
+      />
     ),
-    [details, previews.issue, open],
+    [details, previews.issue, open, model.catalog],
   );
   const rank = model.snapshot?.rank.status === 'ready' ? model.snapshot.rank.data : undefined;
   const game =

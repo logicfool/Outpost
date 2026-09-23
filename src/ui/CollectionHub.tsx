@@ -1,9 +1,10 @@
+import { cardArtworkCandidates } from '../core/playerCardArt';
+import { ArtworkImage } from './ArtworkImage';
 import { catalogueBrowse, ownedBrowse, EMPTY_BROWSE } from '../core/catalogBrowse';
 import type { CollectionView } from '../core/browseMemory';
 import { useBrowseScroll } from '../state/useBrowseScroll';
 import { AimCollectionRows } from './AimCollectionRows';
-import { Bone, Skeleton, SkeletonGroup } from './Skeleton';
-import { ArtworkBoundary } from './ArtworkBoundary';
+import { Skeleton } from './Skeleton';
 import React, { memo, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -21,7 +22,6 @@ import type { CatalogItem, ItemKind } from '../core/types';
 import type { Navigate } from './explorerTypes';
 import { hydrateItem } from '../core/catalog';
 import { collectionValue } from '../core/collectionValue';
-import { Image } from './CachedImage';
 import {
   ItemArt,
   ListGroup,
@@ -110,24 +110,14 @@ export function CollectionHub({ model, onNavigate }: { model: AppModel; onNaviga
       {!art && !equipped && (!model.snapshot || model.busy) && (
         <Skeleton kind="profile" label="Loading equipped banner" />
       )}
-      {art?.wideArt ? (
+      {art && cardArtworkCandidates(art, 'wide', model.catalog).length ? (
         <View style={{ gap: 7 }}>
-          <ArtworkBoundary
-            identity={`collection-banner-${art.id}`}
-            urls={[art.wideArt]}
-            placeholder={
-              <SkeletonGroup label="Loading collection banner">
-                <Bone height="auto" radius={18} style={{ aspectRatio: 3.2 }} />
-              </SkeletonGroup>
-            }
-          >
-            <Image
-              accessibilityLabel={art.name}
-              source={{ uri: art.wideArt }}
-              style={{ width: '100%', aspectRatio: 3.2, borderRadius: 18 }}
-              contentFit="cover"
-            />
-          </ArtworkBoundary>
+          <ArtworkImage
+            candidates={cardArtworkCandidates(art, 'wide', model.catalog)}
+            label={art.name}
+            style={{ width: '100%', aspectRatio: 3.2, borderRadius: 18 }}
+            contentFit="cover"
+          />
           <Text style={[S.small, { textAlign: 'center' }]} numberOfLines={1}>
             {art.name}
             {!equipped ? ' · last seen' : ''}

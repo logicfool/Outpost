@@ -1,3 +1,5 @@
+import { hydrateMatchDetail } from '../core/maps';
+import { missingCatalogPaths, hydrateSnapshotMetadata } from '../core/catalogRecovery';
 import { refreshDeadline } from '../core/refreshPolicy';
 import { mergeSnapshot } from '../core/snapshot';
 import { livePollInterval, PROFILE_POLL_MS, completedLiveTransition } from '../core/refreshPolicy';
@@ -233,6 +235,39 @@ export class Runtime {
       return await promise;
     } finally {
       if (this.catalogFlight === promise) this.catalogFlight = undefined;
+    }
+  }
+  private metadataRepairFlight?: Promise<Catalog>;
+  async repairCatalog(snapshot: Snapshot): Promise<Catalog> {
+    if (this.metadataRepairFlight) return this.metadataRepairFlight;
+    const run = async () => {
+      if (this.catalogFlight) return this.catalog;
+      const needed = missingCatalogPaths(snapshot, this.catalog);
+      if (!needed.length || (this.catalog.repairAfter ?? 0) > this.now()) return this.catalog;
+      const reserved = { ...this.catalog, repairAfter: this.now() + 10 * 60000 };
+      await this.repository.saveCatalog(reserved);
+      this.catalog = reserved;
+      const fresh = await this.publicClient.repair(reserved, needed);
+      this.catalog = mergeCatalog(this.catalog, fresh);
+      for (const client of this.clients.values()) client.updateCatalog(this.catalog);
+      await this.repository.saveCatalog(this.catalog);
+      recordRequest({
+        at: this.now(),
+        service: 'Public catalog',
+        method: 'META',
+        code: missingCatalogPaths(snapshot, this.catalog).length
+          ? 'CATALOG_METADATA_PENDING'
+          : 'CATALOG_METADATA_RECOVERED',
+        durationMs: 0,
+      });
+      return this.catalog;
+    };
+    const work = run();
+    this.metadataRepairFlight = work;
+    try {
+      return await work;
+    } finally {
+      if (this.metadataRepairFlight === work) this.metadataRepairFlight = undefined;
     }
   }
   private async persistSession(session: Session): Promise<void> {
@@ -719,6 +754,10 @@ export class Runtime {
           retryAt: completedGate.autoNotBefore,
         };
 
+      if (reason === 'manual' || !previous) await this.repairCatalog(next).catch(() => {});
+      if (generation !== (this.generations.get(id) ?? 0))
+        throw new AppError('ACCOUNT_CHANGED', 'The account changed while resolving metadata.');
+      next = hydrateSnapshotMetadata(this.catalog, next);
       const latest = await this.repository.snapshot(id);
       if (latest?.liveGame) next.liveGame = latest.liveGame;
       await this.repository.saveSnapshot(next);
@@ -926,7 +965,7 @@ export class Runtime {
             this.scopes.set(id, scope);
           }
         }
-        return saved.detail;
+        return hydrateMatchDetail(this.catalog, saved.detail);
       }
       const client = await this.client(id);
       guard();

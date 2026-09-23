@@ -2,7 +2,15 @@ export type Shard = 'ap' | 'eu' | 'na' | 'kr' | 'pbe';
 export type Region = 'ap' | 'eu' | 'na' | 'br' | 'latam' | 'kr' | 'pbe';
 export type JsonObject = Record<string, unknown>;
 export type ItemKind =
-  'skin' | 'chroma' | 'buddy' | 'spray' | 'card' | 'title' | 'agent' | 'currency' | 'unknown';
+  | 'skin'
+  | 'chroma'
+  | 'buddy'
+  | 'spray'
+  | 'card'
+  | 'title'
+  | 'agent'
+  | 'currency'
+  | 'unknown';
 export interface Account {
   puuid: string;
   gameName: string;
@@ -79,6 +87,7 @@ export interface ContractDefinition {
   levels: { xp: number; rewardId?: string; rewardAmount?: number; rewardType?: string }[];
 }
 export interface Catalog {
+  repairAfter?: number;
   schemaVersion?: number;
   failedPaths?: string[];
   items: Record<string, CatalogItem>;
@@ -86,11 +95,13 @@ export interface Catalog {
     string,
     {
       name: string;
+      imageFallbacks?: string[];
       image?: string;
       isDefault?: boolean;
       collectionKey?: string;
       collectionName?: string;
       itemIds?: string[];
+      itemKinds?: Record<string, ItemKind>;
       membershipSource?: 'store' | 'catalog-theme';
     }
   >;
@@ -127,6 +138,7 @@ export interface BundleCheckout {
   wholesaleOnly: boolean;
 }
 export interface Bundle {
+  imageFallbacks?: string[];
   catalogId?: string;
   id: string;
   name: string;
@@ -198,6 +210,7 @@ export interface MatchSummary {
   startedAt: number;
   queue: string;
   map: string;
+  mapId?: string;
   mapImage?: string;
   rrChange?: number;
   tierAfter?: number;
@@ -228,6 +241,7 @@ export interface MatchDetail {
   completed?: boolean;
   id: string;
   map: string;
+  mapId?: string;
   mapImage?: string;
   queue: string;
   startedAt: number;

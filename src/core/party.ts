@@ -1,3 +1,4 @@
+import { mapMetadata } from './maps';
 import { catalogItem } from './catalog';
 import { tierMeta } from './rank';
 import type { Catalog } from './types';
@@ -122,7 +123,7 @@ function customGame(raw: unknown, catalog: Catalog): PartyCustomGame | undefined
   if (!mapUrl && !text(settings.Mode)) return undefined;
   return {
     mapId: mapUrl || undefined,
-    map: catalog.maps[mapUrl]?.name,
+    map: mapMetadata(catalog, mapUrl)?.name,
     mode:
       text(settings.Mode)
         .split('/')

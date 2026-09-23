@@ -64,7 +64,9 @@ export function safeImage(value: unknown): string | undefined {
   try {
     const url = new URL(text(value));
     return url.protocol === 'https:' &&
-      url.hostname === 'media.valorant-api.com' &&
+      (url.hostname === 'media.valorant-api.com' ||
+        url.href ===
+          'https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/bffcf59a84dcbcea5d881d2b71e09c4c4cc1cf38-1672x941.png') &&
       !url.username &&
       !url.password &&
       !url.port
@@ -80,7 +82,7 @@ export function safeMedia(value: unknown): string | undefined {
   try {
     const url = new URL(text(value));
     return url.protocol === 'https:' &&
-      MEDIA_HOSTS.has(url.hostname) &&
+      (MEDIA_HOSTS.has(url.hostname) || !!safeImage(value)) &&
       !url.username &&
       !url.password &&
       !url.port

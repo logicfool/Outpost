@@ -1,3 +1,5 @@
+import { mapMetadata } from './maps';
+import { bundleMeta, bundleArtwork } from './bundles';
 import { bundleMetadata } from './bundleMetadata';
 import type {
   ActStat,
@@ -56,6 +58,8 @@ const QUEUES: Record<string, string> = {
   premier: 'Premier',
   newmap: 'New Map',
   snowball: 'Snowball Fight',
+  abilitydraft: 'Gauntlet: Glitched',
+  abilitydraftarena: 'Gauntlet: Glitched',
 };
 export function queueName(id: string): string {
   return (
@@ -94,7 +98,13 @@ function offer(raw: unknown, catalog: Catalog, overridePrices?: unknown, id?: st
     rewards = array(o.Rewards).map(object);
   return {
     id: id ?? text(o.OfferID),
-    item: catalogItem(catalog, text(rewards[0]?.ItemID, text(o.OfferID))),
+    item: catalogItem(
+      catalog,
+      text(rewards[0]?.ItemID, text(o.OfferID)),
+      (Object.entries(ITEM_TYPES).find(
+        ([, type]) => type === text(rewards[0]?.ItemTypeID).toLowerCase(),
+      )?.[0] ?? 'unknown') as CatalogItem['kind'],
+    ),
     prices: money(overridePrices ?? o.Cost),
   };
 }
@@ -125,7 +135,9 @@ export function normalizeStore(
     const b = object(value),
       id = text(b.ID);
     if (!id || bundles.some((existing) => existing.id === id)) continue;
-    const meta = catalog.bundles[text(b.DataAssetID)] ?? catalog.bundles[id];
+    const catalogId = text(b.DataAssetID) || id;
+    const meta = bundleMeta(catalog, catalogId);
+    const images = bundleArtwork(catalogId, meta);
     const offers = array(b.ItemOffers).map((rawItem) => {
       const io = object(rawItem);
       return offer(io.Offer, catalog, io.DiscountedCost);
@@ -137,7 +149,13 @@ export function normalizeStore(
           itemId = text(item.ItemID);
         offers.push({
           id: itemId,
-          item: catalogItem(catalog, itemId),
+          item: catalogItem(
+            catalog,
+            itemId,
+            (Object.entries(ITEM_TYPES).find(
+              ([, type]) => type === text(item.ItemTypeID).toLowerCase(),
+            )?.[0] ?? 'unknown') as CatalogItem['kind'],
+          ),
           prices: money({ [text(bi.CurrencyID)]: bi.DiscountedPrice ?? bi.BasePrice }),
         });
       }
@@ -147,7 +165,8 @@ export function normalizeStore(
       id,
       catalogId: text(b.DataAssetID) || undefined,
       name: meta?.name ?? 'Featured collection',
-      image: meta?.image,
+      image: images[0],
+      imageFallbacks: images.slice(1),
       prices: money(b.TotalDiscountedCost ?? b.TotalBaseCost),
       expiresAt:
         serverTime +
@@ -206,7 +225,8 @@ export function normalizeCollection(raw: unknown, catalog: Catalog): CatalogItem
   for (const value of groups) {
     const group = object(value),
       kind = Object.entries(ITEM_TYPES).find(([, id]) => id === group.ItemTypeID)?.[0] as
-        CatalogItem['kind'] | undefined;
+        | CatalogItem['kind']
+        | undefined;
     for (const rawItem of requiredArray(group.Entitlements, 'owned items')) {
       const item = catalogItem(catalog, text(object(rawItem).ItemID), kind ?? 'unknown');
 
@@ -258,8 +278,8 @@ export function normalizeProgression(raw: unknown, catalog: Catalog): Progressio
         nextReward: next?.rewardId ? catalogItem(catalog, next.rewardId) : undefined,
         currentBattlepass: Boolean(
           catalog.currentSeasonId &&
-          meta?.relationId === catalog.currentSeasonId &&
-          meta?.relationType?.toLowerCase() === 'season',
+            meta?.relationId === catalog.currentSeasonId &&
+            meta?.relationType?.toLowerCase() === 'season',
         ),
       };
     })
@@ -297,15 +317,16 @@ export function normalizeMatches(raw: unknown, updates: unknown, catalog: Catalo
     const m = object(value),
       id = text(m.MatchID),
       update = ranked.get(id),
-      mapId = text(update?.MapID),
-      meta = catalog.maps[mapId];
+      mapId = text(m.MapID) || text(m.MapId) || text(update?.MapID),
+      meta = mapMetadata(catalog, mapId);
     const tierAfter = nullableNumber(update?.TierAfterUpdate) ?? undefined;
     const rrAfter = nullableNumber(update?.RankedRatingAfterUpdate) ?? undefined;
     return {
       id,
       startedAt: number(m.GameStartTime),
       queue: text(m.QueueID, 'unknown'),
-      map: meta?.name ?? 'Open match details',
+      map: meta?.name ?? (mapId.split('/').pop() || 'Open match details'),
+      mapId: mapId || undefined,
       mapImage: meta?.image,
       rrChange:
         typeof update?.RankedRatingEarned === 'number' ? update.RankedRatingEarned : undefined,
@@ -434,8 +455,11 @@ export function normalizeMatchDetail(
       info.isCompleted === true ||
       ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState)),
     id: text(info.matchId),
-    map: catalog.maps[text(info.mapId)]?.name ?? 'Unknown map',
-    mapImage: catalog.maps[text(info.mapId)]?.image,
+    map:
+      mapMetadata(catalog, text(info.mapId))?.name ??
+      (text(info.mapId).split('/').pop() || 'Unknown map'),
+    mapId: text(info.mapId) || undefined,
+    mapImage: mapMetadata(catalog, text(info.mapId))?.image,
     queue: text(info.queueID, text(info.queueId, 'unknown')),
     startedAt: number(info.gameStartMillis),
     durationMs: nullableNumber(info.gameLengthMillis) ?? undefined,

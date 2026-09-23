@@ -1,3 +1,4 @@
+import { mapMetadata } from './maps';
 import { normalizeLiveStats } from './liveStats';
 import type { Catalog, LiveGame } from './types';
 import type { LivePlayer } from './playerTypes';
@@ -74,7 +75,7 @@ export function normalizeLive(
   if (!players.has(self))
     throw new AppError('ACCOUNT_MISMATCH', 'The live match does not contain your account.');
   const mapId = text(root.MapID) || text(root.MapId),
-    map = catalog.maps[mapId];
+    map = mapMetadata(catalog, mapId);
   return {
     state,
     matchId: uuid(matchId),

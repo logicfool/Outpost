@@ -52,7 +52,7 @@ test('one failed image settles the card with a stable fallback, not an infinite 
   assert.equal(f.value.ready, true);
   assert.equal(f.value.failed.has('map'), true);
 });
-test('image loading has an eight-second ceiling and late images cannot pop into a released card', async (t) => {
+test('skeleton wait is bounded but a slow valid image can still finish after eight seconds', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = setup(t);
   await f.render('match', ['map', 'agent']);
@@ -61,9 +61,9 @@ test('image loading has an eight-second ceiling and late images cannot pop into 
   assert.equal(f.value.ready, false);
   await act(() => t.mock.timers.tick(1));
   assert.equal(f.value.ready, true);
-  assert.equal(f.value.failed.has('map'), true);
+  assert.equal(f.value.failed.has('map'), false);
   await act(() => f.value.settle('map'));
-  assert.equal(f.value.failed.has('map'), true);
+  assert.equal(f.value.failed.has('map'), false);
 });
 test('changing match or source ignores the previous image callbacks', async (t) => {
   const f = setup(t);

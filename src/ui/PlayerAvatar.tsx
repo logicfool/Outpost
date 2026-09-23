@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useState, useRef } from 'react';
 import { View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { Catalog, CatalogItem } from '../core/types';
@@ -19,8 +19,10 @@ export const PlayerAvatar = memo(function PlayerAvatar({
   const { C } = useTheme(),
     candidates = squareCardCandidates(card, catalog),
     key = candidates.join('|');
-  const [index, setIndex] = useState(0);
-  useEffect(() => setIndex(0), [key]);
+  const [cursor, setCursor] = useState({ key, index: 0 });
+  const index = cursor.key === key ? cursor.index : 0;
+  const active = useRef(key);
+  active.current = key;
   const uri = candidates[index];
   const dot = status === 'online' ? C.mint : status === 'away' ? C.gold : C.subtle;
   return (
@@ -45,7 +47,9 @@ export const PlayerAvatar = memo(function PlayerAvatar({
             accessibilityLabel={
               uri === DEFAULT_CARD_ART ? 'Default VALORANT card' : 'Player card portrait'
             }
-            onError={() => setIndex((n) => n + 1)}
+            onError={() => {
+              if (active.current === key) setCursor({ key, index: index + 1 });
+            }}
           />
         ) : (
           <Feather name="user" size={size * 0.47} color={C.subtle} />

@@ -393,7 +393,7 @@ function ItemArtwork({
     }, ARTWORK_WAIT_MS);
     return () => clearTimeout(timer);
   }, [loaded, urls.length]);
-  const uri = expired ? undefined : urls[index];
+  const uri = urls[index];
   return (
     <View
       style={[
@@ -434,7 +434,23 @@ function ItemArtwork({
           />
         </View>
       )}
-      {uri && !loaded && (
+      {uri && !loaded && expired && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Retry artwork for ${item.name}`}
+          onPress={onRetry}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: C.surface,
+          }}
+        >
+          <Text style={S.small}>Retry image</Text>
+        </Pressable>
+      )}
+      {uri && !loaded && !expired && (
         <SkeletonGroup
           label={`Loading ${item.name} artwork`}
           style={{ position: 'absolute', inset: 0 }}

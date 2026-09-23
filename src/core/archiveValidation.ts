@@ -46,6 +46,7 @@ const point = (v: unknown) => {
 export function validatePreviewShape(value: unknown): void {
   const p = object(value);
   text(p.map);
+  optional(p.mapId, (v) => text(v, 512));
   text(p.agent);
   text(p.score, 60);
   images(p);
@@ -57,6 +58,7 @@ export function validateSummaryShape(value: MatchSummary): void {
   num(value.startedAt);
   text(value.queue, 80);
   text(value.map);
+  optional(value.mapId, (v) => text(v, 512));
   images(value as unknown as Record<string, unknown>);
   optional(value.preview, validatePreviewShape);
   optional(value.rrChange, (v) => num(v, -10000, 10000));

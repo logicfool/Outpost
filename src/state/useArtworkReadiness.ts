@@ -34,12 +34,7 @@ export function useArtworkReadiness(
       : { signature, settled: initialSettled(), expired: false };
   const ready = current.expired || expected.every((url) => !!current.settled[url]);
   const failed = useMemo(
-    () =>
-      new Set(
-        expected.filter(
-          (url) => current.settled[url] === 'failed' || (current.expired && !current.settled[url]),
-        ),
-      ),
+    () => new Set(expected.filter((url) => current.settled[url] === 'failed')),
     [signature, current.settled, current.expired],
   );
   const settle = useCallback(
@@ -48,7 +43,7 @@ export function useArtworkReadiness(
       setState((previous) => {
         const value =
           previous.signature === signature ? previous : { signature, settled: {}, expired: false };
-        if (value.expired || value.settled[url]) return value;
+        if (value.settled[url]) return value;
         return { ...value, settled: { ...value.settled, [url]: failed ? 'failed' : 'ready' } };
       });
     },

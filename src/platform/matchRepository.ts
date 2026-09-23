@@ -132,6 +132,7 @@ export function matchRepository(
                 startedAt: d.startedAt,
                 queue: d.queue,
                 map: d.map,
+                mapId: d.mapId,
                 mapImage: d.mapImage,
                 preview: matchPreview(d),
                 previewComplete: report.completed,

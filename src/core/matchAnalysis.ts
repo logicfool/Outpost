@@ -1,3 +1,4 @@
+import { mapMetadata } from './maps';
 import type { Catalog, MatchDetail, MatchPlayer } from './types';
 import type {
   MapMetadata,
@@ -239,7 +240,7 @@ export function normalizeAnalysis(
   }
   return {
     version: 1,
-    minimap: catalog.maps[text(object(root.matchInfo).mapId)],
+    minimap: mapMetadata(catalog, text(object(root.matchInfo).mapId)),
     events: sorted,
     rounds: [...rounds.values()].sort((a, b) => a.number - b.number),
     available,

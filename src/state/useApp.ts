@@ -601,7 +601,12 @@ export function useApp() {
     const account = activeRef.current;
     if (account?.demo) return;
     const runtime = await getRuntime(),
-      next = await runtime.loadCatalog();
+      loaded = await runtime.loadCatalog();
+    const saved = snapshotRef.current;
+    const next =
+      saved && saved.accountId === account?.puuid
+        ? await runtime.repairCatalog(saved).catch(() => loaded)
+        : loaded;
     if (activeRef.current?.puuid === account?.puuid) setCatalog(next);
   }, []);
   const refreshMedia = useCallback(async () => {

@@ -1,3 +1,4 @@
+import { mapMetadata } from './maps';
 import { Buffer } from 'buffer';
 import { presenceProgress, sharedPartyProgress } from './liveProgress';
 import { valorantActivity, presenceFields } from './presenceState';
@@ -78,7 +79,7 @@ export function friendPresence(node: XmlNode, catalog: Catalog, now = Date.now()
     partyMax,
     presenceSource: valOnline ? 'valorant' : 'riot',
     mapId: mapId || undefined,
-    map: catalog.maps[mapId]?.name,
+    map: mapMetadata(catalog, mapId)?.name,
     status: (child(node, 'status')?.text || (valOnline ? 'VALORANT' : 'Riot client')).slice(0, 200),
     ...(cardId
       ? {

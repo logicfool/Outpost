@@ -2,7 +2,16 @@ import type { MatchDetail, MatchSummary, Section, Snapshot, Store, StoreOffer } 
 import { AppError, object, uuid } from './validation';
 export type MatchPreview = Pick<
   MatchDetail,
-  'map' | 'mapImage' | 'agent' | 'agentImage' | 'kills' | 'deaths' | 'assists' | 'result' | 'score'
+  | 'map'
+  | 'mapId'
+  | 'mapImage'
+  | 'agent'
+  | 'agentImage'
+  | 'kills'
+  | 'deaths'
+  | 'assists'
+  | 'result'
+  | 'score'
 >;
 export interface ArchivedReport {
   imported?: boolean;
@@ -37,6 +46,7 @@ export const ARCHIVE_PAGE_SIZE = 40;
 export function matchPreview(detail: MatchDetail): MatchPreview {
   return {
     map: detail.map,
+    mapId: detail.mapId,
     mapImage: detail.mapImage,
     agent: detail.agent,
     agentImage: detail.agentImage,

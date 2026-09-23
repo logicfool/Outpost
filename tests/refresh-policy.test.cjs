@@ -487,7 +487,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   };
   const fresh = {
     ...old,
-    schemaVersion: 10,
+    schemaVersion: 11,
     maps: {
       ascent: {
         name: 'Ascent',
@@ -512,7 +512,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   await load.call(f.runtime);
   await load.call(f.runtime);
   assert.equal(publicCalls, 1);
-  assert.equal(f.runtime.catalog.schemaVersion, 10);
+  assert.equal(f.runtime.catalog.schemaVersion, 11);
   assert.equal(f.calls.snapshots, 0);
 });
 test('a weapons-only media refresh cannot mark old map metadata as migrated', async () => {
@@ -592,4 +592,64 @@ test('in-flight optional catalogue maintenance does not block a cached account r
   ]);
   assert.equal(result.wallet.status, 'ready');
   assert.equal(f.calls.snapshots, 1);
+});
+test('missing public metadata recovery is single-flight and records its cooldown before requesting data', async () => {
+  const f = fixture(),
+    s = f.gameSnapshot(),
+    id = '77777777-7777-4777-8777-777777777777';
+  s.loadout = {
+    status: 'ready',
+    fetchedAt: f.now,
+    data: { guns: [], card: { id, canonicalId: id, kind: 'card', name: 'Unresolved item' } },
+  };
+  f.runtime.catalog = { ...makeDemo().catalog, repairAfter: undefined };
+  let requests = 0,
+    saved,
+    release;
+  const wait = new Promise((r) => (release = r));
+  f.runtime.repository.saveCatalog = async (c) => {
+    saved = c;
+  };
+  f.runtime.publicClient = {
+    repair: async (previous, paths) => {
+      assert.equal(saved.repairAfter, f.now + 600000);
+      assert.ok(paths.includes('playercards'));
+      requests++;
+      await wait;
+      return previous;
+    },
+  };
+  const first = f.runtime.repairCatalog(s),
+    second = f.runtime.repairCatalog(s);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(requests, 1);
+  await f.runtime.repairCatalog(s);
+  assert.equal(requests, 1);
+});
+test('persisted metadata cooldown survives an instance restart and save failure prevents network work', async () => {
+  const f = fixture(),
+    s = f.gameSnapshot(),
+    id = '88888888-8888-4888-8888-888888888888';
+  s.loadout = {
+    status: 'ready',
+    fetchedAt: f.now,
+    data: { guns: [], card: { id, canonicalId: id, kind: 'card', name: 'Unresolved item' } },
+  };
+  let calls = 0;
+  f.runtime.catalog = { ...makeDemo().catalog, repairAfter: f.now + 600000 };
+  f.runtime.publicClient = {
+    repair: async () => {
+      calls++;
+      throw Error('unexpected');
+    },
+  };
+  await f.runtime.repairCatalog(s);
+  assert.equal(calls, 0);
+  f.runtime.catalog = { ...f.runtime.catalog, repairAfter: undefined };
+  f.runtime.repository.saveCatalog = async () => {
+    throw Error('disk full');
+  };
+  await assert.rejects(f.runtime.repairCatalog(s), /disk full/);
+  assert.equal(calls, 0);
 });
