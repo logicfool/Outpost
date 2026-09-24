@@ -87,6 +87,11 @@ export interface ContractDefinition {
   levels: { xp: number; rewardId?: string; rewardAmount?: number; rewardType?: string }[];
 }
 export interface Catalog {
+  sourceVersion?: string;
+  metadataUpdatedAt?: number;
+  availableVersion?: string;
+  versionCheckedAt?: number;
+  refreshAfter?: number;
   repairAfter?: number;
   schemaVersion?: number;
   failedPaths?: string[];

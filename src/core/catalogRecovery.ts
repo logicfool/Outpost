@@ -31,6 +31,8 @@ export function missingCatalogPaths(
   };
   if (snapshot.loadout.status === 'ready' && snapshot.loadout.data.card)
     inspect(snapshot.loadout.data.card);
+  if (snapshot.collection.status === 'ready')
+    for (const item of snapshot.collection.data) inspect(item);
   if (snapshot.store.status === 'ready') {
     const store = snapshot.store.data;
     for (const offer of [

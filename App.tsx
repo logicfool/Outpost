@@ -1,3 +1,4 @@
+import { ArtworkRevisionProvider } from './src/ui/ArtworkRevision';
 import { RetainedTabs } from './src/ui/RetainedTabs';
 import { NativeTabs, nativeTabsAvailable } from './src/ui/NativeTabs';
 import { uiCrash, type UiCrash } from './src/core/crashReport';
@@ -286,114 +287,97 @@ function AppContent({ model }: { model: AppModel }) {
   const expired =
     model.active && !model.active.demo && model.active.expiresAt <= now && !model.active.canReauth;
   return (
-    <SafeAreaView style={S.page} edges={['top', 'left', 'right']}>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      <View
-        style={styles.shell}
-        aria-hidden={!!explorer || !!item || !!accountRoute}
-        accessibilityElementsHidden={!!explorer || !!item || !!accountRoute}
-        importantForAccessibility={
-          explorer || item || accountRoute ? 'no-hide-descendants' : 'auto'
-        }
-      >
-        {model.booting ? (
-          <View style={styles.center}>
-            <Image source={LOGO} style={styles.bootLogo} />
-            <ActivityIndicator color={C.accent} />
-          </View>
-        ) : !model.active ? (
-          <ScrollView contentContainerStyle={styles.welcome}>
-            <View style={[S.row, { gap: 12 }]}>
-              <Image source={LOGO} style={styles.logo} />
-              <Text style={styles.wordmark}>OUTPOST</Text>
+    <ArtworkRevisionProvider catalog={model.catalog}>
+      <SafeAreaView style={S.page} edges={['top', 'left', 'right']}>
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <View
+          style={styles.shell}
+          aria-hidden={!!explorer || !!item || !!accountRoute}
+          accessibilityElementsHidden={!!explorer || !!item || !!accountRoute}
+          importantForAccessibility={
+            explorer || item || accountRoute ? 'no-hide-descendants' : 'auto'
+          }
+        >
+          {model.booting ? (
+            <View style={styles.center}>
+              <Image source={LOGO} style={styles.bootLogo} />
+              <ActivityIndicator color={C.accent} />
             </View>
-            <LinearGradient
-              colors={['#FF465529', '#7CC4FF14', C.background]}
-              style={styles.welcomeArt}
-            >
-              <Image source={LOGO} style={styles.welcomeLogo} />
-            </LinearGradient>
-            <View style={{ gap: 10 }}>
-              <Text style={S.eyebrow}>VALORANT COMPANION</Text>
-              <Text style={[S.title, { fontSize: 36, lineHeight: 42 }]}>
-                {'Your store, collection\nand matches.'}
-              </Text>
-              <Text style={S.body}>
-                Check daily offers, track your wishlist and review your games in one place.
-              </Text>
-            </View>
-            <View style={{ gap: 12 }}>
-              <Button
-                title={
-                  Platform.OS === 'web' ? 'Sign-in needs the mobile app' : 'Connect Riot account'
-                }
-                disabled={Platform.OS === 'web'}
-                onPress={() => onLink()}
-                icon="log-in"
-              />
-              <Button title="Try the demo" secondary onPress={model.enterDemo} icon="play" />
-            </View>
-          </ScrollView>
-        ) : (
-          <>
-            <View style={styles.header}>
-              <View style={[S.row, { gap: 10 }]}>
-                <Image source={LOGO} style={styles.headerLogo} />
-                {!narrow && <Text style={styles.wordmark}>OUTPOST</Text>}
+          ) : !model.active ? (
+            <ScrollView contentContainerStyle={styles.welcome}>
+              <View style={[S.row, { gap: 12 }]}>
+                <Image source={LOGO} style={styles.logo} />
+                <Text style={styles.wordmark}>OUTPOST</Text>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Switch account"
-                onPress={() => setAccountRoute({ type: 'picker' })}
-                style={styles.profile}
+              <LinearGradient
+                colors={['#FF465529', '#7CC4FF14', C.background]}
+                style={styles.welcomeArt}
               >
-                <PlayerAvatar card={ownCard} catalog={model.catalog} size={26} />
-                <Text
-                  style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 92 }]}
-                  numberOfLines={1}
-                >
-                  {model.active.gameName}
+                <Image source={LOGO} style={styles.welcomeLogo} />
+              </LinearGradient>
+              <View style={{ gap: 10 }}>
+                <Text style={S.eyebrow}>VALORANT COMPANION</Text>
+                <Text style={[S.title, { fontSize: 36, lineHeight: 42 }]}>
+                  {'Your store, collection\nand matches.'}
                 </Text>
-                {model.active.demo && <Text style={styles.demo}>DEMO</Text>}
-              </Pressable>
-            </View>
-            {expired && (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => onLink(model.active!.puuid)}
-                style={styles.notice}
-              >
-                <Feather name="lock" color={C.accent} size={14} />
-                <Text style={[S.small, { color: C.ink, flex: 1 }]}>
-                  Session expired. Tap to sign in again.
+                <Text style={S.body}>
+                  Check daily offers, track your wishlist and review your games in one place.
                 </Text>
-                <Feather name="chevron-right" color={C.subtle} size={16} />
-              </Pressable>
-            )}
-            <NavInsetContext.Provider value={76 + insets.bottom}>
-              {nativeTabs ? (
-                <NativeTabs
-                  active={tab}
-                  interactive={!explorer && !item && !accountRoute}
-                  onChange={setTab}
-                  render={(scene, visible) => (
-                    <ScreenSlot
-                      key={scene}
-                      visible={visible}
-                      tab={scene}
-                      model={model}
-                      onItem={onItem}
-                      onLink={onLink}
-                      onNavigate={onNavigate}
-                    />
-                  )}
+              </View>
+              <View style={{ gap: 12 }}>
+                <Button
+                  title={
+                    Platform.OS === 'web' ? 'Sign-in needs the mobile app' : 'Connect Riot account'
+                  }
+                  disabled={Platform.OS === 'web'}
+                  onPress={() => onLink()}
+                  icon="log-in"
                 />
-              ) : (
-                <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
-                  <RetainedTabs
-                    key={model.active.puuid}
+                <Button title="Try the demo" secondary onPress={model.enterDemo} icon="play" />
+              </View>
+            </ScrollView>
+          ) : (
+            <>
+              <View style={styles.header}>
+                <View style={[S.row, { gap: 10 }]}>
+                  <Image source={LOGO} style={styles.headerLogo} />
+                  {!narrow && <Text style={styles.wordmark}>OUTPOST</Text>}
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Switch account"
+                  onPress={() => setAccountRoute({ type: 'picker' })}
+                  style={styles.profile}
+                >
+                  <PlayerAvatar card={ownCard} catalog={model.catalog} size={26} />
+                  <Text
+                    style={[S.small, { color: C.ink, fontWeight: '600', maxWidth: 92 }]}
+                    numberOfLines={1}
+                  >
+                    {model.active.gameName}
+                  </Text>
+                  {model.active.demo && <Text style={styles.demo}>DEMO</Text>}
+                </Pressable>
+              </View>
+              {expired && (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => onLink(model.active!.puuid)}
+                  style={styles.notice}
+                >
+                  <Feather name="lock" color={C.accent} size={14} />
+                  <Text style={[S.small, { color: C.ink, flex: 1 }]}>
+                    Session expired. Tap to sign in again.
+                  </Text>
+                  <Feather name="chevron-right" color={C.subtle} size={16} />
+                </Pressable>
+              )}
+              <NavInsetContext.Provider value={76 + insets.bottom}>
+                {nativeTabs ? (
+                  <NativeTabs
                     active={tab}
                     interactive={!explorer && !item && !accountRoute}
+                    onChange={setTab}
                     render={(scene, visible) => (
                       <ScreenSlot
                         key={scene}
@@ -406,87 +390,106 @@ function AppContent({ model }: { model: AppModel }) {
                       />
                     )}
                   />
-                </ScreenTransition>
-              )}
-            </NavInsetContext.Provider>
-            {!nativeTabs && (
-              <NavSurface
-                testID="floating-bottom-nav"
-                style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
-              >
-                {NAV.map((nav) => {
-                  const selected = tab === nav.id;
-                  return (
-                    <Pressable
-                      key={nav.id}
-                      testID={`tab-${nav.id}`}
-                      accessibilityRole="tab"
-                      accessibilityLabel={nav.label}
-                      aria-selected={selected}
-                      accessibilityState={{ selected }}
-                      style={styles.navItem}
-                      onPress={() => {
-                        if (!selected) selectionTick();
-                        setTab(nav.id);
-                      }}
-                    >
-                      {selected && (
-                        <View style={[styles.navIndicator, navGlass && styles.navLens]} />
+                ) : (
+                  <ScreenTransition scene={`${model.active.puuid}:${tab}`}>
+                    <RetainedTabs
+                      key={model.active.puuid}
+                      active={tab}
+                      interactive={!explorer && !item && !accountRoute}
+                      render={(scene, visible) => (
+                        <ScreenSlot
+                          key={scene}
+                          visible={visible}
+                          tab={scene}
+                          model={model}
+                          onItem={onItem}
+                          onLink={onLink}
+                          onNavigate={onNavigate}
+                        />
                       )}
-                      <Feather
-                        name={nav.icon}
-                        size={20}
-                        color={selected ? C.accent : navGlass ? C.muted : C.subtle}
-                      />
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.85}
-                        style={[
-                          styles.navLabel,
-                          narrow && { fontSize: 9 },
-                          selected && { color: C.ink, fontWeight: '700' },
-                        ]}
+                    />
+                  </ScreenTransition>
+                )}
+              </NavInsetContext.Provider>
+              {!nativeTabs && (
+                <NavSurface
+                  testID="floating-bottom-nav"
+                  style={[styles.nav, { bottom: Math.max(4, insets.bottom) }]}
+                >
+                  {NAV.map((nav) => {
+                    const selected = tab === nav.id;
+                    return (
+                      <Pressable
+                        key={nav.id}
+                        testID={`tab-${nav.id}`}
+                        accessibilityRole="tab"
+                        accessibilityLabel={nav.label}
+                        aria-selected={selected}
+                        accessibilityState={{ selected }}
+                        style={styles.navItem}
+                        onPress={() => {
+                          if (!selected) selectionTick();
+                          setTab(nav.id);
+                        }}
                       >
-                        {nav.id === 'progress' ? 'Pass' : nav.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </NavSurface>
-            )}
-          </>
-        )}
-        {model.message && (
-          <View style={styles.message}>
-            <Feather name="info" size={18} color={C.gold} />
-            <Text style={[S.body, { flex: 1, fontSize: 13 }]}>{model.message}</Text>
-            <IconButton icon="x" label="Dismiss message" onPress={model.dismissMessage} />
-          </View>
-        )}
-      </View>
-      <AccountsModal
-        route={accountRoute}
-        model={model}
-        onRoute={setAccountRoute}
-        onClose={() => setAccountRoute(null)}
-      />
-      {model.active && (
-        <ItemModal
-          item={item?.accountId === model.active.puuid ? item.value : null}
+                        {selected && (
+                          <View style={[styles.navIndicator, navGlass && styles.navLens]} />
+                        )}
+                        <Feather
+                          name={nav.icon}
+                          size={20}
+                          color={selected ? C.accent : navGlass ? C.muted : C.subtle}
+                        />
+                        <Text
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.85}
+                          style={[
+                            styles.navLabel,
+                            narrow && { fontSize: 9 },
+                            selected && { color: C.ink, fontWeight: '700' },
+                          ]}
+                        >
+                          {nav.id === 'progress' ? 'Pass' : nav.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </NavSurface>
+              )}
+            </>
+          )}
+          {model.message && (
+            <View style={styles.message}>
+              <Feather name="info" size={18} color={C.gold} />
+              <Text style={[S.body, { flex: 1, fontSize: 13 }]}>{model.message}</Text>
+              <IconButton icon="x" label="Dismiss message" onPress={model.dismissMessage} />
+            </View>
+          )}
+        </View>
+        <AccountsModal
+          route={accountRoute}
           model={model}
-          onClose={() => setItem(null)}
+          onRoute={setAccountRoute}
+          onClose={() => setAccountRoute(null)}
         />
-      )}
-      <ExplorerModal
-        model={model}
-        routes={explorer?.accountId === model.active?.puuid ? (explorer?.routes ?? []) : []}
-        onNavigate={onNavigate}
-        onBack={onBack}
-        onClose={onCloseExplorer}
-      />
-      <PrivacyGuard />
-    </SafeAreaView>
+        {model.active && (
+          <ItemModal
+            item={item?.accountId === model.active.puuid ? item.value : null}
+            model={model}
+            onClose={() => setItem(null)}
+          />
+        )}
+        <ExplorerModal
+          model={model}
+          routes={explorer?.accountId === model.active?.puuid ? (explorer?.routes ?? []) : []}
+          onNavigate={onNavigate}
+          onBack={onBack}
+          onClose={onCloseExplorer}
+        />
+        <PrivacyGuard />
+      </SafeAreaView>
+    </ArtworkRevisionProvider>
   );
 }
 

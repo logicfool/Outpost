@@ -1,3 +1,4 @@
+import { useArtworkRevision } from './ArtworkRevision';
 import React, { useRef, useState } from 'react';
 import { Pressable, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import type { ImageProps } from 'expo-image';
@@ -19,9 +20,10 @@ export function ArtworkImage({
   label: string;
   containerStyle?: StyleProp<ViewStyle>;
 }) {
+  const revision = useArtworkRevision();
   const { C, S } = useTheme(),
     urls = [...new Set(candidates.map(safeImage).filter((u): u is string => !!u))],
-    key = urls.join('|');
+    key = revision + '|' + urls.join('|');
   const [attempt, setAttempt] = useState({ key, index: 0, retry: 0 }),
     current = useRef(key);
   const index = attempt.key === key ? attempt.index : 0,
@@ -72,7 +74,7 @@ export function ArtworkImage({
     >
       <Image
         {...props}
-        key={`${uri}:${retry}`}
+        key={`${uri}:${retry}:${revision}`}
         source={{ uri }}
         accessibilityLabel={label}
         style={style}

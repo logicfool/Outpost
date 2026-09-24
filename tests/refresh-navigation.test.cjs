@@ -74,6 +74,8 @@ for (const platform of ['android', 'ios'])
         if (n === 'react/jsx-runtime') return require(n);
         if (n === 'react-native') return RN;
         if (n.endsWith('/RetainedTabs')) return evaluate(compile('src/ui/RetainedTabs.tsx'), load);
+        if (n.endsWith('/ArtworkRevision'))
+          return evaluate(compile('src/ui/ArtworkRevision.tsx'), load);
         if (n.endsWith('/ScrollHeader')) return { ScrollHeader: ({ children }) => children };
         if (n.endsWith('/NativeTabs'))
           return { nativeTabsAvailable: () => false, NativeTabs: () => null };

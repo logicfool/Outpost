@@ -1,3 +1,4 @@
+import { useArtworkRevision } from './ArtworkRevision';
 import { Bone, Skeleton, SkeletonGroup, resourceSkeleton, type SkeletonKind } from './Skeleton';
 import { ARTWORK_WAIT_MS } from '../state/useArtworkReadiness';
 import { Image } from './CachedImage';
@@ -345,12 +346,13 @@ export function ItemArt({
   size?: number;
   style?: ViewStyle;
 }) {
+  const revision = useArtworkRevision();
   const urls = artworkCandidates(item),
     [retry, setRetry] = useState(0);
 
   return (
     <ItemArtwork
-      key={`${item.id}:${urls.join('|')}:${retry}`}
+      key={`${item.id}:${urls.join('|')}:${retry}:${revision}`}
       item={item}
       urls={urls}
       size={size}

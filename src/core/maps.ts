@@ -8,6 +8,18 @@ const GAUNTLET: MapMetadata = {
   image: GAUNTLET_OVERVIEW,
   listImage: GAUNTLET_OVERVIEW,
 };
+// Verified in /v1/maps for release-13.06. Match/queue aliases differ from the public mapUrl.
+export const GAUNTLET_MAP_ID = 'dd3a1cd9-41b1-50ea-3bd6-a7bb3c5978bd';
+const GAUNTLET_MAP_PATH = '/game/maps/abilitydraft/abilitydraft';
+const GAUNTLET_ALIASES = new Set([
+  GAUNTLET_MAP_ID,
+  GAUNTLET_MAP_PATH,
+  '/game/maps/abilitydraft/abilitydraftarena',
+  'abilitydraft',
+  'abilitydraftarena',
+  'gauntlet',
+  'gauntlet: glitched',
+]);
 const EMPTY_MAPS: Catalog['maps'] = {};
 const indices = new WeakMap<Catalog['maps'], Map<string, MapMetadata>>();
 export function mapKey(raw: string): string {
@@ -16,7 +28,10 @@ export function mapKey(raw: string): string {
 export function isGauntletMap(raw: string): boolean {
   const value = mapKey(raw),
     leaf = value.split('/').pop()?.split('.')[0];
-  return leaf === 'abilitydraftarena' && (value === leaf || value.startsWith('/game/maps/'));
+  return (
+    GAUNTLET_ALIASES.has(value) ||
+    (leaf === 'abilitydraftarena' && value.startsWith('/game/maps/abilitydraft/'))
+  );
 }
 export function mapMetadata(catalog: Catalog, raw: string): MapMetadata | undefined {
   const key = mapKey(raw);
@@ -32,7 +47,9 @@ export function mapMetadata(catalog: Catalog, raw: string): MapMetadata | undefi
       if (!index.has(mapKey(value.name))) index.set(mapKey(value.name), value);
     indices.set(maps, index);
   }
-  return index.get(key) ?? (isGauntletMap(raw) ? GAUNTLET : undefined);
+  if (isGauntletMap(raw))
+    return index.get(GAUNTLET_MAP_ID) ?? index.get(GAUNTLET_MAP_PATH) ?? index.get(key) ?? GAUNTLET;
+  return index.get(key);
 }
 export function mapForSaved(
   catalog: Catalog,
@@ -46,7 +63,7 @@ export function mapForSaved(
     ['unknown map', 'open match details', ''].includes(value.map.toLowerCase()) &&
     ['abilitydraft', 'abilitydraftarena'].includes(value.queue?.toLowerCase() ?? '')
   )
-    return GAUNTLET;
+    return mapMetadata(catalog, GAUNTLET_MAP_ID);
 }
 export function hydrateMatchSummary(catalog: Catalog, row: MatchSummary): MatchSummary {
   const map = mapForSaved(catalog, row);
@@ -79,7 +96,12 @@ export function hydrateMatchDetail(catalog: Catalog, detail: MatchDetail): Match
       ? {
           analysis: {
             ...detail.analysis,
-            minimap: map === GAUNTLET ? undefined : map.minimap ? map : detail.analysis.minimap,
+            minimap: map.minimap
+              ? map
+              : isGauntletMap(detail.mapId ?? detail.map) ||
+                  map === mapMetadata(catalog, GAUNTLET_MAP_ID)
+                ? undefined
+                : detail.analysis.minimap,
           },
         }
       : {}),

@@ -487,7 +487,7 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   };
   const fresh = {
     ...old,
-    schemaVersion: 11,
+    schemaVersion: require('../.test-build/catalog.js').CATALOG_SCHEMA_VERSION,
     maps: {
       ascent: {
         name: 'Ascent',
@@ -512,7 +512,10 @@ test('opening a report upgrades old map metadata once without refreshing the sto
   await load.call(f.runtime);
   await load.call(f.runtime);
   assert.equal(publicCalls, 1);
-  assert.equal(f.runtime.catalog.schemaVersion, 11);
+  assert.equal(
+    f.runtime.catalog.schemaVersion,
+    require('../.test-build/catalog.js').CATALOG_SCHEMA_VERSION,
+  );
   assert.equal(f.calls.snapshots, 0);
 });
 test('a weapons-only media refresh cannot mark old map metadata as migrated', async () => {
@@ -681,6 +684,125 @@ test('network catalogue maintenance waits for repair while cache-only reads rema
   assert.equal(requests, 0);
   assert.equal(await load.call(f.runtime, false, false), before);
   release();
-  assert.equal(await updating, after);
+  const updated = await updating;
+  assert.equal(updated.repairedMarker, true);
+  assert.equal(updated.fetchedAt, after.fetchedAt);
+  assert.deepEqual(updated.maps, after.maps);
   assert.equal(requests, 1);
+});
+
+test('an upstream patch change replaces a fresh daily catalogue without refreshing account data', async () => {
+  const f = fixture(),
+    load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  const version = 'release-13.06-shipping-13-5435758';
+  f.runtime.catalog = {
+    ...makeDemo().catalog,
+    schemaVersion: 12,
+    fetchedAt: f.now,
+    sourceVersion: 'release-13.05-shipping-11-5350494',
+  };
+  let versions = 0,
+    categories = 0;
+  f.runtime.publicClient = {
+    version: async () => {
+      versions++;
+      return version;
+    },
+    load: async (previous, sourceVersion, fresh) => {
+      categories++;
+      assert.equal(sourceVersion, version);
+      assert.equal(fresh, true);
+      return { ...previous, sourceVersion, failedPaths: [] };
+    },
+  };
+  const next = await load.call(f.runtime);
+  assert.equal(next.sourceVersion, version);
+  assert.equal(versions, 1);
+  assert.equal(categories, 1);
+  assert.equal(f.calls.snapshots, 0);
+  assert.equal(f.calls.init, 0);
+  assert.equal(await load.call(f.runtime, false, false), next);
+  await assert.rejects(load.call(f.runtime, true), (e) => e.code === 'CATALOG_COOLDOWN');
+  assert.equal(versions, 1);
+});
+test('same-release maintenance checks are bounded and unavailable version checks keep cached content', async () => {
+  const f = fixture(),
+    load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  const version = 'release-13.06-shipping-13-5435758';
+  f.runtime.catalog = {
+    ...makeDemo().catalog,
+    schemaVersion: 12,
+    fetchedAt: f.now,
+    sourceVersion: version,
+    availableVersion: version,
+  };
+  let calls = 0;
+  f.runtime.publicClient = {
+    version: async () => {
+      calls++;
+      throw Error('offline');
+    },
+    load: async () => {
+      throw Error('should not redownload');
+    },
+  };
+  const next = await load.call(f.runtime);
+  assert.ok(Object.keys(next.items).length);
+  assert.equal(next.sourceVersion, version);
+  for (let n = 0; n < 10; n++) await load.call(f.runtime);
+  assert.equal(calls, 1);
+  f.advance(15 * 60000 + 1);
+  await load.call(f.runtime);
+  assert.equal(calls, 2);
+});
+test('catalogue reservations survive restart and storage failures prevent public network work', async () => {
+  const f = fixture(),
+    load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  const catalog = {
+    ...makeDemo().catalog,
+    schemaVersion: 12,
+    fetchedAt: f.now,
+    refreshAfter: f.now + 60000,
+  };
+  f.runtime.repository.catalog = async () => catalog;
+  let calls = 0;
+  f.runtime.publicClient = {
+    version: async () => {
+      calls++;
+      return 'new-version';
+    },
+    load: async () => {
+      calls++;
+      return catalog;
+    },
+  };
+  assert.equal(await load.call(f.runtime), catalog);
+  assert.equal(f.runtime.catalog, catalog);
+  assert.equal(calls, 0);
+  f.advance(60001);
+  f.runtime.repository.saveCatalog = async () => {
+    throw Error('storage full');
+  };
+  await assert.rejects(load.call(f.runtime, true), /storage full/);
+  assert.equal(calls, 0);
+});
+test('partial release updates cannot hammer category retries while the catalogue is incomplete', async () => {
+  const f = fixture(),
+    load = Object.getPrototypeOf(f.runtime).loadCatalog;
+  f.runtime.catalog = { ...makeDemo().catalog, schemaVersion: 12, fetchedAt: f.now };
+  let calls = 0;
+  f.runtime.publicClient = {
+    version: async () => 'release-13.06-shipping-13-5435758',
+    load: async (previous) => {
+      calls++;
+      return { ...previous, failedPaths: ['playercards'] };
+    },
+  };
+  await load.call(f.runtime);
+  f.advance(120000);
+  await load.call(f.runtime);
+  assert.equal(calls, 1);
+  f.advance(180001);
+  await load.call(f.runtime);
+  assert.equal(calls, 2);
 });

@@ -16,7 +16,8 @@ import {
 import { HttpClient, SingleFlightCache } from './http';
 export const PUBLIC_ORIGIN = 'https://valorant-api.com';
 
-export const CATALOG_SCHEMA_VERSION = 11;
+export const CATALOG_SCHEMA_VERSION = 12;
+export const CATALOG_VERSION_CHECK_MS = 15 * 60000;
 export const CATALOG_PATHS = [
   'weapons',
   'buddies',
@@ -403,6 +404,11 @@ export function mergeCatalog(previous: Catalog | undefined, fresh: Catalog): Cat
   if (!previous) return fresh;
   return {
     ...fresh,
+    sourceVersion: fresh.sourceVersion ?? previous.sourceVersion,
+    metadataUpdatedAt: fresh.metadataUpdatedAt ?? previous.metadataUpdatedAt,
+    availableVersion: fresh.availableVersion ?? previous.availableVersion,
+    versionCheckedAt: fresh.versionCheckedAt ?? previous.versionCheckedAt,
+    refreshAfter: fresh.refreshAfter ?? previous.refreshAfter,
     repairAfter: Math.max(previous.repairAfter ?? 0, fresh.repairAfter ?? 0) || undefined,
     weapons: { ...previous.weapons, ...fresh.weapons },
     items: Object.fromEntries(
@@ -469,8 +475,9 @@ export class CatalogClient {
     this.generation++;
     this.cache.clear();
   }
-  async version(): Promise<string> {
-    return this.cache.get('version', 24 * 60 * 60 * 1000, async () => {
+  async version(fresh = false): Promise<string> {
+    if (fresh) this.cache.invalidate('version');
+    return this.cache.get('version', CATALOG_VERSION_CHECK_MS, async () => {
       const response = await this.http.json(`${PUBLIC_ORIGIN}/v1/version`);
       const version = text(object(object(response.data).data).riotClientVersion);
       if (!version || !/^[a-zA-Z0-9.+_-]{4,160}$/.test(version))
@@ -518,6 +525,9 @@ export class CatalogClient {
     return {
       ...mergeCatalog(previous, fresh),
       schemaVersion: previous.schemaVersion,
+      metadataUpdatedAt: entries.some(([, data]) => data !== undefined)
+        ? Date.now()
+        : previous.metadataUpdatedAt,
       fetchedAt: previous.fetchedAt,
     };
   }
@@ -528,7 +538,14 @@ export class CatalogClient {
       async () => (await this.http.json(`${PUBLIC_ORIGIN}/v1/weapons?language=en-US`)).data,
     );
   }
-  async load(previous?: Catalog): Promise<Catalog> {
+  async load(previous?: Catalog, sourceVersion?: string, revalidate = false): Promise<Catalog> {
+    if (revalidate) {
+      this.cache.invalidate('catalog');
+      for (const path of CATALOG_PATHS) {
+        this.cache.invalidate(`category:${path}`);
+        this.cache.invalidate(`repair:${path}`);
+      }
+    }
     return this.cache.get('catalog', 30000, async () => {
       const failed: string[] = [];
       const entries = await Promise.all(
@@ -549,6 +566,11 @@ export class CatalogClient {
       );
       const fresh = await buildCatalogAsync(Object.fromEntries(entries));
       fresh.failedPaths = failed;
+      fresh.metadataUpdatedAt =
+        failed.length < CATALOG_PATHS.length ? Date.now() : previous?.metadataUpdatedAt;
+      fresh.sourceVersion = failed.length ? previous?.sourceVersion : sourceVersion;
+      fresh.availableVersion = sourceVersion ?? previous?.availableVersion;
+      if (failed.length === CATALOG_PATHS.length && previous) fresh.fetchedAt = previous.fetchedAt;
       return mergeCatalog(previous, fresh);
     });
   }

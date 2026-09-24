@@ -1,3 +1,4 @@
+import { GameDataPanel } from './GameDataPanel';
 import { bundleContents, bundleArtwork } from '../core/bundles';
 import { ArtworkImage } from './ArtworkImage';
 import { hydrateMatchSummary, hydrateMatchDetail } from '../core/maps';
@@ -1952,11 +1953,12 @@ export function AccountScreen({ model, onLink }: Props) {
           <View style={S.divider} />
           <InfoRow label="Automatic store refresh" value="When the daily timer resets" />
           <View style={S.divider} />
-          <InfoRow label="Skins & catalog" value="Cached for 24 hours" />
+          <InfoRow label="Skins & catalog" value="Patch-aware cache" />
           <Text style={S.small}>
             Idle and Profile updates run every 60 seconds. Saved match reports are reused. Pull to
             check for new data.
           </Text>
+          <GameDataPanel key={active.puuid} model={model} />
         </View>
         <SectionHeader title="Notifications" />
         <ListGroup>

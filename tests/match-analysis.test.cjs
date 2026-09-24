@@ -243,7 +243,7 @@ test('catalog retains minimap coefficients and weapon icons', () => {
   });
   assert.equal(c.maps['map-path'].xScalarToAdd, 0);
   assert.match(c.weapons[GUN].killIcon, /k.png/);
-  assert.equal(c.schemaVersion, 11);
+  assert.equal(c.schemaVersion, require('../.test-build/catalog.js').CATALOG_SCHEMA_VERSION);
 });
 test('an empty round summary cannot fabricate a playable location', () => {
   const a = normalizeAnalysis(

@@ -1,3 +1,4 @@
+import { useArtworkRevision } from './ArtworkRevision';
 import React, { memo, useState, useRef } from 'react';
 import { View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -16,13 +17,15 @@ export const PlayerAvatar = memo(function PlayerAvatar({
   size?: number;
   status?: 'online' | 'away' | 'offline' | 'unknown';
 }) {
+  const revision = useArtworkRevision(catalog);
   const { C } = useTheme(),
     candidates = squareCardCandidates(card, catalog),
-    key = candidates.join('|');
+    key = revision + '|' + candidates.join('|');
   const [cursor, setCursor] = useState({ key, index: 0 });
   const index = cursor.key === key ? cursor.index : 0;
   const active = useRef(key);
-  active.current = key;
+  const stamp = `${key}:${index}`;
+  active.current = stamp;
   const uri = candidates[index];
   const dot = status === 'online' ? C.mint : status === 'away' ? C.gold : C.subtle;
   return (
@@ -40,6 +43,7 @@ export const PlayerAvatar = memo(function PlayerAvatar({
       >
         {uri ? (
           <Image
+            key={`${uri}:${revision}`}
             source={{ uri }}
             contentFit="cover"
             transition={0}
@@ -48,7 +52,7 @@ export const PlayerAvatar = memo(function PlayerAvatar({
               uri === DEFAULT_CARD_ART ? 'Default VALORANT card' : 'Player card portrait'
             }
             onError={() => {
-              if (active.current === key) setCursor({ key, index: index + 1 });
+              if (active.current === stamp) setCursor({ key, index: index + 1 });
             }}
           />
         ) : (

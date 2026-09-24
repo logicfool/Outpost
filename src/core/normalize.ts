@@ -365,7 +365,8 @@ export function normalizeMatchDetail(
     throw new AppError('ACCOUNT_MISMATCH', 'This match does not contain the signed-in account.');
   const teams = array(r.teams).map(object),
     own = teams.find((t) => t.teamId === player.teamId),
-    other = teams.find((t) => t.teamId !== player.teamId);
+    rivals = teams.filter((t) => t.teamId !== player.teamId),
+    other = teams.length === 2 && rivals.length === 1 ? rivals[0] : undefined;
   const roundResults = array(r.roundResults).map(object);
   const hits = new Map<string, { head: number; body: number; legs: number }>(),
     duels = new Map<string, { kills: number; deaths: number }>();
@@ -477,7 +478,7 @@ export function normalizeMatchDetail(
       ? 'UNKNOWN'
       : own?.won === true
         ? 'WIN'
-        : other?.won === true
+        : own && rivals.some((t) => t.won === true)
           ? 'LOSS'
           : own && other && own.roundsWon === other.roundsWon
             ? 'DRAW'

@@ -178,6 +178,8 @@ export function ownLiveProgress(
   friends: readonly Friend[] = [],
 ): MatchProgress | undefined {
   if (!game || game.state !== 'in_game') return;
+  // Multiple opposing teams do not define one allied/enemy score pair.
+  if (new Set(game.players?.map((p) => p.teamId).filter(Boolean)).size > 2) return;
   const candidates: MatchProgress[] = [],
     own = game.players?.find((p) => p.self);
   const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -280,6 +282,7 @@ export function matchProgress(
 ): MatchProgress | undefined {
   const r = object(raw),
     rows = Array.isArray(r.Teams) ? r.Teams.map(object) : [];
+  if (new Set(rows.map((t) => text(t.TeamID)).filter(Boolean)).size > 2) return;
   const own = rows.find((t) => t.TeamID === teamId),
     other = rows.find((t) => t.TeamID !== teamId);
   const ally = count(own?.RoundsWon),

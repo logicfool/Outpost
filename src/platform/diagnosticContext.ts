@@ -41,6 +41,10 @@ export async function diagnosticContext(model: AppModel, guard: () => void): Pro
       refreshIssue: model.snapshot?.refreshIssue,
       catalogFetchedAt: model.catalog.fetchedAt,
       catalogSchema: model.catalog.schemaVersion,
+      catalogSourceVersion: model.catalog.sourceVersion,
+      catalogAvailableVersion: model.catalog.availableVersion,
+      catalogVersionCheckedAt: model.catalog.versionCheckedAt,
+      catalogRefreshAfter: model.catalog.refreshAfter,
       catalogFailures: model.catalog.failedPaths,
       catalogItemCount: Object.keys(model.catalog.items).length,
       sections: Object.fromEntries(

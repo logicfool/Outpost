@@ -38,6 +38,7 @@ const load = (name) => {
   if (name === './Skeleton') return { Skeleton: 'Skeleton', resourceSkeleton: () => 'store' };
   if (name === '../state/useArtworkReadiness') return { ARTWORK_WAIT_MS: 8000 };
   if (name === './CachedImage') return { Image: 'Image' };
+  if (name === './ArtworkRevision') return { useArtworkRevision: () => '' };
   if (name === './theme')
     return {
       useTheme: () => ({ C: PALETTES.navy, S: {}, isDark: true }),

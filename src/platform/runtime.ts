@@ -1,3 +1,4 @@
+import { CATALOG_VERSION_CHECK_MS } from '../core/catalog';
 import { hydrateMatchDetail } from '../core/maps';
 import { missingCatalogPaths, hydrateSnapshotMetadata } from '../core/catalogRecovery';
 import { refreshDeadline } from '../core/refreshPolicy';
@@ -203,34 +204,83 @@ export class Runtime {
     await this.aim().markLogin(uuid(id));
   }
   async loadCatalog(force = false, allowNetwork = true): Promise<Catalog> {
-    if (!allowNetwork && Object.keys(this.catalog.items).length) return this.catalog;
-    // Do not let a full refresh race a targeted repair and overwrite its newer metadata.
-    // Cache-only startup reads above remain non-blocking.
-    if (allowNetwork && this.metadataRepairFlight) await this.metadataRepairFlight.catch(() => {});
+    if (!allowNetwork) {
+      const cached = Object.keys(this.catalog.items).length
+        ? this.catalog
+        : await this.repository.catalog();
+      if (cached) {
+        this.catalog = cached;
+        for (const client of this.clients.values()) client.updateCatalog(cached);
+      }
+      return this.catalog;
+    }
+    if (this.metadataRepairFlight) await this.metadataRepairFlight.catch(() => {});
     if (this.catalogFlight) return this.catalogFlight;
     const work = async () => {
       const cached = Object.keys(this.catalog.items).length
         ? this.catalog
         : await this.repository.catalog();
-      const ttl = cached?.failedPaths?.length ? 30 * 60000 : DAY_MS;
-      if (!allowNetwork && !cached) return this.catalog;
-      if (
-        cached &&
-        (!allowNetwork ||
-          (!force &&
-            cached.schemaVersion === CATALOG_SCHEMA_VERSION &&
-            cached.fetchedAt + ttl > this.now()))
-      ) {
+      if (cached && cached !== this.catalog) {
         this.catalog = cached;
         for (const client of this.clients.values()) client.updateCatalog(cached);
-        return cached;
       }
-      if (force) this.publicClient.clear();
-      const fresh = await this.publicClient.load(cached ?? this.catalog);
-      this.catalog = fresh;
-      for (const client of this.clients.values()) client.updateCatalog(fresh);
-      await this.repository.saveCatalog(fresh);
-      return fresh;
+      const now = this.now();
+      const publish = async (next: Catalog) => {
+        await this.repository.saveCatalog(next);
+        this.catalog = next;
+        for (const client of this.clients.values()) client.updateCatalog(next);
+        return next;
+      };
+      if ((cached?.refreshAfter ?? 0) > now) {
+        if (force)
+          throw new AppError(
+            'CATALOG_COOLDOWN',
+            'Game data was checked recently. Please wait before refreshing again.',
+            cached!.refreshAfter,
+          );
+        return cached!;
+      }
+      let checkpoint = cached ?? this.catalog;
+      if (
+        force ||
+        !checkpoint.versionCheckedAt ||
+        now >= checkpoint.versionCheckedAt + CATALOG_VERSION_CHECK_MS
+      ) {
+        checkpoint = { ...checkpoint, versionCheckedAt: now };
+        await this.repository.saveCatalog(checkpoint);
+        try {
+          checkpoint.availableVersion = await this.publicClient.version(force);
+        } catch {
+          recordRequest({
+            at: now,
+            service: 'Public catalog',
+            method: 'META',
+            code: 'CATALOG_VERSION_UNAVAILABLE',
+            durationMs: 0,
+          });
+        }
+      }
+      const migrated = checkpoint.schemaVersion === CATALOG_SCHEMA_VERSION;
+      const changed =
+        !!checkpoint.availableVersion && checkpoint.availableVersion !== checkpoint.sourceVersion;
+      const ttl = checkpoint.failedPaths?.length ? 5 * 60000 : DAY_MS;
+      if (!force && cached && migrated && !changed && checkpoint.fetchedAt + ttl > now)
+        return checkpoint === cached ? cached : publish(checkpoint);
+      // Persist the reservation before network work, including across app restarts.
+      const reserved = { ...checkpoint, refreshAfter: now + 60000 };
+      await publish(reserved);
+      const fresh = await this.publicClient.load(
+        reserved,
+        checkpoint.availableVersion,
+        force || changed || !migrated,
+      );
+      const next = {
+        ...mergeCatalog(this.catalog, fresh),
+        versionCheckedAt: checkpoint.versionCheckedAt,
+        availableVersion: checkpoint.availableVersion,
+        refreshAfter: this.now() + (fresh.failedPaths?.length ? 5 * 60000 : 60000),
+      };
+      return publish(next);
     };
     const promise = work();
     this.catalogFlight = promise;

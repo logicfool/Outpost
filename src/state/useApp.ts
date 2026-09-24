@@ -1,3 +1,4 @@
+import { hydrateSnapshotMetadata } from '../core/catalogRecovery';
 import { restoreProgressively } from '../core/progressiveCache';
 import { yieldToUI } from '../core/cooperative';
 import { livePollInterval } from '../core/refreshPolicy';
@@ -174,11 +175,21 @@ export function useApp() {
       setCatalog(runtime.catalog);
       setBusy(false);
 
+      const displayedMetadata = runtime.catalog;
       void yieldToUI()
         .then(() => runtime.loadCatalog())
         .then((meta) => {
-          if (epoch.current === stamp && activeRef.current?.puuid === account.puuid)
+          if (epoch.current === stamp && activeRef.current?.puuid === account.puuid) {
             setCatalog(meta);
+            if (
+              meta.items !== displayedMetadata.items ||
+              meta.maps !== displayedMetadata.maps ||
+              meta.bundles !== displayedMetadata.bundles
+            )
+              setSnapshot((saved) =>
+                saved?.accountId === account.puuid ? hydrateSnapshotMetadata(meta, saved) : saved,
+              );
+          }
         })
         .catch(() => {});
       const [historyResult, accountsResult] = await Promise.allSettled([
@@ -607,7 +618,25 @@ export function useApp() {
       saved && saved.accountId === account?.puuid
         ? await runtime.repairCatalog(saved).catch(() => loaded)
         : loaded;
-    if (activeRef.current?.puuid === account?.puuid) setCatalog(next);
+    if (activeRef.current?.puuid === account?.puuid) {
+      setCatalog(next);
+      setSnapshot((saved) =>
+        saved && saved.accountId === account?.puuid ? hydrateSnapshotMetadata(next, saved) : saved,
+      );
+    }
+  }, []);
+  const refreshCatalog = useCallback(async () => {
+    const account = activeRef.current,
+      stamp = epoch.current;
+    if (account?.demo) return makeDemo().catalog;
+    const next = await (await getRuntime()).loadCatalog(true);
+    if (epoch.current === stamp && activeRef.current?.puuid === account?.puuid) {
+      setCatalog(next);
+      setSnapshot((saved) =>
+        saved && saved.accountId === account?.puuid ? hydrateSnapshotMetadata(next, saved) : saved,
+      );
+    }
+    return next;
   }, []);
   const refreshMedia = useCallback(async () => {
     const fresh = await (await getRuntime()).refreshMedia();
@@ -1191,6 +1220,7 @@ export function useApp() {
     message,
     dismissMessage: () => setMessage(null),
     ensureCatalog,
+    refreshCatalog,
     setTheme,
     setAutoChatHistory,
     setBackgroundChatHistory,

@@ -596,7 +596,7 @@ try {
       await tab('Settings');
       await page.getByText('Every 5 seconds in game', { exact: true }).waitFor();
       await page.getByText('When the daily timer resets', { exact: true }).waitFor();
-      await page.getByText('Cached for 24 hours', { exact: true }).waitFor();
+      await page.getByText('Patch-aware cache', { exact: true }).waitFor();
       await shot('refresh-policy');
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await tab('Store');

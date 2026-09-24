@@ -139,6 +139,17 @@ try {
       await shot('patch-collection-' + width);
     }
   });
+  await check(
+    'game-data controls are visible without exposing account refresh in demo mode',
+    async () => {
+      await tab('account');
+      const action = page.getByRole('button', { name: 'Refresh game data', exact: true });
+      await action.scrollIntoViewIfNeeded();
+      assert.equal(await action.isDisabled(), true);
+      await page.getByText('Game data · Demo', { exact: true }).waitFor();
+      await shot('patch-game-data-settings');
+    },
+  );
   assert.deepEqual(errors, []);
   assert.equal(requests.length, 0);
   passed = true;
