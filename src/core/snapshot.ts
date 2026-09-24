@@ -1,3 +1,4 @@
+import { mergeGauntletLive } from './gauntlet';
 import { appendMatchSection } from './matchArchive';
 import type { Snapshot } from './types';
 
@@ -34,6 +35,10 @@ export function mergeSnapshot(previous: Snapshot | null, next: Snapshot): Snapsh
     ) {
       Object.assign(merged, { [key]: old });
     }
+  }
+  if (previous.liveGame.status === 'ready' && merged.liveGame.status === 'ready') {
+    const data = mergeGauntletLive(previous.liveGame.data, merged.liveGame.data);
+    if (data !== merged.liveGame.data) merged.liveGame = { ...merged.liveGame, data };
   }
   merged.matches = appendMatchSection(previous.matches, merged.matches);
   return merged;

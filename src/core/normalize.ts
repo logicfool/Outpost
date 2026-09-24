@@ -1,3 +1,4 @@
+import { isGauntlet, readGauntlet, duoStatus } from './gauntlet';
 import { mapMetadata } from './maps';
 import { bundleMeta, bundleArtwork } from './bundles';
 import { bundleMetadata } from './bundleMetadata';
@@ -359,7 +360,13 @@ export function normalizeMatchDetail(
   const r = object(raw),
     info = object(r.matchInfo),
     me = accountId.toLowerCase();
-  const rawPlayers = requiredArray(r.players, 'match players').map(object);
+  const gauntletMode = isGauntlet({
+    queue: text(info.queueID, text(info.queueId)),
+    mapId: text(info.mapId),
+  });
+  const rawPlayers = requiredArray(r.players, 'match players')
+    .map(object)
+    .filter((p) => !gauntletMode || p.isObserver !== true);
   const player = rawPlayers.find((p) => text(p.subject).toLowerCase() === me);
   if (!player)
     throw new AppError('ACCOUNT_MISMATCH', 'This match does not contain the signed-in account.');
@@ -439,6 +446,16 @@ export function normalizeMatchDetail(
     .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
   const self = players.find((p) => p.self)!,
     byId = new Map(players.map((p) => [p.subject, p]));
+  const completed =
+    info.isCompleted === true ||
+    ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState));
+  const gauntlet = gauntletMode
+    ? readGauntlet(text(info.matchId), teams, players, completed)
+    : undefined;
+  const ownDuo = gauntlet?.teams.find(
+    (t) => t.id.toLowerCase() === text(player.teamId).toLowerCase(),
+  );
+  const tournamentStatus = ownDuo && gauntlet ? duoStatus(ownDuo, gauntlet) : 'unknown';
   const analysis = normalizeAnalysis(raw, catalog, players);
   duels.clear();
   for (const event of analysis.events) {
@@ -452,9 +469,8 @@ export function normalizeMatchDetail(
     duels.set(opponent, score);
   }
   return {
-    completed:
-      info.isCompleted === true ||
-      ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState)),
+    ...(gauntlet ? { gauntlet, placement: ownDuo?.placement } : {}),
+    completed,
     id: text(info.matchId),
     map:
       mapMetadata(catalog, text(info.mapId))?.name ??
@@ -471,20 +487,27 @@ export function normalizeMatchDetail(
     assists: self.assists,
     acs: self.acs,
     headshotPct: self.headshotPct,
-    result: !(
-      info.isCompleted === true ||
-      ['Completed', 'Surrendered', 'VoteDraw'].includes(text(info.completionState))
-    )
-      ? 'UNKNOWN'
-      : own?.won === true
+    result: gauntletMode
+      ? tournamentStatus === 'winner'
         ? 'WIN'
-        : own && rivals.some((t) => t.won === true)
+        : tournamentStatus === 'eliminated'
           ? 'LOSS'
-          : own && other && own.roundsWon === other.roundsWon
-            ? 'DRAW'
-            : 'UNKNOWN',
+          : 'UNKNOWN'
+      : !completed
+        ? 'UNKNOWN'
+        : own?.won === true
+          ? 'WIN'
+          : own && rivals.some((t) => t.won === true)
+            ? 'LOSS'
+            : own && other && own.roundsWon === other.roundsWon
+              ? 'DRAW'
+              : 'UNKNOWN',
     score:
-      own && other && typeof own.roundsWon === 'number' && typeof other.roundsWon === 'number'
+      !gauntletMode &&
+      own &&
+      other &&
+      typeof own.roundsWon === 'number' &&
+      typeof other.roundsWon === 'number'
         ? `${own.roundsWon} - ${other.roundsWon}`
         : '-',
     teamId: text(player.teamId) || undefined,

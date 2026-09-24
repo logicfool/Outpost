@@ -92,11 +92,15 @@ function components(platform) {
                           S: { small: {}, h3: {} },
                         }),
                       }
-                    : n.startsWith('../core/')
-                      ? require(path.join(__dirname, '../.test-build', n.slice(8) + '.js'))
-                      : (() => {
-                          throw Error(n);
-                        })();
+                    : n === './GauntletView'
+                      ? require('./loading-harness.cjs')
+                          .harness({ os: platform })
+                          .load('src/ui/GauntletView.tsx')
+                      : n.startsWith('../core/')
+                        ? require(path.join(__dirname, '../.test-build', n.slice(8) + '.js'))
+                        : (() => {
+                            throw Error(n);
+                          })();
   const m = { exports: {} },
     code = ts.transpileModule(
       fs.readFileSync(path.join(__dirname, '../src/ui/LiveMatchView.tsx'), 'utf8'),

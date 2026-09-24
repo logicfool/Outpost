@@ -1,3 +1,5 @@
+import { isGauntlet, gauntletOwnResult } from '../core/gauntlet';
+import { GauntletReportTeams } from './GauntletView';
 import { GameDataPanel } from './GameDataPanel';
 import { bundleContents, bundleArtwork } from '../core/bundles';
 import { ArtworkImage } from './ArtworkImage';
@@ -1250,7 +1252,23 @@ export function MatchCard({
             ) : (
               <Feather name="file-text" size={16} color={C.subtle} />
             )}
-            {detail ? <Text style={styles.matchScore}>{detail.score}</Text> : null}
+            {detail ? (
+              <Text style={styles.matchScore}>
+                {isGauntlet({
+                  queue: match.queue,
+                  mapId: detail.mapId ?? match.mapId,
+                  map: detail.map,
+                })
+                  ? detail.placement
+                    ? `#${detail.placement}`
+                    : detail.result === 'WIN'
+                      ? 'Winning duo'
+                      : detail.result === 'LOSS'
+                        ? 'Duo eliminated'
+                        : '2v2 survival'
+                  : detail.score}
+              </Text>
+            ) : null}
             <View style={[S.row, { gap: 4 }]}>
               {match.tierImage ? (
                 <Image
@@ -1395,7 +1413,8 @@ export function MatchReport({
   }, [id, subject, model.matchDetail]);
   const own = detail?.teams.find((t) => t.id === detail.teamId),
     other = detail?.teams.find((t) => t.id !== detail.teamId),
-    teamGame = detail?.teams.length === 2;
+    gauntletMode = !!detail && isGauntlet(detail),
+    teamGame = !gauntletMode && detail?.teams.length === 2;
   const tone = resultTone(detail?.result, C);
   const content = (
     <ModalPage>
@@ -1422,7 +1441,11 @@ export function MatchReport({
               <Text style={[S.eyebrow, { color: tone }]}>
                 {resultLabel(detail.result).toUpperCase()}
               </Text>
-              {own && other && own.roundsWon !== null && other.roundsWon !== null ? (
+              {gauntletMode ? (
+                <Text style={[styles.heroScore, { fontSize: 26 }]}>
+                  {gauntletOwnResult(detail)}
+                </Text>
+              ) : teamGame && own && other && own.roundsWon !== null && other.roundsWon !== null ? (
                 <Text style={styles.heroScore}>
                   <Text style={{ color: C.mint }}>{own.roundsWon}</Text>
                   <Text style={{ color: C.subtle }}> - </Text>
@@ -1470,46 +1493,59 @@ export function MatchReport({
               ]}
             />
             {tab === 'scoreboard' &&
-              (teamGame
-                ? [own, other].map(
-                    (team) =>
-                      team && (
-                        <View key={team.id} style={{ gap: 10 }}>
-                          <SectionHeader
-                            title={
-                              team === own
-                                ? subject && subject !== model.active?.puuid
-                                  ? 'Player’s team'
-                                  : 'Your team'
-                                : 'Opposing team'
-                            }
-                            detail={
-                              team.roundsWon !== null ? `${team.roundsWon} rounds` : undefined
-                            }
-                          />
-                          {detail.players
-                            .filter((p) => p.teamId === team.id)
-                            .map((player) => (
-                              <PlayerRow
-                                key={player.subject}
-                                player={player}
-                                ownId={model.active?.puuid}
-                                ally={team === own}
-                                onOpen={() => onNavigate({ type: 'player', player })}
-                              />
-                            ))}
-                        </View>
-                      ),
-                  )
-                : detail.players.map((player) => (
+              (gauntletMode ? (
+                <GauntletReportTeams
+                  detail={detail}
+                  ownId={model.active?.puuid}
+                  renderPlayer={(player, friendly) => (
                     <PlayerRow
-                      key={player.subject}
                       player={player}
                       ownId={model.active?.puuid}
-                      ally={player.self}
+                      ally={friendly}
                       onOpen={() => onNavigate({ type: 'player', player })}
                     />
-                  )))}
+                  )}
+                />
+              ) : teamGame ? (
+                [own, other].map(
+                  (team) =>
+                    team && (
+                      <View key={team.id} style={{ gap: 10 }}>
+                        <SectionHeader
+                          title={
+                            team === own
+                              ? subject && subject !== model.active?.puuid
+                                ? 'Player’s team'
+                                : 'Your team'
+                              : 'Opposing team'
+                          }
+                          detail={team.roundsWon !== null ? `${team.roundsWon} rounds` : undefined}
+                        />
+                        {detail.players
+                          .filter((p) => p.teamId === team.id)
+                          .map((player) => (
+                            <PlayerRow
+                              key={player.subject}
+                              player={player}
+                              ownId={model.active?.puuid}
+                              ally={team === own}
+                              onOpen={() => onNavigate({ type: 'player', player })}
+                            />
+                          ))}
+                      </View>
+                    ),
+                )
+              ) : (
+                detail.players.map((player) => (
+                  <PlayerRow
+                    key={player.subject}
+                    player={player}
+                    ownId={model.active?.puuid}
+                    ally={player.self}
+                    onOpen={() => onNavigate({ type: 'player', player })}
+                  />
+                ))
+              ))}
             {tab === 'rounds' && <RoundOverview detail={detail} onNavigate={onNavigate} />}
             {tab === 'duels' && (
               <DuelMatrix detail={detail} ownId={model.active?.puuid} onNavigate={onNavigate} />

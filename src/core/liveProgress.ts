@@ -1,3 +1,4 @@
+import { isGauntlet } from './gauntlet';
 import type { Friend } from './chatTypes';
 import type { LiveGame } from './types';
 import type { MatchProgress } from './matchTypes';
@@ -177,7 +178,7 @@ export function ownLiveProgress(
   now = Date.now(),
   friends: readonly Friend[] = [],
 ): MatchProgress | undefined {
-  if (!game || game.state !== 'in_game') return;
+  if (!game || game.state !== 'in_game' || isGauntlet(game)) return;
   // Multiple opposing teams do not define one allied/enemy score pair.
   if (new Set(game.players?.map((p) => p.teamId).filter(Boolean)).size > 2) return;
   const candidates: MatchProgress[] = [],

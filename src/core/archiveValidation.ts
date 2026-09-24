@@ -49,6 +49,10 @@ export function validatePreviewShape(value: unknown): void {
   optional(p.mapId, (v) => text(v, 512));
   text(p.agent);
   text(p.score, 60);
+  optional(p.placement, (v) => {
+    num(v, 1, 8);
+    if (!Number.isInteger(v)) invalid();
+  });
   images(p);
   if (!['WIN', 'LOSS', 'DRAW', 'UNKNOWN'].includes(String(p.result))) invalid();
   for (const key of ['kills', 'deaths', 'assists']) if (p[key] !== null) num(p[key], 0, 10000);
@@ -151,6 +155,30 @@ export function validateReportShape(d: MatchDetail): void {
     images(r);
     num(r.kills, 0, 10000);
     num(r.deaths, 0, 10000);
+  }
+  if (d.gauntlet) {
+    const g = d.gauntlet;
+    if (uuid(g.matchId) !== uuid(d.id) || g.complete !== !!d.completed) invalid();
+    bool(g.complete);
+    num(g.observedAt);
+    const ids = new Set<string>();
+    for (const value of list(g.teams, 64)) {
+      const t = object(value);
+      text(t.id, 60);
+      const id = String(t.id).trim().toLowerCase();
+      if (!id || ids.has(id)) invalid();
+      ids.add(id);
+      optional(t.name, (v) => text(v, 120));
+      for (const member of list(t.members, 100)) uuid(member);
+      for (const field of ['health', 'maxHealth']) optional(t[field], (v) => num(v, 0, 100000));
+      for (const field of ['eliminated', 'won']) optional(t[field], bool);
+      optional(t.placement, (v) => {
+        num(v, 1, 8);
+        if (!Number.isInteger(v)) invalid();
+      });
+      num(t.seenAt, 0, g.observedAt);
+      optional(t.evidenceAt, (v) => num(v, 0, g.observedAt));
+    }
   }
   if (d.analysis) {
     const a = d.analysis;

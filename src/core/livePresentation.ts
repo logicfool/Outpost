@@ -1,3 +1,4 @@
+import { isGauntlet, gauntletGroups } from './gauntlet';
 import type { Catalog, LiveGame, Ranked, Section } from './types';
 import type { LivePlayer } from './playerTypes';
 import type { LiveEquipment, MatchProgress } from './matchTypes';
@@ -44,6 +45,7 @@ export class LiveMatchMemory {
   }
 }
 export function liveTeams(game: LiveGame, ownId?: string) {
+  if (isGauntlet(game)) return gauntletGroups(game, ownId);
   const players = game.players ?? [],
     own = players.find((p) => p.subject === ownId || p.self);
   const ids = [...new Set(players.map((p) => p.teamId))];
@@ -93,7 +95,7 @@ export function retainedLiveScore(
   game: LiveGame | undefined,
   current?: MatchProgress,
 ): MatchProgress | undefined {
-  if (!game || game.state !== 'in_game' || game.matchId !== view.matchId) {
+  if (!game || isGauntlet(game) || game.state !== 'in_game' || game.matchId !== view.matchId) {
     view.score = undefined;
     return;
   }

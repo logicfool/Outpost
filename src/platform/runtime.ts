@@ -1,3 +1,4 @@
+import { mergeGauntletLive } from '../core/gauntlet';
 import { CATALOG_VERSION_CHECK_MS } from '../core/catalog';
 import { hydrateMatchDetail } from '../core/maps';
 import { missingCatalogPaths, hydrateSnapshotMetadata } from '../core/catalogRecovery';
@@ -1227,6 +1228,8 @@ export class Runtime {
         const cutoff = changed ? previous.observedAt : previous.presenceNotBefore;
         if (cutoff) sample = { ...sample, data: { ...sample.data, presenceNotBefore: cutoff } };
       }
+      if (sample.status === 'ready' && gate?.sample?.status === 'ready')
+        sample = { ...sample, data: mergeGauntletLive(gate.sample.data, sample.data) };
       const error = sample.status === 'error' ? sample : sample.data.detailError;
       const failures = error ? (gate?.failures ?? 0) + 1 : 0;
       const notBefore = Math.max(

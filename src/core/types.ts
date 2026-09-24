@@ -243,6 +243,8 @@ export interface MatchPlayer {
   headshotPct: number | null;
 }
 export interface MatchDetail {
+  gauntlet?: import('./gauntlet').GauntletState;
+  placement?: number;
   completed?: boolean;
   id: string;
   map: string;
@@ -373,6 +375,7 @@ export interface Ranked {
   placementsRemaining?: number;
 }
 export interface LiveGame {
+  gauntlet?: import('./gauntlet').GauntletState;
   players?: import('./playerTypes').LivePlayer[];
   queue?: string;
   gamePod?: string;

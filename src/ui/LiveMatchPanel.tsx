@@ -77,7 +77,7 @@ export function LiveMatchPanel({
               {value.detailError && (
                 <Text style={[S.small, { color: C.gold }]}>{value.detailError.message}</Text>
               )}
-              {!!value.players?.length && (
+              {(!!value.players?.length || !!value.gauntlet?.teams.length) && (
                 <>
                   <View style={S.between}>
                     <Text style={[S.h3, { color: C.muted, fontSize: 13 }]}>Match roster</Text>

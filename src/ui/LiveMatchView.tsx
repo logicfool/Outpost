@@ -1,3 +1,5 @@
+import { isGauntlet } from '../core/gauntlet';
+import { GauntletLiveHero, GauntletPicker } from './GauntletView';
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -28,6 +30,7 @@ export function LiveMatchHero({
   const { C, S } = useTheme(),
     [detail, setDetail] = useState(false),
     active = game.state === 'in_game';
+  if (isGauntlet(game)) return <GauntletLiveHero game={game} region={region} />;
   const score = hasScorePair(progress);
   const fresh = !!progressLabel(progress) && !stale,
     hasStats = active && game.players?.some((p) => !!freshLiveStats(p.stats));
@@ -205,7 +208,21 @@ export function LiveRoster({
   const statsEnabled = game.state === 'in_game' && members.some((p) => !!freshLiveStats(p.stats));
   return (
     <View testID="live-roster" style={{ gap: 8 }}>
-      {teams.length > 1 && (
+      {isGauntlet(game) && (
+        <GauntletPicker
+          game={game}
+          ownId={ownId}
+          selected={group?.id}
+          onSelect={(id) => {
+            setSelected(id);
+            onTeamChange?.(id);
+          }}
+        />
+      )}
+      {isGauntlet(game) && (
+        <Text style={S.h3}>{group?.label ?? 'Team data not reported'} · Players</Text>
+      )}
+      {!isGauntlet(game) && teams.length > 1 && (
         <View
           accessibilityRole="tablist"
           style={{
@@ -244,6 +261,9 @@ export function LiveRoster({
           ))}
         </View>
       )}
+      {isGauntlet(game) && !members.length && (
+        <Text style={S.small}>This duo has no players in the latest roster.</Text>
+      )}
       {statsEnabled && (
         <View
           accessibilityLabel="Kills deaths assists columns"
@@ -263,7 +283,12 @@ export function LiveRoster({
           const you = p.subject === ownId || p.self,
             rank = liveRank(p, ranks[p.subject]),
             stats = game.state === 'in_game' ? freshLiveStats(p.stats) : undefined;
-          const agent = p.agent && p.agent !== 'Not selected' ? p.agent : 'Choosing agent';
+          const agent =
+            p.agent && p.agent !== 'Not selected'
+              ? p.agent
+              : game.state === 'in_game'
+                ? 'Agent not reported'
+                : 'Choosing agent';
           return (
             <Pressable
               key={p.subject}

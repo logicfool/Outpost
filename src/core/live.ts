@@ -1,3 +1,4 @@
+import { isGauntlet, readGauntlet } from './gauntlet';
 import { mapMetadata } from './maps';
 import { normalizeLiveStats } from './liveStats';
 import type { Catalog, LiveGame } from './types';
@@ -28,6 +29,10 @@ export function normalizeLive(
     returnedId = text(root.MatchID) || text(root.ID);
   if (returnedId && uuid(returnedId) !== uuid(matchId))
     throw new AppError('MATCH_SCOPE', 'The live match changed. Refresh to try again.');
+  const gauntletMode = isGauntlet({
+    queue: text(root.QueueID),
+    mapId: text(root.MapID) || text(root.MapId),
+  });
   const rawTeams = [...array(root.Teams), root.AllyTeam, root.EnemyTeam]
     .filter(Boolean)
     .map(object);
@@ -39,8 +44,13 @@ export function normalizeLive(
     throw new AppError('SCHEMA', 'Riot did not return the live roster.');
   const players = new Map<string, LivePlayer>();
   for (const value of all) {
-    const p = object(value),
-      identity = object(p.PlayerIdentity),
+    const p = object(value);
+    if (
+      gauntletMode &&
+      (p.IsObserver === true || p.isObserver === true || p.IsCoach === true || p.isCoach === true)
+    )
+      continue;
+    const identity = object(p.PlayerIdentity),
       subject = uuid(p.Subject ?? identity.Subject);
     const hidden = identity.Incognito === true && subject !== self,
       hideLevel = identity.HideAccountLevel === true && subject !== self;
@@ -78,6 +88,7 @@ export function normalizeLive(
     map = mapMetadata(catalog, mapId);
   return {
     state,
+    ...(gauntletMode ? { gauntlet: readGauntlet(matchId, rawTeams, [...players.values()]) } : {}),
     matchId: uuid(matchId),
     mapId,
     progress:

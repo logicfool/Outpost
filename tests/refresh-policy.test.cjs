@@ -806,3 +806,32 @@ test('partial release updates cannot hammer category retries while the catalogue
   await load.call(f.runtime);
   assert.equal(calls, 2);
 });
+
+test('live gate retains Gauntlet team evidence across partial roster refreshes', async () => {
+  const { gauntletFixture } = require('./gauntlet-fixture.cjs');
+  const f = fixture();
+  let game = gauntletFixture({ now: f.now }).game,
+    calls = 0;
+  f.runtime.client = async () => ({
+    liveGame: async () => {
+      calls++;
+      return game;
+    },
+  });
+  const first = await f.runtime.live(ID);
+  assert.equal(first.data.gauntlet.teams.length, 8);
+  f.advance(5001);
+  game = gauntletFixture({ health: false, now: f.now }).game;
+  game.players = game.players.slice(0, 12);
+  game.gauntlet.teams = game.gauntlet.teams.slice(0, 6);
+  const second = await f.runtime.live(ID);
+  assert.equal(second.data.gauntlet.teams.length, 8);
+  assert.equal(second.data.players.length, 12);
+  assert.equal(second.data.gauntlet.teams[7].evidenceAt, first.data.gauntlet.teams[7].evidenceAt);
+  const cached = await f.runtime.live(ID);
+  assert.equal(calls, 2);
+  assert.equal(cached.data.gauntlet.teams.length, 8);
+  f.advance(5001);
+  game = { state: 'idle', observedAt: f.now };
+  assert.equal((await f.runtime.live(ID)).data.gauntlet, undefined);
+});

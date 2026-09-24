@@ -12,6 +12,7 @@ export type MatchPreview = Pick<
   | 'assists'
   | 'result'
   | 'score'
+  | 'placement'
 >;
 export interface ArchivedReport {
   imported?: boolean;
@@ -55,6 +56,7 @@ export function matchPreview(detail: MatchDetail): MatchPreview {
     assists: detail.assists,
     result: detail.result,
     score: detail.score,
+    ...(detail.placement ? { placement: detail.placement } : {}),
   };
 }
 export function validateMatchSummary(input: unknown): MatchSummary {
